@@ -1,8 +1,15 @@
+import contextlib
+import gzip
 import importlib.machinery
 import importlib.util
+import io
+import os
+import tarfile
 import tempfile
 import unittest
+from http.client import IncompleteRead
 from pathlib import Path
+from unittest import mock
 
 path = Path(__file__).parent.parent / "bin/omaupdateimpact"
 loader = importlib.machinery.SourceFileLoader("impact", str(path))
@@ -18,9 +25,11 @@ def parse(text):
 
 
 def compare(current, target, user=""):
-    report = impact.Report()
-    impact.compare_bindings(parse(current), parse(target), parse(user), report)
-    return report
+    return impact.compare_bindings(parse(current), parse(target), parse(user))
+
+
+def titles(findings, level):
+    return [finding.title for finding in findings if finding.level == level]
 
 
 class ParseLua(unittest.TestCase):
@@ -57,43 +66,55 @@ class ParseLua(unittest.TestCase):
 
     def test_counts_computed_keys(self):
         parsed = parse('o.bind("SUPER + " .. n, "x", "y")')
-        self.assertEqual((parsed.binds, parsed.unread), ({}, 1))
+        self.assertEqual((parsed.binds, len(parsed.unread)), ({}, 1))
 
 
 class CompareBindings(unittest.TestCase):
     def test_flags_a_clash_with_a_new_default(self):
-        report = compare("", 'o.bind("SUPER + M", "Minimize", "min")', 'o.bind("SUPER + M", "Mail", "mail")')
-        self.assertEqual(len(report.attention), 1)
-        self.assertIn("clash", report.attention[0])
+        findings = compare("", 'o.bind("SUPER + M", "Minimize", "min")', 'o.bind("SUPER + M", "Mail", "mail")')
+        self.assertEqual(len(titles(findings, "attention")), 1)
+        self.assertIn("clash", titles(findings, "attention")[0])
+        self.assertEqual(findings[0].fix, 'Add hl.unbind("SUPER + M") or choose another key.')
+
+    def test_a_clash_names_the_files_behind_it(self):
+        target, user = impact.Parsed(), impact.Parsed()
+        impact.parse_lua('o.bind("SUPER + M", "Minimize", "min")', target, "default/hypr/tiling.lua")
+        impact.parse_lua('o.bind("SUPER + M", "Mail", "mail")', user, "~/.config/hypr/bindings.lua")
+        findings = impact.compare_bindings(impact.Parsed(), target, user)
+        self.assertEqual(findings[0].evidence, ["default/hypr/tiling.lua", "~/.config/hypr/bindings.lua"])
+
+    def test_computed_keys_are_a_note(self):
+        findings = compare('o.bind("SUPER + " .. n, "x", "y")', "")
+        self.assertEqual(titles(findings, "unknown"), [])
+        self.assertIn("1 key bindings", titles(findings, "note")[0])
 
     def test_no_clash_when_the_user_unbinds_first(self):
         user = 'hl.unbind("SUPER + M")\no.bind("SUPER + M", "Mail", "mail")'
-        report = compare("", 'o.bind("SUPER + M", "Minimize", "min")', user)
-        self.assertEqual(report.attention, [])
+        findings = compare("", 'o.bind("SUPER + M", "Minimize", "min")', user)
+        self.assertEqual(titles(findings, "attention"), [])
 
     def test_no_clash_when_the_default_is_unchanged(self):
         same = 'o.bind("SUPER + M", "Minimize", "min")'
-        self.assertEqual(compare(same, same, 'o.bind("SUPER + M", "Mail", "mail")').attention, [])
+        self.assertEqual(titles(compare(same, same, 'o.bind("SUPER + M", "Mail", "mail")'), "attention"), [])
 
     def test_reports_a_moved_shortcut(self):
-        report = compare('o.bind("SUPER + Q", "Calc", "c")', 'o.bind("SUPER + SHIFT + Q", "Calc", "c")')
-        self.assertIn('Moved: "Calc" from SUPER + Q to SUPER + SHIFT + Q.', report.notes)
+        findings = compare('o.bind("SUPER + Q", "Calc", "c")', 'o.bind("SUPER + SHIFT + Q", "Calc", "c")')
+        self.assertIn('Moved: "Calc" from SUPER + Q to SUPER + SHIFT + Q.', titles(findings, "note"))
 
     def test_a_turned_off_shortcut_that_moves_comes_back(self):
-        report = compare(
+        findings = compare(
             'o.bind("SUPER + Q", "Calc", "c")',
             'o.bind("SUPER + SHIFT + Q", "Calc", "c")',
             'hl.unbind("SUPER + Q")',
         )
-        self.assertIn("comes back", report.attention[0])
+        self.assertIn("comes back", titles(findings, "attention")[0])
 
     def test_reports_a_shortcut_taken_over_by_another_action(self):
-        report = compare('o.bind("SUPER + N", "Night", "n")', 'o.bind("SUPER + N", "Network", "w")')
-        self.assertIn('SUPER + N is now "Network", it was "Night".', report.notes)
+        findings = compare('o.bind("SUPER + N", "Night", "n")', 'o.bind("SUPER + N", "Network", "w")')
+        self.assertIn('SUPER + N is now "Network", it was "Night".', titles(findings, "note"))
 
     def test_reworded_description_with_the_same_command_is_not_a_change(self):
-        report = compare('o.bind("SUPER + N", "Old", "n")', 'o.bind("SUPER + N", "New", "n")')
-        self.assertEqual((report.attention, report.notes), ([], []))
+        self.assertEqual(compare('o.bind("SUPER + N", "Old", "n")', 'o.bind("SUPER + N", "New", "n")'), [])
 
 
 class Packages(unittest.TestCase):
@@ -104,10 +125,10 @@ class Packages(unittest.TestCase):
             return impact.package_changes(Path(directory), set(already_run))
 
     def test_reads_drops(self):
-        self.assertEqual(self.changes({"1.sh": "omarchy-pkg-drop a b >/dev/null\n"}), {"a": False, "b": False})
+        self.assertEqual(self.changes({"1.sh": "omarchy-pkg-drop a b >/dev/null\n"}), {"a": (False, "1.sh"), "b": (False, "1.sh")})
 
     def test_indented_drop_is_conditional(self):
-        self.assertEqual(self.changes({"1.sh": "if x; then\n  omarchy-pkg-drop a\nfi\n"}), {"a": True})
+        self.assertEqual(self.changes({"1.sh": "if x; then\n  omarchy-pkg-drop a\nfi\n"}), {"a": (True, "1.sh")})
 
     def test_skips_migrations_already_run(self):
         self.assertEqual(self.changes({"1.sh": "omarchy-pkg-drop a\n"}, ["1.sh"]), {})
@@ -117,6 +138,18 @@ class Packages(unittest.TestCase):
 
     def test_ignores_shell_variables(self):
         self.assertEqual(self.changes({"1.sh": 'omarchy-pkg-drop "$pkg"\n'}), {})
+
+    def test_a_missing_pacman_is_unknown(self):
+        finding = impact.compare_packages(Path("target"), Path("home"), None)[0]
+        self.assertEqual((finding.check, finding.level), ("packages", "unknown"))
+
+    def test_a_removal_names_its_migration(self):
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory)
+            (target / "migrations").mkdir()
+            (target / "migrations/1.sh").write_text("omarchy-pkg-drop a\n")
+            finding = impact.compare_packages(target, target, {"a"})[0]
+        self.assertEqual((finding.level, finding.evidence), ("attention", ["migrations/1.sh"]))
 
 
 class Commands(unittest.TestCase):
@@ -134,12 +167,11 @@ class Commands(unittest.TestCase):
         (self.base / "target/bin/omarchy-gone-too").touch()
 
     def attention(self):
-        report = impact.Report()
-        impact.compare_commands(self.base / "current", self.base / "target", self.home, report)
-        return report.attention
+        findings = impact.compare_commands(self.base / "current", self.base / "target", self.home)
+        return titles(findings, "attention")
 
     def test_finds_a_call_to_a_deleted_command(self):
-        (self.hooks / "my.hook").write_text("omarchy-gone\n")
+        (self.hooks / "my.hook").write_text("omarchy-gone\nomarchy-gone again\n")
         self.assertEqual(len(self.attention()), 1)
 
     def test_a_line_starting_with_a_flag_is_not_a_comment(self):
@@ -174,10 +206,174 @@ class Plugins(unittest.TestCase):
             original_which = impact.shutil.which
             impact.shutil.which = lambda name: "/bin/true"
             self.addCleanup(setattr, impact.shutil, "which", original_which)
-            report = impact.Report()
-            impact.compare_plugins(Path("current"), Path("target"), home, report)
-            self.assertEqual(len(report.notes), 1)
-            self.assertIn("1 new qmllint warnings, such as a.qml: new", report.notes[0])
+            notes = titles(impact.compare_plugins(Path("current"), Path("target"), home), "note")
+            self.assertEqual(len(notes), 2)
+            self.assertIn("1 new qmllint warnings, such as a.qml: new", notes[0])
+
+    def findings_without_qmllint(self, home):
+        with mock.patch.object(impact.shutil, "which", return_value=None), \
+                mock.patch.object(impact, "QMLLINT", "/nonexistent/qmllint"):
+            return impact.compare_plugins(Path("current"), Path("target"), home)
+
+    def test_a_missing_qmllint_is_unknown_when_there_are_plugins(self):
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            (home / ".config/omarchy/plugins/demo").mkdir(parents=True)
+            finding = self.findings_without_qmllint(home)[0]
+        self.assertEqual((finding.check, finding.level), ("plugins", "unknown"))
+
+    def test_a_missing_qmllint_does_not_matter_without_plugins(self):
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            (home / ".config/omarchy/plugins").mkdir(parents=True)
+            self.assertEqual(self.findings_without_qmllint(home), [])
+
+
+class ProgramCase(unittest.TestCase):
+    """Runs main() on small fictional trees."""
+
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.base = Path(directory.name)
+        self.home = self.base / "home"
+        self.home.mkdir()
+        self.tree("current", 'o.bind("SUPER + W", "Close", "close-it")')
+        self.tree("target", 'o.bind("SUPER + W", "Close", "close-it")')
+        self.cache = self.base / "cache"
+        patcher = mock.patch.dict(os.environ, XDG_CACHE_HOME=str(self.cache))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def tree(self, name, bindings):
+        root = self.base / name
+        for part in ("bin", "default/hypr", "migrations", "shell"):
+            (root / part).mkdir(parents=True)
+        (root / "default/hypr/bindings.lua").write_text(bindings)
+        return root
+
+    def run_main(self, *args):
+        argv = ["omaupdateimpact", "--root", str(self.base / "current"), "--home", str(self.home), *args]
+        out, err = io.StringIO(), io.StringIO()
+        with mock.patch("sys.argv", argv), contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            code = impact.main()
+        return code, out.getvalue(), err.getvalue()
+
+    def check(self, *args, packages=frozenset()):
+        with mock.patch.object(impact, "installed_packages", return_value=packages):
+            return self.run_main("--target", str(self.base / "target"), *args)
+
+    def archive(self):
+        output = io.BytesIO()
+        with tarfile.open(fileobj=output, mode="w:gz") as tar:
+            tar.add(self.base / "target", arcname="omarchy-1.2.3")
+        return output.getvalue()
+
+    def download(self, *responses, args=("v1.2.3",)):
+        """Run with each network request answered by the next response."""
+        with mock.patch.object(impact.urllib.request, "urlopen", side_effect=responses), \
+                mock.patch.object(impact, "installed_packages", return_value=set()):
+            return self.run_main(*args)
+
+    def assert_download_failed(self, result):
+        code, out, err = result
+        self.assertEqual((code, out), (2, ""))
+        self.assertEqual(len(err.splitlines()), 1)
+        self.assertIn("Couldn't download the release", err)
+        self.assertEqual(list(self.cache.glob("*/*")), [])
+
+
+class Program(ProgramCase):
+    def test_a_clean_run_exits_0(self):
+        code, out, _ = self.check()
+        self.assertEqual(code, 0)
+        self.assertIn("Nothing found", out)
+
+    def test_something_that_needs_attention_exits_1(self):
+        (self.base / "target/migrations/1.sh").write_text("omarchy-pkg-drop a\n")
+        code, out, _ = self.check(packages={"a"})
+        self.assertEqual(code, 1)
+        self.assertNotIn("Nothing found", out)
+
+    def test_a_missing_pacman_exits_3_and_never_says_nothing_found(self):
+        empty = self.base / "empty"
+        empty.mkdir()
+        with mock.patch.dict(os.environ, PATH=str(empty)):
+            code, out, _ = self.run_main("--target", str(self.base / "target"))
+        self.assertEqual(code, 3)
+        self.assertNotIn("nothing found", out.lower())
+        self.assertEqual(out.splitlines()[-1], "These checks didn't run: packages.")
+
+    def test_attention_outranks_unknown(self):
+        (self.home / ".config/hypr").mkdir(parents=True)
+        (self.home / ".config/hypr/bindings.lua").write_text('o.bind("SUPER + M", "Mail", "mail")')
+        (self.base / "target/default/hypr/bindings.lua").write_text('o.bind("SUPER + M", "Minimize", "min")')
+        code, out, _ = self.check(packages=None)
+        self.assertEqual(code, 1)
+        self.assertIn("These checks didn't run: packages.", out)
+
+    def test_an_exception_in_a_check_exits_2_on_one_line(self):
+        with mock.patch.object(impact, "compare_commands", side_effect=RuntimeError("broke\nbadly")):
+            code, out, err = self.check()
+        self.assertEqual((code, out), (2, ""))
+        self.assertEqual(err, "Unexpected RuntimeError: broke badly\n")
+
+    def test_debug_shows_the_traceback(self):
+        with mock.patch.object(impact, "compare_commands", side_effect=RuntimeError("broke")):
+            code, _, err = self.check("--debug")
+        self.assertEqual(code, 2)
+        self.assertIn("Traceback", err)
+
+
+class Downloads(ProgramCase):
+    def test_a_good_archive_is_used(self):
+        code, _, err = self.download(io.BytesIO(self.archive()))
+        self.assertEqual((code, err), (0, ""))
+        self.assertTrue((self.cache / "omaupdateimpact/v1.2.3/bin").is_dir())
+
+    def test_a_truncated_archive_exits_2(self):
+        data = self.archive()
+        self.assert_download_failed(self.download(io.BytesIO(data[: len(data) // 2])))
+
+    def test_a_corrupt_archive_exits_2(self):
+        data = b"\x1f\x8b\x08\x00" + bytes(6) + b"\xff" * 64
+        self.assert_download_failed(self.download(io.BytesIO(data)))
+
+    def test_a_bad_checksum_exits_2(self):
+        data = self.archive()
+        self.assert_download_failed(self.download(io.BytesIO(data[:-8] + bytes(8))))
+
+    def test_a_page_instead_of_an_archive_exits_2(self):
+        self.assert_download_failed(self.download(io.BytesIO(b"<html>Not here</html>")))
+
+    def test_an_empty_download_exits_2(self):
+        self.assert_download_failed(self.download(io.BytesIO(b"")))
+
+    def test_a_tar_error_exits_2(self):
+        data = gzip.compress(b"not a tar file " * 100)
+        self.assert_download_failed(self.download(io.BytesIO(data)))
+
+    def test_an_archive_without_a_release_exits_2(self):
+        output = io.BytesIO()
+        with tarfile.open(fileobj=output, mode="w:gz") as tar:
+            tar.add(self.base / "target/default/hypr/bindings.lua", arcname="bindings.lua")
+        self.assert_download_failed(self.download(io.BytesIO(output.getvalue())))
+
+    def test_a_dropped_connection_exits_2(self):
+        response = mock.MagicMock()
+        response.__enter__.return_value.read.side_effect = IncompleteRead(b"")
+        self.assert_download_failed(self.download(response))
+
+
+class ReleasesApi(ProgramCase):
+    def test_the_newest_tag_is_downloaded(self):
+        api, archive = io.BytesIO(b'[{"tag_name": "v1.2.3"}]'), io.BytesIO(self.archive())
+        self.assertEqual(self.download(api, archive, args=())[0], 0)
+
+    def test_bad_answers_exit_2(self):
+        for body in (b"", b"not json", b"\xff", b"[]", b"{}", b"[1]", b"[{}]", b'[{"tag_name": null}]'):
+            with self.subTest(body=body):
+                self.assert_download_failed(self.download(io.BytesIO(body), args=()))
 
 
 if __name__ == "__main__":

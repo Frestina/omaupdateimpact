@@ -39,9 +39,9 @@ attention", and a partial run can exit 0. Most later tickets build on this.
 
 ## Done when
 
-- [ ] A truncated or corrupt archive gives one line and exit 2, with a test.
-- [ ] A forced exception inside a check gives exit 2, not 1, with a test.
-- [ ] With `pacman` missing and nothing else found, the exit is 3 and "nothing
+- [x] A truncated or corrupt archive gives one line and exit 2, with a test.
+- [x] A forced exception inside a check gives exit 2, not 1, with a test.
+- [x] With `pacman` missing and nothing else found, the exit is 3 and "nothing
       found" isn't printed, with a test.
-- [ ] Exit codes in the README match the spec.
-- [ ] `tests/run` passes.
+- [x] Exit codes in the README match the spec.
+- [x] `tests/run` passes.

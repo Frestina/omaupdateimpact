@@ -6,6 +6,8 @@ text. See README.md.
 """
 
 import argparse
+import gzip
+import http.client
 import json
 import os
 import re
@@ -15,7 +17,9 @@ import sys
 import tarfile
 import tempfile
 import textwrap
+import traceback
 import urllib.request
+import zlib
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -25,13 +29,15 @@ MODIFIERS = ["SUPER", "CTRL", "SHIFT", "ALT"]
 BIND_CALLS = ["o.bind_toggle", "o.rebind", "o.bind", "hl.bind", "hl.unbind"]
 TEXT_SUFFIXES = {"", ".lua", ".sh", ".hook", ".conf", ".toml", ".json", ".qml", ".js", ".py"}
 QMLLINT = "/usr/lib/qt6/bin/qmllint"
+ATTENTION, NOTE, UNKNOWN = "attention", "note", "unknown"
+DOWNLOAD_ERRORS = (OSError, EOFError, ValueError, zlib.error, tarfile.TarError, http.client.HTTPException)
 
 
 @dataclass
 class Bind:
-    keys: str
     description: str
     command: str
+    source: str = ""
 
     def same_action(self, other):
         if self.command == other.command:
@@ -42,15 +48,21 @@ class Bind:
 @dataclass
 class Parsed:
     binds: dict = field(default_factory=dict)
-    unbinds: set = field(default_factory=set)
-    unread: int = 0
+    unbinds: dict = field(default_factory=dict)
+    unread: list = field(default_factory=list)
 
 
 @dataclass
-class Report:
-    attention: list = field(default_factory=list)
-    notes: list = field(default_factory=list)
-    limits: list = field(default_factory=list)
+class Finding:
+    check: str
+    level: str
+    title: str
+    evidence: list
+    detail: str = ""
+    fix: str = ""
+
+    def text(self):
+        return " ".join(part for part in (self.title, self.detail, self.fix) if part)
 
 
 def blank_comments(text):
@@ -130,7 +142,7 @@ def normalize_keys(keys):
     return " + ".join(mods + rest)
 
 
-def parse_lua(text, parsed):
+def parse_lua(text, parsed, source=""):
     """Collect the bind and unbind calls in one Lua file."""
     text = blank_comments(text)
     names = "|".join(re.escape(name) for name in BIND_CALLS)
@@ -139,14 +151,14 @@ def parse_lua(text, parsed):
         args = call_arguments(text, match.end() - 1)
         keys = literal(args[0]) if args else None
         if keys is None:
-            parsed.unread += 1
+            parsed.unread.append(source)
             continue
         chord = normalize_keys(keys)
         if name == "hl.unbind":
-            parsed.unbinds.add(chord)
+            parsed.unbinds[chord] = source
             continue
         if name == "o.rebind":
-            parsed.unbinds.add(chord)
+            parsed.unbinds[chord] = source
         if name == "hl.bind":
             options = args[2] if len(args) > 2 else ""
             found = re.search(r"description\s*=\s*([\"'])(.*?)\1", options)
@@ -158,14 +170,14 @@ def parse_lua(text, parsed):
         command = value if value is not None else command
         if name == "o.bind_toggle":
             command = "omarchy-toggle-" + command
-        parsed.binds[chord] = Bind(chord, description, command)
+        parsed.binds[chord] = Bind(description, command, source)
 
 
 def parse_defaults(root):
     parsed = Parsed()
     for path in sorted((root / "default/hypr").rglob("*.lua")):
         if path.name != "helpers.lua":
-            parse_lua(path.read_text(errors="replace"), parsed)
+            parse_lua(path.read_text(errors="replace"), parsed, str(path.relative_to(root)))
     return parsed
 
 
@@ -173,10 +185,15 @@ def label(bind):
     return bind.description or bind.command
 
 
-def compare_bindings(current, target, user, report):
+def sources(*binds):
+    return sorted({bind.source for bind in binds})
+
+
+def compare_bindings(current, target, user):
     cur, tgt = current.binds, target.binds
     changed = {c for c in cur if c not in tgt or not cur[c].same_action(tgt[c])}
     arrived = {c for c in tgt if c not in cur or not cur[c].same_action(tgt[c])}
+    findings = []
 
     moved = {}
     for chord in sorted(changed):
@@ -189,31 +206,56 @@ def compare_bindings(current, target, user, report):
         mine = user.binds[chord]
         if chord in user.unbinds or chord not in tgt or chord not in arrived:
             continue
-        report.attention.append(
-            f'{chord}: your "{label(mine)}" will clash with the new default '
-            f'"{label(tgt[chord])}", and both will fire. Add hl.unbind("{chord}") '
-            "or choose another key."
-        )
+        findings.append(Finding(
+            "bindings",
+            ATTENTION,
+            f'{chord}: your "{label(mine)}" will clash with the new default "{label(tgt[chord])}".',
+            sources(mine, tgt[chord]),
+            detail="Both will fire.",
+            fix=f'Add hl.unbind("{chord}") or choose another key.',
+        ))
 
     for chord in sorted(user.unbinds):
         if chord in moved:
-            report.attention.append(
+            findings.append(Finding(
+                "bindings",
+                ATTENTION,
                 f'{chord}: you turned off "{label(cur[chord])}" here, but it moves to '
-                f"{moved[chord]}, so it comes back. Unbind {moved[chord]} too."
-            )
+                f"{moved[chord]}, so it comes back.",
+                [user.unbinds[chord], *sources(cur[chord], tgt[moved[chord]])],
+                fix=f"Unbind {moved[chord]} too.",
+            ))
         elif chord in cur and chord not in tgt:
-            report.notes.append(f"{chord}: your unbind no longer does anything, the default is gone.")
+            findings.append(Finding(
+                "bindings",
+                NOTE,
+                f"{chord}: your unbind no longer does anything, the default is gone.",
+                [user.unbinds[chord], cur[chord].source],
+            ))
         elif chord in arrived and chord in cur and chord in user.binds:
-            report.notes.append(
+            findings.append(Finding(
+                "bindings",
+                NOTE,
                 f'{chord}: your binding now replaces "{label(tgt[chord])}", '
-                f'not "{label(cur[chord])}".'
-            )
+                f'not "{label(cur[chord])}".',
+                sources(user.binds[chord], tgt[chord]),
+            ))
 
     for chord, other in sorted(moved.items()):
-        report.notes.append(f'Moved: "{label(cur[chord])}" from {chord} to {other}.')
+        findings.append(Finding(
+            "bindings",
+            NOTE,
+            f'Moved: "{label(cur[chord])}" from {chord} to {other}.',
+            sources(cur[chord], tgt[other]),
+        ))
 
     for chord in sorted(c for c in arrived if c in cur and c not in user.binds):
-        report.notes.append(f'{chord} is now "{label(tgt[chord])}", it was "{label(cur[chord])}".')
+        findings.append(Finding(
+            "bindings",
+            NOTE,
+            f'{chord} is now "{label(tgt[chord])}", it was "{label(cur[chord])}".',
+            sources(cur[chord], tgt[chord]),
+        ))
 
     fresh = sorted(
         c for c in arrived
@@ -221,16 +263,26 @@ def compare_bindings(current, target, user, report):
     )
     if fresh:
         lines = ", ".join(f'{c} ("{label(tgt[c])}")' for c in fresh)
-        report.notes.append(f"New default shortcuts: {lines}.")
+        findings.append(Finding(
+            "bindings", NOTE, f"New default shortcuts: {lines}.", sources(*(tgt[c] for c in fresh))
+        ))
 
     gone = sorted(c for c in changed if c not in moved and c not in tgt and c not in user.unbinds)
     if gone:
         lines = ", ".join(f'{c} ("{label(cur[c])}")' for c in gone)
-        report.notes.append(f"Default shortcuts removed: {lines}.")
+        findings.append(Finding(
+            "bindings", NOTE, f"Default shortcuts removed: {lines}.", sources(*(cur[c] for c in gone))
+        ))
 
     unread = current.unread + target.unread + user.unread
     if unread:
-        report.limits.append(f"{unread} key bindings use computed keys and weren't compared.")
+        findings.append(Finding(
+            "bindings",
+            NOTE,
+            f"{len(unread)} key bindings use computed keys and weren't compared.",
+            sorted(set(unread)),
+        ))
+    return findings
 
 
 def installed_packages():
@@ -242,7 +294,7 @@ def installed_packages():
 
 
 def package_changes(migrations, already_run):
-    """Packages the pending migrations remove, with whether that is conditional."""
+    """Packages the pending migrations remove: whether that is conditional, and which migration."""
     dropped = {}
     for path in sorted(migrations.glob("*.sh")):
         if path.name in already_run:
@@ -256,20 +308,28 @@ def package_changes(migrations, already_run):
                 if found.group(2) == "add":
                     dropped.pop(package, None)
                 else:
-                    dropped[package] = bool(found.group(1))
+                    dropped[package] = (bool(found.group(1)), path.name)
     return dropped
 
 
-def compare_packages(target, home, installed, report):
+def compare_packages(target, home, installed):
     if installed is None:
-        report.limits.append("pacman wasn't available, so packages weren't checked.")
-        return
+        title = "pacman wasn't available, so packages weren't checked."
+        return [Finding("packages", UNKNOWN, title, ["pacman -Qq"])]
     state = home / ".local/state/omarchy/migrations"
     already_run = {p.name for p in state.iterdir()} if state.is_dir() else set()
     dropped = package_changes(target / "migrations", already_run)
+    findings = []
     for package in sorted(set(dropped) & installed):
-        when = "may remove" if dropped[package] else "will remove"
-        report.attention.append(f"The update {when} {package}, which is installed here.")
+        conditional, migration = dropped[package]
+        when = "may remove" if conditional else "will remove"
+        findings.append(Finding(
+            "packages",
+            ATTENTION,
+            f"The update {when} {package}, which is installed here.",
+            [f"migrations/{migration}"],
+        ))
+    return findings
 
 
 def user_files(home):
@@ -291,13 +351,13 @@ def user_files(home):
     yield from (path for path in singles if path.is_file())
 
 
-def compare_commands(current, target, home, report):
+def compare_commands(current, target, home):
     removed = {p.name for p in (current / "bin").glob("omarchy-*")}
     removed -= {p.name for p in (target / "bin").glob("omarchy-*")}
     if not removed:
-        return
+        return []
     pattern = re.compile(r"(?<![\w-])(" + "|".join(map(re.escape, sorted(removed))) + r")(?![\w-])")
-    found = {}
+    found = set()
     for path in user_files(home):
         try:
             lines = path.read_text(errors="strict").splitlines()
@@ -308,10 +368,14 @@ def compare_commands(current, target, home, report):
             if line.lstrip().startswith(comments):
                 continue
             for command in pattern.findall(line):
-                found.setdefault((command, path), True)
+                found.add((command, path))
+    findings = []
     for command, path in sorted(found, key=lambda item: (str(item[1]), item[0])):
         shown = str(path).replace(str(home), "~", 1)
-        report.attention.append(f"{shown} calls {command}, which the release deletes.")
+        findings.append(Finding(
+            "commands", ATTENTION, f"{shown} calls {command}, which the release deletes.", [shown]
+        ))
+    return findings
 
 
 def lint(plugin, shell, qmllint):
@@ -332,33 +396,48 @@ def lint(plugin, shell, qmllint):
     return warnings
 
 
-def compare_plugins(current, target, home, report):
+def compare_plugins(current, target, home):
     plugins = home / ".config/omarchy/plugins"
-    if not plugins.is_dir():
-        return
+    installed = sorted(p for p in plugins.iterdir() if p.is_dir()) if plugins.is_dir() else []
+    if not installed:
+        return []
+    shown = "~/.config/omarchy/plugins"
     qmllint = shutil.which("qmllint") or (QMLLINT if Path(QMLLINT).exists() else None)
     if not qmllint:
-        report.limits.append("qmllint wasn't found, so plugins weren't linted.")
-        return
-    for plugin in sorted(p for p in plugins.iterdir() if p.is_dir()):
+        return [Finding("plugins", UNKNOWN, "qmllint wasn't found, so plugins weren't linted.", [shown])]
+    findings = []
+    for plugin in installed:
         before = lint(plugin.resolve(), current / "shell", qmllint)
         after = lint(plugin.resolve(), target / "shell", qmllint)
         new = after - before
         if new:
             sample = next(iter(new))
-            report.notes.append(
+            findings.append(Finding(
+                "plugins",
+                NOTE,
                 f"{plugin.name}: {sum(new.values())} new qmllint warnings, such as "
-                f"{sample[0]}: {sample[1]}"
-            )
-    report.limits.append(
-        "qmllint can't prove a plugin works. Most plugin breaks only show when the shell runs them."
-    )
+                f"{sample[0]}: {sample[1]}",
+                [f"{shown}/{plugin.name}/{sample[0]}"],
+            ))
+    findings.append(Finding(
+        "plugins",
+        NOTE,
+        "qmllint can't prove a plugin works. Most plugin breaks only show when the shell runs them.",
+        [shown],
+    ))
+    return findings
 
 
 def latest_tag():
     url = f"https://api.github.com/repos/{REPO}/releases?per_page=1"
     with urllib.request.urlopen(url, timeout=30) as response:
-        return json.load(response)[0]["tag_name"]
+        try:
+            tag = json.load(response)[0]["tag_name"]
+        except (ValueError, LookupError, TypeError):
+            tag = None
+    if not tag or not isinstance(tag, str):
+        raise ValueError("the releases API gave no usable release")
+    return tag
 
 
 def fetch_release(tag, cache):
@@ -370,9 +449,15 @@ def fetch_release(tag, cache):
             archive = Path(scratch) / "release.tar.gz"
             with urllib.request.urlopen(url, timeout=120) as response, archive.open("wb") as out:
                 shutil.copyfileobj(response, out)
+            # tarfile stops at the end-of-archive marker and never reaches gzip's checksum.
+            with gzip.open(archive) as stream:
+                while stream.read(1 << 20):
+                    pass
             with tarfile.open(archive) as tar:
                 tar.extractall(scratch, filter="data")
-            unpacked = next(p for p in Path(scratch).iterdir() if p.is_dir())
+            unpacked = next((p for p in Path(scratch).iterdir() if p.is_dir()), None)
+            if unpacked is None:
+                raise tarfile.ReadError("the archive holds no release")
             unpacked.rename(root)
     return root
 
@@ -385,11 +470,56 @@ def installed_version():
     return output.split()[-1]
 
 
-def print_section(title, lines):
+def print_section(title, findings, level):
+    lines = [finding.text() for finding in findings if finding.level == level]
     if lines:
         print(f"\n{title}")
         for line in lines:
             print(textwrap.fill(line, 88, initial_indent="  - ", subsequent_indent="    "))
+
+
+def fail(what, error, debug):
+    """Explain a failure on one line, with the traceback under --debug, and exit 2."""
+    if debug:
+        traceback.print_exception(error)
+    print(f"{what}: {' '.join(str(error).split())}", file=sys.stderr)
+    return 2
+
+
+def run(options):
+    target = options.target
+    tag = options.tag
+    if target is None:
+        cache = Path(os.environ.get("XDG_CACHE_HOME", options.home / ".cache")) / "omaupdateimpact"
+        try:
+            tag = tag or latest_tag()
+            target = fetch_release(tag, cache)
+        except DOWNLOAD_ERRORS as error:
+            return fail("Couldn't download the release", error, options.debug)
+
+    user = Parsed()
+    bindings = options.home / ".config/hypr/bindings.lua"
+    if bindings.is_file():
+        parse_lua(bindings.read_text(errors="replace"), user, "~/.config/hypr/bindings.lua")
+
+    findings = [
+        *compare_bindings(parse_defaults(options.root), parse_defaults(target), user),
+        *compare_packages(target, options.home, installed_packages()),
+        *compare_commands(options.root, target, options.home),
+        *compare_plugins(options.root, target, options.home),
+    ]
+
+    print(f"Omarchy {installed_version()} -> {tag or target.name}. Nothing was changed.")
+    print_section("Needs attention", findings, ATTENTION)
+    print_section("Worth knowing", findings, NOTE)
+    print_section("Limits of this check", findings, UNKNOWN)
+    levels = {finding.level for finding in findings}
+    not_run = sorted({finding.check for finding in findings if finding.level == UNKNOWN})
+    if not_run:
+        print(f"\nThese checks didn't run: {', '.join(not_run)}.")
+    elif ATTENTION not in levels:
+        print("\nNothing found that needs attention.")
+    return 1 if ATTENTION in levels else 3 if UNKNOWN in levels else 0
 
 
 def main():
@@ -398,37 +528,12 @@ def main():
     parser.add_argument("--target", type=Path, help="use an unpacked release instead of downloading")
     parser.add_argument("--root", type=Path, default=Path("/usr/share/omarchy"))
     parser.add_argument("--home", type=Path, default=Path.home())
+    parser.add_argument("--debug", action="store_true", help="show the traceback when something fails")
     options = parser.parse_args()
-
-    target = options.target
-    tag = options.tag
-    if target is None:
-        cache = Path(os.environ.get("XDG_CACHE_HOME", options.home / ".cache")) / "omaupdateimpact"
-        try:
-            tag = tag or latest_tag()
-            target = fetch_release(tag, cache)
-        except OSError as error:
-            print(f"Couldn't download the release: {error}", file=sys.stderr)
-            return 2
-
-    report = Report()
-    user = Parsed()
-    bindings = options.home / ".config/hypr/bindings.lua"
-    if bindings.is_file():
-        parse_lua(bindings.read_text(errors="replace"), user)
-
-    compare_bindings(parse_defaults(options.root), parse_defaults(target), user, report)
-    compare_packages(target, options.home, installed_packages(), report)
-    compare_commands(options.root, target, options.home, report)
-    compare_plugins(options.root, target, options.home, report)
-
-    print(f"Omarchy {installed_version()} -> {tag or target.name}. Nothing was changed.")
-    print_section("Needs attention", report.attention)
-    print_section("Worth knowing", report.notes)
-    print_section("Limits of this check", report.limits)
-    if not report.attention:
-        print("\nNothing found that needs attention.")
-    return 1 if report.attention else 0
+    try:
+        return run(options)
+    except Exception as error:
+        return fail(f"Unexpected {type(error).__name__}", error, options.debug)
 
 
 if __name__ == "__main__":

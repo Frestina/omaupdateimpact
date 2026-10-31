@@ -24,7 +24,17 @@ the release is downloaded to `~/.cache/omaupdateimpact` and read as text.
   config, hooks, extensions, plugins or `.bashrc` still call.
 - **Plugins:** `qmllint` warnings that are new with the release's shell.
 
-It exits 1 if something needs attention, 0 if not, and 2 if the download failed.
+## Exit codes
+
+| Exit | Meaning |
+| --- | --- |
+| 0 | Every check ran and nothing needs attention, or there is no update |
+| 1 | Something needs attention |
+| 2 | No verdict: bad usage, a failed download, an unusable tree or a crash |
+| 3 | Nothing needs attention, but at least one check couldn't run |
+
+Exit 3 names the checks that didn't run. A failure prints one line, and `--debug`
+adds the traceback.
 
 ## Limits
 

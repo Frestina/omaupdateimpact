@@ -50,3 +50,8 @@ Paths already ruled out are not here; they are under
   uses it.
 - **A binding inside an `if` counts as always on.** v4.5.0-rc2's dictation
   bindings depend on the installed backend. Reading that would mean running Lua.
+- **Unreadable user files.** The commands check skips a file it can't read, such
+  as a broken symlink or a denied one, without saying so. That should be `unknown`.
+  Fits with 008, which already reworks that scan.
+- **Evidence in the text report.** Findings carry evidence, but only `--json` (016)
+  will show it. 012 could print it, if it doesn't crowd the report.

@@ -134,6 +134,9 @@ evidence. Levels are `attention`, `note` and `unknown`.
 An unexpected exception is exit 2 with one line of explanation. It never falls
 through to Python's exit 1, which would read as a finding.
 
+Bindings with computed keys are a note, not `unknown`. Every release has them, so
+`unknown` would make exit 0 impossible. They stay listed in the README's limits.
+
 ## JSON
 
 `--json` prints one document and nothing else: `schemaVersion`, the installed
