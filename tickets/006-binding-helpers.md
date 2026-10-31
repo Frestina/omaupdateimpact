@@ -18,6 +18,8 @@ and release, and the dict keeps only the last.
 
 - [Reading release formats](../SPEC.md#reading-release-formats)
 - [Checks](../SPEC.md#checks)
+- [Findings and exit codes](../SPEC.md#findings-and-exit-codes)
+- [What must never happen](../SPEC.md#what-must-never-happen), rule 1
 
 ## Scope
 
@@ -31,6 +33,15 @@ and release, and the dict keeps only the last.
   becomes an `unknown` finding that names it.
 - Read commands that are Lua tables as a whole value, such as
   `{ webapp = "https://..." }`, and long strings as literals.
+- Keep each computed key's expression. A default whose expression differs between
+  the versions is `unknown`, and so is a computed key in the user's bindings. An
+  unchanged default stays a note. Today a release can move a computed binding onto
+  one of the user's keys and still exit 0.
+- Count a computed call once when it is in both versions. On v4.5.0-rc2 the note
+  says 12 for 6 calls.
+- A `~/.config/hypr/bindings.lua` that exists but can't be read is `unknown`. Today
+  a broken symlink reads as having no bindings and exits 0, and a denied file is a
+  crash.
 
 ## Done when
 
@@ -39,4 +50,8 @@ and release, and the dict keeps only the last.
 - [ ] Press and release on one chord survive parsing, with a test.
 - [ ] `CONTROL + A` clashes with `CTRL + A`, with a test.
 - [ ] An unknown `o.bind_foo` helper produces an `unknown` finding, with a test.
+- [ ] A changed computed key gives `unknown` and exit 3, and an unchanged one can
+      still exit 0, with tests.
+- [ ] A computed key in the user's bindings gives `unknown`, with a test.
+- [ ] A broken `bindings.lua` symlink gives `unknown`, with a test.
 - [ ] `tests/run` passes.

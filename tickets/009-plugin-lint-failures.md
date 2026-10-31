@@ -23,7 +23,6 @@ warnings, the same result as a perfect plugin.
 - Treat these as `unknown`, naming the plugin: `qmllint` dies from a signal, it
   exits non-zero with no parseable warnings, or it runs past a timeout.
 - Add a timeout. There is none today, so a hung `qmllint` hangs the tool.
-- `qmllint` missing while plugins exist is `unknown`, so exit 3.
 - Fix "1 new qmllint warnings".
 
 ## Done when
