@@ -105,9 +105,9 @@ A tree with no readable default bindings is also exit 2: the format has moved.
 Computed keys don't count as readable.
 
 The installed version comes from `omarchy-version`, which also handles
-`omarchy-dev` and dev checkouts. It is the command on `PATH`, never the copy in a
-tree: `--root` can point at a release, and nothing from a release runs. If it
-fails, the version shows as "unknown".
+`omarchy-dev` and dev checkouts. It is looked up on `PATH`, and its path is never
+built from `--root` or `--target`: those can point at a release, and nothing from
+a release runs. If it fails, the version shows as "unknown".
 
 ### Checks
 

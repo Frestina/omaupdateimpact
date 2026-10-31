@@ -27,10 +27,12 @@ installed tree is hardcoded.
 - Get the installed version from `omarchy-version`, which also handles
   `omarchy-dev`. Today the edge channel reports "unknown".
 - Parsing zero default bindings from a tree is exit 2: the format has moved.
+- Review follow-ups: tests pin the "Can't compare" line.
 
 ## Done when
 
 - [x] Missing and empty trees exit 2 for both `--root` and `--target`, with tests.
 - [x] `OMARCHY_PATH` is used when set, with a test.
 - [x] A tree with no readable bindings exits 2, with a test.
+- [x] Refused trees say "Can't compare", not "Unexpected UnusableTree", with a test.
 - [x] `tests/run` passes.

@@ -419,6 +419,7 @@ class Trees(ProgramCase):
         code, out, err = result
         self.assertEqual((code, out), (2, ""))
         self.assertEqual(len(err.splitlines()), 1)
+        self.assertTrue(err.startswith("Can't compare: "), err)
         for name in names:
             self.assertIn(name, err)
 
