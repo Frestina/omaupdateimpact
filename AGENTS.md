@@ -15,10 +15,35 @@ the same commit when a decision changes.
 4. A ticket is done when every box under "Done when" is ticked and `tests/run`
    passes. Tick the boxes in the ticket file and set the table to `done`.
 5. Commit with the ticket number first: `006: read o.bind_hold`.
+6. Hand it to the reviewer, as below, and wait for its verdict.
 
 Something the ticket didn't foresee goes to
 [tickets/BACKLOG.md](tickets/BACKLOG.md) or becomes a new ticket, not into the
 current one.
+
+## Handing a ticket to the reviewer
+
+A reviewer session (started with `/reviewer`) reviews every ticket. You and it
+work the ticket back and forth until it is ready, without the user relaying
+messages.
+
+1. Find it: `.claude/reviewer-session` holds its session name. Check that name is
+   listed by `ListAgents`. If the file is missing or the session is not listed,
+   tell the user to start one with `/reviewer`, then stop.
+2. Send it one message with `SendMessage`. First line: `<ticket> done: <commit>`.
+   Then what you built, decisions the ticket did not settle and where the spec
+   now records them, test results (and any step skipped), and anything you put in
+   the backlog.
+3. Wait for its answer. It is one of:
+   - **Ready.** The ticket is finished. Stop; do not start another ticket.
+   - **Findings.** Fix them and commit as `<ticket>: review follow-ups`. The
+     reviewer's edits to the ticket and spec are uncommitted in the tree: commit
+     them with yours, unchanged. Tick the new boxes, set the table to `done`, and
+     message the reviewer again as in step 2.
+   - **Waiting for the user.** A finding needs the user's decision. Wait for the
+     reviewer's next message.
+4. If you disagree with a finding, say why in your message instead of changing
+   the code. The reviewer decides, or asks the user.
 
 ## Rules that outrank everything
 
