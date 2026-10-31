@@ -14,7 +14,9 @@ channel, and exits 0. The `edge` and `dev` channels have no tagged releases, so
 those need a tag.
 
 It changes nothing on your system, and nothing from the release is ever run:
-the release is downloaded to `~/.cache/omaupdateimpact` and read as text.
+the release is downloaded to `~/.cache/omaupdateimpact` and read as text. Two
+releases stay there and older ones are removed. If GitHub's rate limit gets in the
+way, set `GITHUB_TOKEN`.
 
 ## What it checks
 

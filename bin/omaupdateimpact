@@ -18,6 +18,7 @@ import tarfile
 import tempfile
 import textwrap
 import traceback
+import urllib.error
 import urllib.request
 import zlib
 from collections import Counter
@@ -34,6 +35,8 @@ QMLLINT = "/usr/lib/qt6/bin/qmllint"
 ATTENTION, NOTE, UNKNOWN = "attention", "note", "unknown"
 DOWNLOAD_ERRORS = (OSError, EOFError, ValueError, zlib.error, tarfile.TarError, http.client.HTTPException)
 VERSION = re.compile(r"(?:\d+:)?v?(\d+)\.(\d+)\.(\d+)(?:-?rc(\d+))?(?:-\d+)?")
+TAG = re.compile(r"v\d+\.\d+\.\d+(?:-rc\d+)?", re.ASCII)
+KEPT_RELEASES = 2
 
 
 @dataclass
@@ -70,6 +73,10 @@ class Finding:
 
 class UnusableTree(Exception):
     """A tree that can't be compared: going on would report nothing to worry about."""
+
+
+class RateLimited(OSError):
+    """GitHub turned a request down because of its rate limit."""
 
 
 class NoRelease(Exception):
@@ -464,15 +471,32 @@ def is_prerelease(name):
     return None if key is None else key[3] != float("inf")
 
 
+def github(url, timeout, token=None, advice="Try again later."):
+    request = urllib.request.Request(url)
+    if token:
+        # urllib carries plain headers along a redirect, whatever host it leads to.
+        request.add_unredirected_header("Authorization", f"Bearer {token}")
+    try:
+        return urllib.request.urlopen(request, timeout=timeout)
+    except urllib.error.HTTPError as error:
+        with error:
+            limited = error.headers.get("x-ratelimit-remaining") == "0" or "retry-after" in error.headers
+            if error.code in (403, 429) and limited:
+                raise RateLimited(f"GitHub's rate limit is used up. {advice}") from error
+            raise
+
+
 def api(path):
-    with urllib.request.urlopen(f"https://api.github.com/repos/{REPO}/{path}", timeout=30) as response:
+    token = os.environ.get("GITHUB_TOKEN")
+    advice = "Try again later." if token else "Try again later, or set GITHUB_TOKEN."
+    with github(f"https://api.github.com/repos/{REPO}/{path}", 30, token, advice) as response:
         return json.load(response)
 
 
 def stable_tag():
     release = api("releases/latest")
     tag = release.get("tag_name") if isinstance(release, dict) else None
-    if not tag or not isinstance(tag, str):
+    if not isinstance(tag, str) or not TAG.fullmatch(tag):
         raise ValueError("the releases API gave no usable release")
     return tag
 
@@ -481,7 +505,7 @@ def release_tags():
     """Every release tag, newest version first. The API sorts by date, so a stable patch can top an RC."""
     releases = api("releases?per_page=100")
     tags = [r.get("tag_name") for r in releases if isinstance(r, dict)] if isinstance(releases, list) else []
-    return sorted((t for t in tags if isinstance(t, str) and version_key(t)), key=version_key, reverse=True)
+    return sorted((t for t in tags if isinstance(t, str) and TAG.fullmatch(t)), key=version_key, reverse=True)
 
 
 def channel_tag(channel):
@@ -505,6 +529,33 @@ def newer_releases(version):
     return list(dict.fromkeys(newer[:1] + stable[:1]))
 
 
+def save(response, out, tag):
+    """Write a download to out. On a terminal, count it: GitHub doesn't say the size up front."""
+    if not sys.stderr.isatty():
+        shutil.copyfileobj(response, out)
+        return
+    done = 0
+    try:
+        print(f"Downloading {tag}...", end="", file=sys.stderr, flush=True)
+        while chunk := response.read(1 << 20):
+            out.write(chunk)
+            done += len(chunk)
+            print(f"\rDownloading {tag}: {done / (1 << 20):.0f} MB", end="", file=sys.stderr, flush=True)
+    finally:
+        print(file=sys.stderr)
+
+
+def prune(cache, tag, scratch):
+    """Keep the release just fetched and the newest other. The rest move to scratch, which goes away.
+
+    A rename is atomic, so a run cut short can't leave half a release that passes for a cached one.
+    """
+    releases = [path for path in cache.iterdir() if TAG.fullmatch(path.name)]
+    releases.sort(key=lambda path: (path.name == tag, version_key(path.name)), reverse=True)
+    for old in releases[KEPT_RELEASES:]:
+        old.rename(scratch / old.name)
+
+
 def fetch_release(tag, cache):
     root = cache / tag
     if not root.is_dir():
@@ -512,8 +563,8 @@ def fetch_release(tag, cache):
         url = f"https://github.com/{REPO}/archive/refs/tags/{tag}.tar.gz"
         with tempfile.TemporaryDirectory(dir=cache) as scratch:
             archive = Path(scratch) / "release.tar.gz"
-            with urllib.request.urlopen(url, timeout=120) as response, archive.open("wb") as out:
-                shutil.copyfileobj(response, out)
+            with github(url, 120) as response, archive.open("wb") as out:
+                save(response, out, tag)
             # tarfile stops at the end-of-archive marker and never reaches gzip's checksum.
             with gzip.open(archive) as stream:
                 while stream.read(1 << 20):
@@ -524,6 +575,7 @@ def fetch_release(tag, cache):
             if unpacked is None:
                 raise tarfile.ReadError("the archive holds no release")
             unpacked.rename(root)
+            prune(cache, tag, Path(scratch))
     return root
 
 
@@ -550,8 +602,9 @@ def report_no_update(version, tag, channel):
     print(f"Omarchy {version} is already {described(tag, channel)}. There is no update.")
     try:
         newer = newer_releases(version)
-    except DOWNLOAD_ERRORS:
-        print("Couldn't check for newer releases on other channels.")
+    except DOWNLOAD_ERRORS as error:
+        reason = f" {error}" if isinstance(error, RateLimited) else ""
+        print(f"Couldn't check for newer releases on other channels.{reason}")
         return 0
     for release in newer:
         name = "rc" if is_prerelease(release) else "stable"
@@ -576,6 +629,8 @@ def fail(what, error, debug):
 
 
 def run(options):
+    if options.tag and not TAG.fullmatch(options.tag):
+        raise NoRelease(f"{options.tag} isn't a release tag. Tags look like v1.2.3 or v1.2.3-rc1.")
     options.home = options.home or Path.home()
     # omarchy-version only knows this machine, so it can't speak for a tree given by hand.
     own_tree = options.root is None
@@ -586,7 +641,7 @@ def run(options):
     target = options.target
     tag = options.tag
     if target is None:
-        cache = Path(os.environ.get("XDG_CACHE_HOME", options.home / ".cache")) / "omaupdateimpact"
+        cache = Path(os.environ.get("XDG_CACHE_HOME") or options.home / ".cache") / "omaupdateimpact"
         try:
             tag = tag or channel_tag(channel)
             installed, wanted = version_key(version), version_key(tag)

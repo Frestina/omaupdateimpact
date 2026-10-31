@@ -94,6 +94,10 @@ argument overrides both.
 "Newest" goes by version, not date, because the API sorts by date and a stable
 patch can come after an RC. Whether a release is a prerelease goes by its tag.
 
+A tag must look like `v1.2.3` or `v1.2.3-rc1`, because it becomes a cache path. A
+tag argument of any other shape is exit 2 before anything else happens, even with
+`--target`. Tags from the API are held to the same shape.
+
 If the target is what's installed, it says so, names any newer release on another
 channel, and exits 0: there is no update. Nothing is downloaded. If the list of
 releases can't be fetched, it says so and still exits 0.
@@ -124,6 +128,16 @@ The installed version comes from `omarchy-version`, which also handles
 `omarchy-dev` and dev checkouts. It is looked up on `PATH`, and its path is never
 built from `--root` or `--target`: those can point at a release, and nothing from
 a release runs. If it fails, the version shows as "unknown".
+
+### Downloads
+
+`GITHUB_TOKEN`, when it's set, goes to `api.github.com` and nowhere else: a
+redirect doesn't carry it on, and the archive doesn't need it. A 403 or 429 with no
+requests left, or with `Retry-After`, is reported as the rate limit.
+
+On a terminal, stderr says what is downloading and counts the megabytes. GitHub
+doesn't send the archive's size, so the count is all there is to show. Off a
+terminal the download is silent.
 
 ### Checks
 
@@ -182,7 +196,10 @@ breaking change bumps `schemaVersion`.
 
 ## Files
 
-- `~/.cache/omaupdateimpact/<tag>`: unpacked releases, pruned automatically.
+- `~/.cache/omaupdateimpact/<tag>`: unpacked releases. `XDG_CACHE_HOME` replaces
+  `~/.cache` unless it's empty. After a download, the release it fetched and the
+  newest other one by version stay, and the rest go. So an older release someone
+  asks for is not removed before it's read. Nothing else in the cache is touched.
 - Reviewed findings, once they exist, in `~/.config/omaupdateimpact/`.
 
 Nothing else is written.

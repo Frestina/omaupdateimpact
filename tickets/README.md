@@ -32,7 +32,7 @@ when.
 | 002 | [Typed findings and exit codes](002-findings-and-exit-codes.md) | 001 | done |
 | 003 | [Refuse unusable trees](003-refuse-unusable-trees.md) | 002 | done |
 | 004 | [Follow the update channel](004-follow-the-channel.md) | 003 | done |
-| 005 | [Downloads and the cache](005-downloads-and-cache.md) | 002 | todo |
+| 005 | [Downloads and the cache](005-downloads-and-cache.md) | 002 | done |
 | 006 | [Read every binding helper](006-binding-helpers.md) | 002 | todo |
 | 007 | [Read every package removal](007-package-removals.md) | 002 | todo |
 | 008 | [Find every call to a deleted command](008-command-coverage.md) | 002 | todo |

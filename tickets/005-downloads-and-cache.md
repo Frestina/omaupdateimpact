@@ -30,8 +30,8 @@ removes it, so an RC cycle fills the disk quietly.
 
 ## Done when
 
-- [ ] A bad tag exits 2 without touching the network or cache, with a test.
-- [ ] A third release prunes the oldest, with a test.
-- [ ] Empty `XDG_CACHE_HOME` uses `~/.cache`, with a test.
-- [ ] A 403 with a rate-limit header gives its own message, with a test.
-- [ ] `tests/run` passes.
+- [x] A bad tag exits 2 without touching the network or cache, with a test.
+- [x] A third release prunes the oldest, with a test.
+- [x] Empty `XDG_CACHE_HOME` uses `~/.cache`, with a test.
+- [x] A 403 with a rate-limit header gives its own message, with a test.
+- [x] `tests/run` passes.

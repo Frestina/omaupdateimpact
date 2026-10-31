@@ -59,5 +59,14 @@ Paths already ruled out are not here; they are under
 - **The message when the mirror and packages disagree.** It says "the channel is
   stable / rc, and only stable and rc have tagged releases", which reads as a
   contradiction. The exit 2 is right. 012 could reword it.
+- **Scratch left by a killed run.** A run killed mid-download leaves its `tmp*`
+  folder in the cache. Pruning skips those, since one may belong to a live run.
+  Waits for a real report.
+- **Two runs at once.** One run can prune the release another is reading. Rare from
+  a terminal, more likely once the plugin (022) runs it in the background.
+- **A relative `XDG_CACHE_HOME`.** The XDG spec says to ignore it, and it's used as
+  given. Waits for a real report.
+- **A rejected `GITHUB_TOKEN`.** A stale token shows as `HTTP Error 401`, with no
+  mention of the token. 012 could name it.
 - **Evidence in the text report.** Findings carry evidence, but only `--json` (016)
   will show it. 012 could print it, if it doesn't crowd the report.

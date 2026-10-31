@@ -9,9 +9,11 @@ import shutil
 import tarfile
 import tempfile
 import unittest
+from email.message import Message
 from http.client import IncompleteRead
 from pathlib import Path
 from unittest import mock
+from urllib.error import HTTPError
 
 path = Path(__file__).parent.parent / "bin/omaupdateimpact"
 loader = importlib.machinery.SourceFileLoader("impact", str(path))
@@ -298,6 +300,19 @@ class Plugins(unittest.TestCase):
             self.assertEqual(self.findings_without_qmllint(home), [])
 
 
+class Terminal(io.StringIO):
+    def isatty(self):
+        return True
+
+
+def refused(code, **headers):
+    """An HTTP error from GitHub, as urllib raises it."""
+    message = Message()
+    for name, value in headers.items():
+        message[name.replace("_", "-")] = value
+    return HTTPError("https://github.invalid/", code, "Refused", message, io.BytesIO())
+
+
 class ProgramCase(unittest.TestCase):
     """Runs main() on small fictional trees."""
 
@@ -313,6 +328,8 @@ class ProgramCase(unittest.TestCase):
         patcher = mock.patch.dict(os.environ, XDG_CACHE_HOME=str(self.cache))
         patcher.start()
         self.addCleanup(patcher.stop)
+        os.environ.pop("GITHUB_TOKEN", None)
+        self.terminal = False
 
     def tree(self, name, bindings):
         root = self.base / name
@@ -327,7 +344,7 @@ class ProgramCase(unittest.TestCase):
 
     def run_argv(self, *args):
         argv = ["omaupdateimpact", *args]
-        out, err = io.StringIO(), io.StringIO()
+        out, err = io.StringIO(), Terminal() if self.terminal else io.StringIO()
         with mock.patch("sys.argv", argv), contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
             code = impact.main()
         return code, out.getvalue(), err.getvalue()
@@ -604,6 +621,204 @@ class Downloads(ProgramCase):
         self.assert_download_failed(self.download(response))
 
 
+    def test_a_download_is_quiet_when_stderr_is_not_a_terminal(self):
+        self.assertEqual(self.download(io.BytesIO(self.archive()))[2], "")
+
+
+class Terminals(ProgramCase):
+    def setUp(self):
+        super().setUp()
+        self.terminal = True
+
+    def test_a_download_says_what_it_is_fetching_and_how_much(self):
+        code, out, err = self.download(io.BytesIO(self.archive()))
+        self.assertEqual(code, 0)
+        self.assertIn("Downloading v1.2.3", err)
+        self.assertRegex(err, r"\d MB\n$")
+        self.assertNotIn("Downloading", out)
+
+    def test_a_failed_download_ends_the_progress_line(self):
+        response = mock.MagicMock()
+        response.__enter__.return_value.read.side_effect = IncompleteRead(b"")
+        code, _, err = self.download(response)
+        self.assertEqual(code, 2)
+        self.assertTrue(err.splitlines()[-1].startswith("Couldn't download the release"))
+
+
+class Tags(ProgramCase):
+    def test_good_tags_are_accepted(self):
+        for tag in ("v1.2.3", "v4.5.0-rc2", "v10.20.30-rc11"):
+            with self.subTest(tag=tag):
+                self.assertTrue(impact.TAG.fullmatch(tag))
+
+    def test_a_bad_tag_exits_2_before_the_network_or_the_cache(self):
+        bad = (
+            "../../x", "v1.2.3/../../x", "main", "1.2.3", "v1.2", "v1.2.3rc1", "v1.2.3-beta1",
+            "v1.2.3-rc", "v1.2.3\n", "v\u0661.2.3", ".", "..",
+        )
+        for tag in bad:
+            with self.subTest(tag=tag), mock.patch.object(impact.urllib.request, "urlopen") as urlopen:
+                code, out, err = self.run_main(tag)
+                self.assertEqual((code, out), (2, ""))
+                self.assertEqual(len(err.splitlines()), 1)
+                self.assertIn("isn't a release tag", err)
+                urlopen.assert_not_called()
+                self.assertFalse(self.cache.exists())
+
+    def test_a_bad_tag_is_refused_with_target_too(self):
+        code, _, err = self.check("../../x")
+        self.assertEqual(code, 2)
+        self.assertIn("isn't a release tag", err)
+
+    def test_a_bad_tag_from_the_api_is_never_a_cache_path(self):
+        for body in (b'{"tag_name": "../../x"}', b'{"tag_name": "v1.2.3/../.."}'):
+            with self.subTest(body=body):
+                self.assert_download_failed(self.download(io.BytesIO(body), args=("--channel", "stable")))
+        self.assertFalse((self.base / "x").exists())
+
+    def test_the_listing_skips_tags_of_another_shape(self):
+        listing = io.BytesIO(b'[{"tag_name": "v9.9.9/x"}, {"tag_name": "9.9.9"}, {"tag_name": "v1.2.3"}]')
+        code, out, _ = self.download(listing, io.BytesIO(self.archive()), args=("--channel", "rc"))
+        self.assertEqual(code, 0)
+        self.assertIn("-> v1.2.3 ", out)
+
+
+class Cache(ProgramCase):
+    def fetch_all(self, *tags):
+        for tag in tags:
+            self.assertEqual(self.download(io.BytesIO(self.archive()), args=(tag,))[0], 0)
+
+    def cached(self):
+        return sorted(path.name for path in (self.cache / "omaupdateimpact").iterdir())
+
+    def test_a_third_release_prunes_the_oldest(self):
+        self.fetch_all("v1.0.0", "v1.1.0", "v1.2.0")
+        self.assertEqual(self.cached(), ["v1.1.0", "v1.2.0"])
+
+    def test_oldest_goes_by_version_not_by_order_of_download(self):
+        self.fetch_all("v1.2.0", "v1.0.0", "v1.1.0")
+        self.assertEqual(self.cached(), ["v1.1.0", "v1.2.0"])
+
+    def test_a_final_release_outranks_its_candidates(self):
+        self.fetch_all("v1.2.0-rc9", "v1.2.0", "v1.2.0-rc10")
+        self.assertEqual(self.cached(), ["v1.2.0", "v1.2.0-rc10"])
+
+    def test_an_older_release_being_checked_is_kept(self):
+        self.fetch_all("v1.1.0", "v1.2.0", "v1.0.0")
+        self.assertEqual(self.cached(), ["v1.0.0", "v1.2.0"])
+
+    def test_a_failed_download_prunes_nothing(self):
+        self.fetch_all("v1.0.0", "v1.1.0")
+        self.download(io.BytesIO(b"broken"), args=("v1.2.0",))
+        self.assertEqual(self.cached(), ["v1.0.0", "v1.1.0"])
+
+    def test_a_cached_release_prunes_nothing(self):
+        self.fetch_all("v1.0.0", "v1.1.0")
+        shutil.copytree(self.base / "target", self.cache / "omaupdateimpact/v1.2.0")
+        with mock.patch.object(impact.urllib.request, "urlopen") as urlopen, \
+                mock.patch.object(impact, "installed_packages", return_value=set()):
+            self.assertEqual(self.run_main("v1.2.0")[0], 0)
+        urlopen.assert_not_called()
+        self.assertEqual(self.cached(), ["v1.0.0", "v1.1.0", "v1.2.0"])
+
+    def test_only_releases_are_pruned(self):
+        self.fetch_all("v1.0.0", "v1.1.0")
+        (self.cache / "omaupdateimpact/notes").mkdir()
+        self.fetch_all("v1.2.0")
+        self.assertEqual(self.cached(), ["notes", "v1.1.0", "v1.2.0"])
+
+    def test_a_link_in_the_cache_is_removed_but_not_followed(self):
+        outside = self.base / "outside"
+        outside.mkdir()
+        (outside / "file").touch()
+        cache = self.cache / "omaupdateimpact"
+        cache.mkdir(parents=True)
+        (cache / "v0.9.0").symlink_to(outside)
+        self.fetch_all("v1.0.0", "v1.1.0")
+        self.assertEqual(self.cached(), ["v1.0.0", "v1.1.0"])
+        self.assertTrue((outside / "file").exists())
+
+    def test_nothing_is_left_in_scratch(self):
+        self.fetch_all("v1.0.0", "v1.1.0", "v1.2.0")
+        self.assertFalse([name for name in self.cached() if not impact.TAG.fullmatch(name)])
+
+    def test_an_empty_xdg_cache_home_uses_the_home_cache(self):
+        with mock.patch.dict(os.environ, XDG_CACHE_HOME=""):
+            self.assertEqual(self.download(io.BytesIO(self.archive()))[0], 0)
+        self.assertTrue((self.home / ".cache/omaupdateimpact/v1.2.3/bin").is_dir())
+        self.assertFalse(Path("omaupdateimpact").exists())
+
+    def test_an_unset_xdg_cache_home_uses_the_home_cache(self):
+        del os.environ["XDG_CACHE_HOME"]
+        self.assertEqual(self.download(io.BytesIO(self.archive()))[0], 0)
+        self.assertTrue((self.home / ".cache/omaupdateimpact/v1.2.3/bin").is_dir())
+
+
+class RateLimits(ProgramCase):
+    def api_failure(self, error):
+        return self.download(error, args=("--channel", "stable"))
+
+    def assert_limited(self, result, advice):
+        code, out, err = result
+        self.assertEqual((code, out), (2, ""))
+        self.assertEqual(err, f"Couldn't download the release: GitHub's rate limit is used up. {advice}\n")
+
+    def test_a_403_with_no_requests_left_says_so(self):
+        self.assert_limited(self.api_failure(refused(403, x_ratelimit_remaining="0")), "Try again later, or set GITHUB_TOKEN.")
+
+    def test_a_429_and_a_retry_after_say_so_too(self):
+        for error in (refused(429, x_ratelimit_remaining="0"), refused(403, retry_after="60"), refused(429, retry_after="60")):
+            with self.subTest(code=error.code):
+                self.assert_limited(self.api_failure(error), "Try again later, or set GITHUB_TOKEN.")
+
+    def test_a_token_that_is_already_set_is_not_suggested(self):
+        with mock.patch.dict(os.environ, GITHUB_TOKEN="fictional"):
+            self.assert_limited(self.api_failure(refused(403, x_ratelimit_remaining="0")), "Try again later.")
+
+    def test_the_archive_is_not_helped_by_a_token(self):
+        self.assert_limited(self.download(refused(429, retry_after="60")), "Try again later.")
+
+    def test_other_refusals_stay_as_they_are(self):
+        for error in (refused(403), refused(403, x_ratelimit_remaining="12"), refused(404), refused(500, retry_after="60")):
+            with self.subTest(code=error.code):
+                code, _, err = self.api_failure(error)
+                self.assertEqual(code, 2)
+                self.assertNotIn("rate limit", err)
+                self.assertIn("Couldn't download the release: HTTP Error", err)
+
+
+class Tokens(ProgramCase):
+    def requests(self, *args):
+        """What was sent for a stable run: the API request, then the archive request."""
+        answers = [io.BytesIO(b'{"tag_name": "v1.2.3"}'), io.BytesIO(self.archive())]
+        with mock.patch.object(impact.urllib.request, "urlopen", side_effect=answers) as urlopen, \
+                mock.patch.object(impact, "installed_packages", return_value=set()):
+            self.assertEqual(self.run_main("--channel", "stable")[0], 0)
+        return [call.args[0] for call in urlopen.call_args_list]
+
+    def test_github_token_goes_to_the_api_and_no_further(self):
+        with mock.patch.dict(os.environ, GITHUB_TOKEN="fictional"):
+            listing, archive = self.requests()
+        self.assertEqual(listing.get_header("Authorization"), "Bearer fictional")
+        self.assertEqual(listing.headers, {})
+        self.assertFalse(archive.has_header("Authorization"))
+
+    def test_no_token_sends_no_header(self):
+        for environment in ({}, {"GITHUB_TOKEN": ""}):
+            with self.subTest(environment=environment), mock.patch.dict(os.environ, environment):
+                listing, _ = self.requests()
+                self.assertFalse(listing.has_header("Authorization"))
+                shutil.rmtree(self.cache)
+
+    def test_a_redirect_drops_the_token(self):
+        with mock.patch.dict(os.environ, GITHUB_TOKEN="fictional"):
+            listing, _ = self.requests()
+        followed = impact.urllib.request.HTTPRedirectHandler().redirect_request(
+            listing, None, 302, "Found", {}, "https://elsewhere.invalid/",
+        )
+        self.assertFalse(followed.has_header("Authorization"))
+
+
 class ReleasesApi(ProgramCase):
     def test_the_newest_tag_is_downloaded(self):
         api, archive = io.BytesIO(b'[{"tag_name": "v1.2.3"}]'), io.BytesIO(self.archive())
@@ -647,7 +862,8 @@ class Channels(ProgramCase):
     def on_channel(self, channel, version="1.0.0-1"):
         self.stub(f'echo "{version}"', f'echo "{channel}"')
 
-    def answer(self, url, *args, **kwargs):
+    def answer(self, request, *args, **kwargs):
+        url = request.full_url
         self.urls.append(url)
         if url.endswith("/releases/latest"):
             return io.BytesIO(self.latest)
@@ -797,7 +1013,7 @@ class Channels(ProgramCase):
         self.assertEqual(out.splitlines()[1:], ["Newer on the stable channel: v1.2.3. To check it: omaupdateimpact v1.2.3"])
 
     def test_two_unreadable_versions_are_not_the_same_version(self):
-        for version, tag in (('echo "dev (abc1234)"', "main"), ("exit 1", "trunk")):
+        for version, tag in (('echo "dev (abc1234)"', "v1.2.3"), ("exit 1", "v1.2.2")):
             with self.subTest(version=version):
                 self.stub(version, 'echo "stable"')
                 code, out, _ = self.fetch(tag, own_tree=True)
@@ -817,6 +1033,13 @@ class Channels(ProgramCase):
         code, out, _ = self.fetch(own_tree=True)
         self.assertEqual(code, 0)
         self.assertIn("Couldn't check for newer releases", out)
+
+    def test_up_to_date_names_the_rate_limit_when_that_stopped_the_listing(self):
+        self.on_channel("stable", version="1.2.3-1")
+        self.listing_error = refused(403, x_ratelimit_remaining="0")
+        code, out, _ = self.fetch(own_tree=True)
+        self.assertEqual(code, 0)
+        self.assertIn("Couldn't check for newer releases on other channels. GitHub's rate limit", out)
 
     def test_a_tree_given_by_hand_is_compared_even_at_the_same_version(self):
         (self.base / "target/migrations/1.sh").write_text("omarchy-pkg-drop a\n")
