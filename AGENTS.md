@@ -14,7 +14,8 @@ the same commit when a decision changes.
    links, and do only what its scope says.
 4. A ticket is done when every box under "Done when" is ticked and `tests/run`
    passes. Tick the boxes in the ticket file and set the table to `done`.
-5. Commit with the ticket number first: `006: read o.bind_hold`.
+5. Commit with the ticket number first: `006: read o.bind_hold`. Tickets are
+   committed directly on main, with no branches.
 6. Hand it to the reviewer, as below, and wait for its verdict.
 
 Something the ticket didn't foresee goes to
