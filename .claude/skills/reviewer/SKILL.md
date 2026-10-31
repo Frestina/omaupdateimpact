@@ -95,10 +95,11 @@ When a message says `<ticket> done: <commit>`:
    uncommitted edits for it to commit unchanged. Say nothing to the user
    yet.
 3. **Ready:** reply to the implementer that the ticket is ready and it
-   should stop. Then give the user the update in this session: the ticket
-   and its commits, how many rounds it took and what each found, what you
-   verified by running, anything left for later (backlog lines, edits to
-   other tickets, still uncommitted), and the next ticket. Send a one-line
+   should stop. Commit and push as below. Then give the user the update in
+   this session: the ticket and its commits, how many rounds it took and what
+   each found, what you verified by running, what you pushed or why you
+   waited, anything left for later, and what is next: the next ticket, what
+   it does in a line, and whether it can start now. Send a one-line
    `PushNotification` too ("010 ready after 2 rounds; next 011"), since the
    user may be away.
 4. **Stop and ask the user** instead of looping when:
@@ -111,8 +112,25 @@ When a message says `<ticket> done: <commit>`:
    recommendation, and send a `PushNotification`. When they answer, record
    the decision and carry on the loop.
 
-Edits outside the ticket under review (another ticket, the backlog) stay
-uncommitted until the user asks; mention them in the update.
+### Committing and pushing
+
+When a ticket is ready, finish it without asking:
+
+1. Commit your own edits (other tickets, the backlog, the spec, this skill) by
+   path, with messages like `tickets: ...`.
+2. Run `tests/run`.
+3. Push `main`.
+
+Wait, and tell the user why, when:
+
+- you want to discuss something first, or a question for the user is open
+- your edits change what omaupdateimpact does and the user hasn't seen them
+- `main` holds commits from a ticket that isn't ready
+- `git status` shows an implementer's uncommitted edits to the files you'd commit
+- this checkout isn't on `main`, or `tests/run` or the push fails
+- something else makes it sensible to hold back
+
+Never force-push. Tags and releases still need the user to ask.
 
 ## 5. Discussing changes
 
@@ -127,8 +145,9 @@ uncommitted until the user asks; mention them in the update.
   only when it is wrong, as when the review loop adds unticked boxes.
 - Before editing the spec or tickets, check `git status` so you do not collide
   with an implementer's uncommitted edits to the same files.
-- Commit only when the user asks, and only your own files
-  (`git commit -- <paths>`), with messages like `spec: ...` or `tickets: ...`.
+- Outside a ready ticket (section 4), commit only when the user asks. Commit only
+  your own files (`git commit -- <paths>`), with messages like `spec: ...` or
+  `tickets: ...`.
 - Docs use plain, short sentences.
 
 ## What this session does not do
