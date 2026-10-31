@@ -42,6 +42,9 @@ and release, and the dict keeps only the last.
 - A `~/.config/hypr/bindings.lua` that exists but can't be read is `unknown`. Today
   a broken symlink reads as having no bindings and exits 0, and a denied file is a
   crash.
+- Review follow-ups: a turned-off shortcut that moves onto a key also turned off
+  doesn't come back, a broken link above `bindings.lua` is `unknown`, and tests
+  cover the logic that no test held.
 
 ## Done when
 
@@ -54,4 +57,16 @@ and release, and the dict keeps only the last.
       still exit 0, with tests.
 - [x] A computed key in the user's bindings gives `unknown`, with a test.
 - [x] A broken `bindings.lua` symlink gives `unknown`, with a test.
+- [x] Unbinding both ends of a move gives no attention finding and exit 0, with a
+      test.
+- [x] A broken `~/.config/hypr` link gives `unknown` and exit 3, with a test.
+- [x] A press alone that becomes a press and release pair counts as a change, with
+      a test.
+- [x] A multi-line block comment hides the binds in it, with a test.
+- [x] `hl.unbind("ALL")` isn't `hl.unbind("all")`, with a test.
+- [x] An unknown helper only in the installed tree gives `unknown`, with a test.
+- [x] The moved fix quotes the default's spelling, with a test.
+- [x] A removed default you turned off isn't listed as removed, with a test.
+- [x] Your binding on a chord you didn't turn off gets no "replaces" note, with a
+      test.
 - [x] `tests/run` passes.

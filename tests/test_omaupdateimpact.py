@@ -126,6 +126,9 @@ class ParseLua(unittest.TestCase):
         parsed = parse('o.bind("SUPER + A", "x", "y")\nhl.unbind("all")\no.bind("SUPER + B", "x", "y")')
         self.assertEqual(list(parsed.binds), ["SUPER + B"])
 
+    def test_only_lowercase_all_removes_every_bind(self):
+        self.assertIn("SUPER + A", parse('o.bind("SUPER + A", "x", "y")\nhl.unbind("ALL")').binds)
+
     def test_every_modifier_spelling_is_the_same_key(self):
         for spelled, chord in (
             ("CONTROL + A", "CTRL + A"),
@@ -175,6 +178,12 @@ class ParseLua(unittest.TestCase):
 
     def test_an_unclosed_long_string_is_not_a_literal(self):
         self.assertIsNone(impact.literal("[[run it"))
+
+    def test_skips_block_comments_over_several_lines(self):
+        for opened, closed in (("--[[", "]]"), ("--[==[", "]==]")):
+            with self.subTest(opened):
+                text = f'{opened}\no.bind("SUPER + A", "x", "y")\n{closed}\no.bind("SUPER + B", "x", "y")'
+                self.assertEqual(list(parse(text).binds), ["SUPER + B"])
 
     def test_skips_block_comments_with_levels(self):
         self.assertEqual(parse('--[==[ ]] o.bind("SUPER + A", "x", "y") ]==]').binds, {})
@@ -229,6 +238,12 @@ class BindingHelpers(unittest.TestCase):
         findings = impact.compare_bindings(impact.Parsed(), parsed, impact.Parsed())
         self.assertIn("o.bind_foo", titles(findings, "unknown")[0])
         self.assertEqual(findings[0].evidence, ["default/hypr/helpers.lua"])
+
+    def test_a_helper_only_in_the_installed_tree_is_unknown(self):
+        current = impact.Parsed()
+        impact.parse_helpers("function o.bind_foo(keys) end", current, "default/hypr/helpers.lua")
+        findings = impact.compare_bindings(current, impact.Parsed(), impact.Parsed())
+        self.assertIn("o.bind_foo", titles(findings, "unknown")[0])
 
     def test_a_helper_in_both_versions_is_one_finding(self):
         current, target = impact.Parsed(), impact.Parsed()
@@ -349,6 +364,25 @@ class CompareBindings(unittest.TestCase):
         findings = compare(current, 'o.bind("F9", "Start", "a")')
         self.assertIn('F9 is now "Start", it was "Start / Stop".', titles(findings, "note"))
 
+    def test_a_press_that_becomes_a_press_and_release_pair_is_a_change(self):
+        findings = compare('o.bind("F9", "Start", "a")', 'o.bind_hold("F9", "Start", "a", "Stop", "b")')
+        self.assertIn('F9 is now "Start / Stop", it was "Start".', titles(findings, "note"))
+
+    def test_a_removed_default_you_turned_off_is_not_listed_as_removed(self):
+        findings = compare('o.bind("SUPER + Q", "Calc", "c")', "", 'hl.unbind("SUPER + Q")')
+        self.assertEqual(
+            titles(findings, "note"), ["SUPER + Q: your unbind no longer does anything, the default is gone."]
+        )
+
+    def test_no_replaces_note_on_a_chord_you_did_not_turn_off(self):
+        findings = compare(
+            'o.bind("CTRL + A", "Old", "o")',
+            'o.bind("CONTROL + A", "New", "n")',
+            'hl.unbind("CTRL + A")\no.bind("CTRL + A", "Mine", "m")',
+        )
+        self.assertEqual(len(titles(findings, "attention")), 1)
+        self.assertEqual(titles(findings, "note"), [])
+
     def test_a_default_that_unbinds_its_own_key_is_gone(self):
         findings = compare('o.bind("SUPER + Q", "Calc", "c")', 'o.bind("SUPER + Q", "Calc", "c")\nhl.unbind("SUPER + Q")')
         self.assertIn('Default shortcuts removed: SUPER + Q ("Calc").', titles(findings, "note"))
@@ -378,6 +412,29 @@ class CompareBindings(unittest.TestCase):
             'hl.unbind("SUPER + Q")',
         )
         self.assertIn("comes back", titles(findings, "attention")[0])
+
+    def test_unbinding_both_ends_of_a_move_keeps_it_off(self):
+        findings = compare(
+            'o.bind("SUPER + Q", "Calc", "c")',
+            'o.bind("SUPER + SHIFT + Q", "Calc", "c")',
+            'hl.unbind("SUPER + Q")\nhl.unbind("SUPER + SHIFT + Q")',
+        )
+        self.assertEqual(titles(findings, "attention"), [])
+        self.assertEqual(titles(findings, "note"), ['Moved: "Calc" from SUPER + Q to SUPER + SHIFT + Q.'])
+
+    def test_a_shortcut_comes_back_when_its_new_keys_are_unbound_in_another_spelling(self):
+        findings = compare(
+            'o.bind("SUPER + Q", "Calc", "c")',
+            'o.bind("SUPER + SHIFT + Q", "Calc", "c")',
+            'hl.unbind("SUPER + Q")\nhl.unbind("SHIFT + SUPER + Q")',
+        )
+        self.assertIn("comes back", titles(findings, "attention")[0])
+
+    def test_the_moved_fix_spells_the_keys_the_way_the_default_does(self):
+        findings = compare(
+            'o.bind("CTRL + Q", "Calc", "c")', 'o.bind("CONTROL + W", "Calc", "c")', 'hl.unbind("CTRL + Q")'
+        )
+        self.assertEqual(findings[0].fix, "Unbind CONTROL + W too.")
 
     def test_a_shortcut_that_comes_back_names_the_files_behind_it(self):
         current, target, user = impact.Parsed(), impact.Parsed(), impact.Parsed()
@@ -706,6 +763,36 @@ class Bindings(ProgramCase):
     def test_a_broken_link_is_unknown(self):
         self.bindings.symlink_to(self.base / "missing.lua")
         self.assert_unreadable()
+
+    def test_a_broken_link_above_the_file_is_unknown(self):
+        self.bindings.parent.rmdir()
+        self.bindings.parent.symlink_to(self.base / "unmounted")
+        self.assert_unreadable()
+
+    def test_a_broken_link_further_up_is_unknown(self):
+        config = self.home / ".config"
+        self.bindings.parent.rmdir()
+        config.rmdir()
+        config.symlink_to(self.base / "unmounted")
+        self.assert_unreadable()
+
+    def test_a_link_to_a_folder_with_no_bindings_is_fine(self):
+        config = self.home / ".config"
+        self.bindings.parent.rmdir()
+        config.rmdir()
+        (self.base / "dotfiles").mkdir()
+        config.symlink_to(self.base / "dotfiles")
+        self.assertEqual(self.check()[0], 0)
+
+    def test_no_hypr_folder_is_fine(self):
+        self.bindings.parent.rmdir()
+        self.assertEqual(self.check()[0], 0)
+
+    def test_unbinding_both_ends_of_a_move_exits_0(self):
+        (self.base / "current/default/hypr/bindings.lua").write_text('o.bind("SUPER + Q", "Calc", "c")')
+        (self.base / "target/default/hypr/bindings.lua").write_text('o.bind("SUPER + SHIFT + Q", "Calc", "c")')
+        self.bindings.write_text('hl.unbind("SUPER + Q")\nhl.unbind("SUPER + SHIFT + Q")')
+        self.assertEqual(self.check()[0], 0)
 
     def test_a_folder_is_unknown(self):
         self.bindings.mkdir()

@@ -290,7 +290,11 @@ def read_user_bindings(path, shown):
     parsed = Parsed()
     try:
         path.lstat()
-    except (FileNotFoundError, NotADirectoryError):
+    except FileNotFoundError:
+        # A dotfiles folder on an unmounted drive looks just like having no bindings.
+        broken = any(parent.is_symlink() and not parent.exists() for parent in path.parents)
+        return parsed, [unreadable_bindings(shown, "It's a broken link")] if broken else []
+    except NotADirectoryError:
         return parsed, []
     except OSError as error:
         return parsed, [unreadable_bindings(shown, error.strerror)]
@@ -400,14 +404,15 @@ def compare_bindings(current, target, user):
             continue
         unbound = sorted(set(user.unbinds[chord].values()))
         if chord in moved:
-            findings.append(Finding(
-                "bindings",
-                ATTENTION,
-                f'{chord}: you turned off "{label(cur[chord])}" here, but it moves to '
-                f"{moved[chord]}, so it comes back.",
-                [*unbound, *sources(cur[chord], tgt[moved[chord]])],
-                fix=f"Unbind {' and '.join(spelled(tgt[moved[chord]]))} too.",
-            ))
+            if not turned_off(moved[chord], tgt[moved[chord]]):
+                findings.append(Finding(
+                    "bindings",
+                    ATTENTION,
+                    f'{chord}: you turned off "{label(cur[chord])}" here, but it moves to '
+                    f"{moved[chord]}, so it comes back.",
+                    [*unbound, *sources(cur[chord], tgt[moved[chord]])],
+                    fix=f"Unbind {' and '.join(spelled(tgt[moved[chord]]))} too.",
+                ))
         elif chord not in tgt:
             findings.append(Finding(
                 "bindings",

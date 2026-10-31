@@ -207,12 +207,14 @@ exit 0 impossible. A computed key in the defaults is a note while its key
 expression is the same in both versions, spacing aside. Each expression is counted
 as many times as both versions share it, so a call in both counts once. It is
 `unknown` when the expressions differ, and so is a computed key in your own
-bindings. A loop whose range changes while its key expression stays the same is
-still a note. They stay listed in the README's limits.
+bindings. An expression in only one version counts as a difference, and a computed
+`hl.unbind` is apart from a bind on the same expression. A loop whose range changes
+while its key expression stays the same is still a note. They stay listed in the
+README's limits.
 
 A `~/.config/hypr/bindings.lua` that exists but can't be read is `unknown`: a broken
-link, a denied file, or anything that isn't a file. With no such file there is
-nothing to compare, which is not a limit.
+link, a broken link in a folder above it, a denied file, or anything that isn't a
+file. With no such file there is nothing to compare, which is not a limit.
 
 ## JSON
 
