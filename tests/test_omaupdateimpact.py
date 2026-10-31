@@ -3,6 +3,7 @@ import gzip
 import importlib.machinery
 import importlib.util
 import io
+import json
 import os
 import shutil
 import tarfile
@@ -606,12 +607,256 @@ class Downloads(ProgramCase):
 class ReleasesApi(ProgramCase):
     def test_the_newest_tag_is_downloaded(self):
         api, archive = io.BytesIO(b'[{"tag_name": "v1.2.3"}]'), io.BytesIO(self.archive())
-        self.assertEqual(self.download(api, archive, args=())[0], 0)
+        self.assertEqual(self.download(api, archive, args=("--channel", "rc"))[0], 0)
 
     def test_bad_answers_exit_2(self):
-        for body in (b"", b"not json", b"\xff", b"[]", b"{}", b"[1]", b"[{}]", b'[{"tag_name": null}]'):
-            with self.subTest(body=body):
-                self.assert_download_failed(self.download(io.BytesIO(body), args=()))
+        bodies = {
+            "rc": (b"", b"not json", b"\xff", b"[]", b"{}", b"[1]", b"[{}]", b'[{"tag_name": null}]', b'[{"tag_name": "x"}]'),
+            "stable": (b"", b"not json", b"\xff", b"[]", b"[1]", b"{}", b'{"tag_name": null}', b'{"tag_name": 1}'),
+        }
+        for channel, answers in bodies.items():
+            for body in answers:
+                with self.subTest(channel=channel, body=body):
+                    self.assert_download_failed(self.download(io.BytesIO(body), args=("--channel", channel)))
+
+
+def releases(*tags):
+    return json.dumps([{"tag_name": tag} for tag in tags]).encode()
+
+
+class Channels(ProgramCase):
+    """Fictional releases: stable is v1.2.3, and v2.0.0-rc2 is the newest of all."""
+
+    def setUp(self):
+        super().setUp()
+        self.latest = b'{"tag_name": "v1.2.3"}'
+        self.listing = releases("v2.0.0-rc2", "v2.0.0-rc1", "v1.2.3", "v1.2.2")
+        self.listing_error = None
+
+    def stub(self, version, channel):
+        directory = self.base / "stub"
+        directory.mkdir(exist_ok=True)
+        for name, line in (("omarchy-version", version), ("omarchy-version-channel", channel)):
+            command = directory / name
+            command.write_text(f"#!/bin/sh\n{line}\n")
+            command.chmod(0o755)
+        patcher = mock.patch.dict(os.environ, PATH=f"{directory}:{os.environ['PATH']}")
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def on_channel(self, channel, version="1.0.0-1"):
+        self.stub(f'echo "{version}"', f'echo "{channel}"')
+
+    def answer(self, url, *args, **kwargs):
+        self.urls.append(url)
+        if url.endswith("/releases/latest"):
+            return io.BytesIO(self.latest)
+        if "/releases?" in url:
+            if self.listing_error:
+                raise self.listing_error
+            return io.BytesIO(self.listing)
+        return io.BytesIO(self.archive())
+
+    def fetch(self, *args, own_tree=False, packages=frozenset()):
+        """Run against the fictional API, keeping the URLs it was asked for in self.urls."""
+        self.urls = []
+        with mock.patch.object(impact.urllib.request, "urlopen", side_effect=self.answer), \
+                mock.patch.object(impact, "installed_packages", return_value=packages):
+            if own_tree:
+                with mock.patch.dict(os.environ, OMARCHY_PATH=str(self.base / "current")):
+                    return self.run_argv("--home", str(self.home), *args)
+            return self.run_main(*args)
+
+    def assert_downloaded(self, tag):
+        self.assertTrue(self.urls[-1].endswith(f"/archive/refs/tags/{tag}.tar.gz"), self.urls)
+
+    def test_stable_takes_the_latest_stable_release(self):
+        self.on_channel("stable")
+        code, out, _ = self.fetch()
+        self.assertEqual(code, 0)
+        self.assertTrue(self.urls[0].endswith("/releases/latest"))
+        self.assert_downloaded("v1.2.3")
+        self.assertIn("-> v1.2.3 (stable channel, not a prerelease).", out.splitlines()[0])
+
+    def test_rc_takes_the_newest_release(self):
+        self.on_channel("rc")
+        code, out, _ = self.fetch()
+        self.assertEqual(code, 0)
+        self.assert_downloaded("v2.0.0-rc2")
+        self.assertIn("-> v2.0.0-rc2 (rc channel, prerelease).", out.splitlines()[0])
+
+    def test_rc_goes_by_version_when_a_stable_patch_comes_later(self):
+        self.on_channel("rc")
+        self.listing = releases("v1.2.4", "v2.0.0-rc2", "v1.2.3")
+        self.fetch()
+        self.assert_downloaded("v2.0.0-rc2")
+
+    def test_rc_takes_the_final_release_over_its_candidates(self):
+        self.on_channel("rc")
+        self.listing = releases("v2.0.0-rc2", "v2.0.0", "v2.0.0-rc1")
+        self.fetch()
+        self.assert_downloaded("v2.0.0")
+
+    def test_a_channel_without_tags_exits_2_and_asks_for_one(self):
+        for channel in ("edge", "dev", "unknown", "stable / rc"):
+            with self.subTest(channel=channel):
+                self.on_channel(channel)
+                code, out, err = self.fetch()
+                self.assertEqual((code, out, self.urls), (2, "", []))
+                self.assertEqual(len(err.splitlines()), 1)
+                self.assertIn(f"the channel is {channel},", err)
+                self.assertIn("Pass a tag", err)
+
+    def test_a_failing_channel_command_counts_as_unknown(self):
+        self.stub('echo "1.0.0-1"', "exit 1")
+        code, _, err = self.fetch()
+        self.assertEqual(code, 2)
+        self.assertIn("the channel is unknown,", err)
+
+    def test_a_dev_checkout_is_the_dev_channel_whatever_its_mirrors_say(self):
+        self.on_channel("stable", version="dev (abc1234)")
+        code, _, err = self.fetch()
+        self.assertEqual((code, self.urls), (2, []))
+        self.assertIn("the channel is dev,", err)
+
+    def test_channel_flag_overrides_the_system(self):
+        self.on_channel("edge")
+        self.assertEqual(self.fetch("--channel", "rc")[0], 0)
+        self.assert_downloaded("v2.0.0-rc2")
+
+    def test_channel_flag_can_name_a_channel_without_tags(self):
+        self.on_channel("stable")
+        code, _, err = self.fetch("--channel", "edge")
+        self.assertEqual((code, self.urls), (2, []))
+        self.assertIn("Pass a tag", err)
+
+    def test_a_tag_overrides_the_channel(self):
+        self.on_channel("stable")
+        code, out, _ = self.fetch("v2.0.0-rc1", "--channel", "rc")
+        self.assertEqual((code, len(self.urls)), (0, 1))
+        self.assert_downloaded("v2.0.0-rc1")
+        self.assertIn("-> v2.0.0-rc1 (rc channel, prerelease).", out.splitlines()[0])
+
+    def test_a_tag_works_on_a_channel_without_tags(self):
+        self.on_channel("edge")
+        code, out, _ = self.fetch("v1.2.3")
+        self.assertEqual(code, 0)
+        self.assertIn("(edge channel, not a prerelease)", out.splitlines()[0])
+
+    def test_a_target_directory_works_on_a_channel_without_tags(self):
+        self.on_channel("edge")
+        code, out, _ = self.fetch("--target", str(self.base / "target"))
+        self.assertEqual((code, self.urls), (0, []))
+        self.assertIn("-> target (edge channel, can't tell if it's a prerelease).", out.splitlines()[0])
+
+    def test_up_to_date_exits_0_and_names_the_newer_rc(self):
+        self.on_channel("stable", version="1.2.3-1")
+        code, out, err = self.fetch(own_tree=True)
+        self.assertEqual((code, err), (0, ""))
+        lines = out.splitlines()
+        self.assertEqual(lines[0], "Omarchy 1.2.3-1 is already v1.2.3 (stable channel, not a prerelease). There is no update.")
+        self.assertEqual(lines[1:], ["Newer on the rc channel: v2.0.0-rc2. To check it: omaupdateimpact v2.0.0-rc2"])
+
+    def test_up_to_date_downloads_nothing(self):
+        self.on_channel("stable", version="1.2.3-1")
+        self.fetch(own_tree=True)
+        self.assertFalse(any("/archive/" in url for url in self.urls))
+        self.assertFalse(self.cache.exists())
+
+    def test_up_to_date_on_the_newest_release_names_nothing_else(self):
+        self.on_channel("rc", version="2.0.0rc2-1")
+        code, out, _ = self.fetch(own_tree=True)
+        self.assertEqual(code, 0)
+        self.assertEqual(
+            out.splitlines(),
+            ["Omarchy 2.0.0rc2-1 is already v2.0.0-rc2 (rc channel, prerelease). There is no update."],
+        )
+
+    def test_up_to_date_on_rc_ignores_an_older_stable_patch(self):
+        self.on_channel("rc", version="2.0.0rc2-1")
+        self.listing = releases("v1.2.4", "v2.0.0-rc2")
+        self.assertEqual(len(self.fetch(own_tree=True)[1].splitlines()), 1)
+
+    def test_an_explicit_tag_that_is_installed_names_both_newer_releases(self):
+        self.on_channel("stable", version="1.2.2-1")
+        code, out, _ = self.fetch("v1.2.2", own_tree=True)
+        self.assertEqual(code, 0)
+        self.assertEqual(
+            out.splitlines()[1:],
+            [
+                "Newer on the rc channel: v2.0.0-rc2. To check it: omaupdateimpact v2.0.0-rc2",
+                "Newer on the stable channel: v1.2.3. To check it: omaupdateimpact v1.2.3",
+            ],
+        )
+
+    def test_a_candidate_a_final_release_replaced_is_not_named(self):
+        self.on_channel("stable", version="1.2.2-1")
+        self.listing = releases("v1.2.3", "v1.2.3-rc1", "v1.2.2")
+        out = self.fetch("v1.2.2", own_tree=True)[1]
+        self.assertNotIn("rc1", out)
+
+    def test_up_to_date_still_exits_0_when_the_listing_fails_and_says_so(self):
+        self.on_channel("stable", version="1.2.3-1")
+        self.listing_error = OSError("no network")
+        code, out, _ = self.fetch(own_tree=True)
+        self.assertEqual(code, 0)
+        self.assertIn("Couldn't check for newer releases", out)
+
+    def test_a_tree_given_by_hand_is_compared_even_at_the_same_version(self):
+        (self.base / "target/migrations/1.sh").write_text("omarchy-pkg-drop a\n")
+        self.on_channel("stable", version="1.2.3-1")
+        code, out, _ = self.fetch(packages={"a"})
+        self.assertEqual(code, 1)
+        self.assertNotIn("no update", out)
+
+    def test_a_target_given_by_hand_is_compared_even_at_the_same_version(self):
+        (self.base / "target/migrations/1.sh").write_text("omarchy-pkg-drop a\n")
+        self.on_channel("stable", version="1.2.3-1")
+        code, out, _ = self.fetch("--target", str(self.base / "target"), "v1.2.3", own_tree=True, packages={"a"})
+        self.assertEqual(code, 1)
+        self.assertNotIn("no update", out)
+
+    def test_the_channel_command_in_a_tree_is_never_run(self):
+        marker = self.base / "ran"
+        for name in ("current", "target"):
+            command = self.base / name / "bin/omarchy-version-channel"
+            command.write_text(f"#!/bin/sh\ntouch {marker}\n")
+            command.chmod(0o755)
+        with mock.patch.dict(os.environ, PATH=str(self.base / "nowhere")):
+            out = self.check()[1]
+        self.assertIn("(unknown channel,", out.splitlines()[0])
+        self.assertFalse(marker.exists())
+
+
+class Versions(unittest.TestCase):
+    def test_a_package_and_its_tag_count_as_the_same_version(self):
+        for package, tag in (
+            ("4.0.6-1", "v4.0.6"),
+            ("4.0.6-2", "v4.0.6"),
+            ("1:4.0.6-1", "v4.0.6"),
+            ("4.5.0rc2-1", "v4.5.0-rc2"),
+        ):
+            with self.subTest(package=package):
+                self.assertEqual(impact.version_key(package), impact.version_key(tag))
+
+    def test_different_releases_stay_different(self):
+        for package, tag in (("4.0.6-1", "v4.0.6-rc1"), ("4.0.6-1", "v4.0.60"), ("4.5.0rc2-1", "v4.5.0-rc1")):
+            with self.subTest(package=package, tag=tag):
+                self.assertNotEqual(impact.version_key(package), impact.version_key(tag))
+
+    def test_a_dev_or_unknown_version_has_no_key(self):
+        for version in ("dev (abc1234)", "dev", "dev.abc1234-1", "unknown", ""):
+            with self.subTest(version=version):
+                self.assertIsNone(impact.version_key(version))
+
+    def test_a_candidate_sorts_before_its_final_release(self):
+        tags = ["v4.0.6", "v4.5.0", "v4.5.0-rc10", "v4.5.0-rc2"]
+        self.assertEqual(sorted(tags, key=impact.version_key), ["v4.0.6", "v4.5.0-rc2", "v4.5.0-rc10", "v4.5.0"])
+
+    def test_whether_a_name_is_a_prerelease(self):
+        self.assertEqual(
+            [impact.is_prerelease(name) for name in ("v4.5.0-rc2", "v4.0.6", "my-tree")], [True, False, None]
+        )
 
 
 if __name__ == "__main__":

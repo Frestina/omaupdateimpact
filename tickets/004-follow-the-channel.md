@@ -30,9 +30,9 @@ coming.
 
 ## Done when
 
-- [ ] Each channel picks the right release, with tests against canned API data.
-- [ ] Installed `4.0.6-1` and target `v4.0.6` count as the same version, with a
+- [x] Each channel picks the right release, with tests against canned API data.
+- [x] Installed `4.0.6-1` and target `v4.0.6` count as the same version, with a
       test.
-- [ ] A tag argument overrides the channel, with a test.
-- [ ] Up to date gives exit 0 and mentions the newer RC, with a test.
-- [ ] `tests/run` passes.
+- [x] A tag argument overrides the channel, with a test.
+- [x] Up to date gives exit 0 and mentions the newer RC, with a test.
+- [x] `tests/run` passes.

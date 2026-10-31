@@ -53,5 +53,8 @@ Paths already ruled out are not here; they are under
 - **The first line shows this machine's version, even with `--root`.** Pointing
   `--root` at another tree still prints what `omarchy-version` says. Only people
   testing the tool use it that way, so it waits for 012.
+- **Installed newer than the target.** Someone who moves from rc to stable has a
+  version past the latest stable. The report treats that as an update, though
+  nothing would be delivered until stable catches up. Waits for a real report.
 - **Evidence in the text report.** Findings carry evidence, but only `--json` (016)
   will show it. 012 could print it, if it doesn't crowd the report.

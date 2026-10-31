@@ -33,6 +33,7 @@ TEXT_SUFFIXES = {"", ".lua", ".sh", ".hook", ".conf", ".toml", ".json", ".qml", 
 QMLLINT = "/usr/lib/qt6/bin/qmllint"
 ATTENTION, NOTE, UNKNOWN = "attention", "note", "unknown"
 DOWNLOAD_ERRORS = (OSError, EOFError, ValueError, zlib.error, tarfile.TarError, http.client.HTTPException)
+VERSION = re.compile(r"(?:\d+:)?v?(\d+)\.(\d+)\.(\d+)(?:-?rc(\d+))?(?:-\d+)?")
 
 
 @dataclass
@@ -69,6 +70,10 @@ class Finding:
 
 class UnusableTree(Exception):
     """A tree that can't be compared: going on would report nothing to worry about."""
+
+
+class NoRelease(Exception):
+    """A channel with no tagged release to follow."""
 
 
 def blank_comments(text):
@@ -442,16 +447,62 @@ def compare_plugins(current, target, home):
     return findings
 
 
-def latest_tag():
-    url = f"https://api.github.com/repos/{REPO}/releases?per_page=1"
-    with urllib.request.urlopen(url, timeout=30) as response:
-        try:
-            tag = json.load(response)[0]["tag_name"]
-        except (ValueError, LookupError, TypeError):
-            tag = None
+def version_key(text):
+    """A sort key for a tag or a package version, or None for anything else.
+
+    The tag v4.5.0-rc2 is the package 4.5.0rc2-1, and a pkgrel is the same release.
+    """
+    found = VERSION.fullmatch(text)
+    if not found:
+        return None
+    major, minor, patch, rc = found.groups()
+    return int(major), int(minor), int(patch), float("inf") if rc is None else int(rc)
+
+
+def is_prerelease(name):
+    key = version_key(name)
+    return None if key is None else key[3] != float("inf")
+
+
+def api(path):
+    with urllib.request.urlopen(f"https://api.github.com/repos/{REPO}/{path}", timeout=30) as response:
+        return json.load(response)
+
+
+def stable_tag():
+    release = api("releases/latest")
+    tag = release.get("tag_name") if isinstance(release, dict) else None
     if not tag or not isinstance(tag, str):
         raise ValueError("the releases API gave no usable release")
     return tag
+
+
+def release_tags():
+    """Every release tag, newest version first. The API sorts by date, so a stable patch can top an RC."""
+    releases = api("releases?per_page=100")
+    tags = [r.get("tag_name") for r in releases if isinstance(r, dict)] if isinstance(releases, list) else []
+    return sorted((t for t in tags if isinstance(t, str) and version_key(t)), key=version_key, reverse=True)
+
+
+def channel_tag(channel):
+    if channel == "stable":
+        return stable_tag()
+    if channel != "rc":
+        raise NoRelease(
+            f"the channel is {channel}, and only stable and rc have tagged releases. "
+            "Pass a tag, such as omaupdateimpact v4.5.0."
+        )
+    tags = release_tags()
+    if not tags:
+        raise ValueError("the releases API gave no usable release")
+    return tags[0]
+
+
+def newer_releases(version):
+    """The newest release past this version, and the newest stable one if that is an RC."""
+    newer = [tag for tag in release_tags() if version_key(tag) > version_key(version)]
+    stable = [tag for tag in newer if not is_prerelease(tag)]
+    return list(dict.fromkeys(newer[:1] + stable[:1]))
 
 
 def fetch_release(tag, cache):
@@ -476,12 +527,36 @@ def fetch_release(tag, cache):
     return root
 
 
-def installed_version():
+def ask(command):
+    """What an Omarchy command on PATH prints, or "unknown"."""
     try:
-        output = subprocess.run(["omarchy-version"], capture_output=True, text=True, check=True).stdout
+        output = subprocess.run([command], capture_output=True, text=True, check=True).stdout
     except (OSError, subprocess.CalledProcessError):
         return "unknown"
     return output.strip() or "unknown"
+
+
+def installed_channel(version):
+    # omarchy-version-channel reads the mirrors, and a linked checkout leaves those as they were.
+    return "dev" if version.startswith("dev") else ask("omarchy-version-channel")
+
+
+def described(name, channel):
+    kind = {True: "prerelease", False: "not a prerelease", None: "can't tell if it's a prerelease"}
+    return f"{name} ({channel} channel, {kind[is_prerelease(name)]})"
+
+
+def report_no_update(version, tag, channel):
+    print(f"Omarchy {version} is already {described(tag, channel)}. There is no update.")
+    try:
+        newer = newer_releases(version)
+    except DOWNLOAD_ERRORS:
+        print("Couldn't check for newer releases on other channels.")
+        return 0
+    for release in newer:
+        name = "rc" if is_prerelease(release) else "stable"
+        print(f"Newer on the {name} channel: {release}. To check it: omaupdateimpact {release}")
+    return 0
 
 
 def print_section(title, findings, level):
@@ -502,13 +577,21 @@ def fail(what, error, debug):
 
 def run(options):
     options.home = options.home or Path.home()
+    # omarchy-version only knows this machine, so it can't speak for a tree given by hand.
+    own_tree = options.root is None
+    options.root = options.root or Path(os.environ.get("OMARCHY_PATH") or INSTALLED)
     check_tree(options.root, "installed")
+    version = ask("omarchy-version")
+    channel = options.channel or installed_channel(version)
     target = options.target
     tag = options.tag
     if target is None:
         cache = Path(os.environ.get("XDG_CACHE_HOME", options.home / ".cache")) / "omaupdateimpact"
         try:
-            tag = tag or latest_tag()
+            tag = tag or channel_tag(channel)
+            installed, wanted = version_key(version), version_key(tag)
+            if own_tree and installed and installed == wanted:
+                return report_no_update(version, tag, channel)
             target = fetch_release(tag, cache)
         except DOWNLOAD_ERRORS as error:
             return fail("Couldn't download the release", error, options.debug)
@@ -526,7 +609,7 @@ def run(options):
         *compare_plugins(options.root, target, options.home),
     ]
 
-    print(f"Omarchy {installed_version()} -> {tag or target.name}. Nothing was changed.")
+    print(f"Omarchy {version} -> {described(tag or target.name, channel)}. Nothing was changed.")
     print_section("Needs attention", findings, ATTENTION)
     print_section("Worth knowing", findings, NOTE)
     print_section("Limits of this check", findings, UNKNOWN)
@@ -541,12 +624,12 @@ def run(options):
 
 def main():
     parser = argparse.ArgumentParser(description="Check your Omarchy setup against a release.")
-    parser.add_argument("tag", nargs="?", help="release tag (default: the newest, including RCs)")
+    parser.add_argument("tag", nargs="?", help="release tag (default: what your channel would deliver)")
+    parser.add_argument("--channel", help="follow this channel (default: omarchy-version-channel)")
     parser.add_argument("--target", type=Path, help="use an unpacked release instead of downloading")
     parser.add_argument(
         "--root",
         type=Path,
-        default=Path(os.environ.get("OMARCHY_PATH") or INSTALLED),
         help="the installed tree (default: $OMARCHY_PATH, then /usr/share/omarchy)",
     )
     parser.add_argument("--home", type=Path)
@@ -556,6 +639,8 @@ def main():
         return run(options)
     except UnusableTree as error:
         return fail("Can't compare", error, options.debug)
+    except NoRelease as error:
+        return fail("Can't pick a release", error, options.debug)
     except Exception as error:
         return fail(f"Unexpected {type(error).__name__}", error, options.debug)
 

@@ -4,9 +4,14 @@ Check your Omarchy setup against a release before you update. It tells you what
 the update would do to *your* machine, not what changed in general.
 
 ```
-omaupdateimpact              # the newest release, including release candidates
-omaupdateimpact v4.5.0-rc2   # a specific release
+omaupdateimpact               # the release your update channel would deliver
+omaupdateimpact --channel rc  # the release another channel would deliver
+omaupdateimpact v4.5.0-rc2    # a specific release
 ```
+
+If you already have that release, it says so, names any newer release on another
+channel, and exits 0. The `edge` and `dev` channels have no tagged releases, so
+those need a tag.
 
 It changes nothing on your system, and nothing from the release is ever run:
 the release is downloaded to `~/.cache/omaupdateimpact` and read as text.

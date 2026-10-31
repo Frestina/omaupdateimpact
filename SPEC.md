@@ -83,11 +83,27 @@ An update delivers what the user's channel delivers, so that is the default.
 | --- | --- |
 | stable | the latest non-prerelease release |
 | rc | the newest release, prereleases included |
-| edge, dev | no tag exists: exit 2 and ask for an explicit tag |
+| edge, dev, anything else | no tag exists: exit 2 and ask for an explicit tag |
 
-The channel comes from `omarchy-version-channel`. `--channel` overrides it and a
-tag argument overrides both. If the target is what's installed, it says so,
-names any newer release on another channel, and exits 0: there is no update.
+The channel comes from `omarchy-version-channel`. It is looked up on `PATH`, like
+`omarchy-version`. It prints two words when the mirror and the packages disagree,
+and that counts as anything else. It can't see a linked checkout, so an installed
+version of `dev` means the dev channel. `--channel` overrides it and a tag
+argument overrides both.
+
+"Newest" goes by version, not date, because the API sorts by date and a stable
+patch can come after an RC. Whether a release is a prerelease goes by its tag.
+
+If the target is what's installed, it says so, names any newer release on another
+channel, and exits 0: there is no update. Nothing is downloaded. If the list of
+releases can't be fetched, it says so and still exits 0.
+
+The tag `v4.5.0-rc2` is the package `4.5.0rc2-1`. The epoch and the pkgrel don't
+make a different release, so `4.0.6-2` and `v4.0.6` are the same version. A dev or
+unknown version matches nothing, so the check runs.
+
+With `--root` or `--target` the trees are always compared. `omarchy-version` only
+knows this machine, so it can't say a tree given by hand has no update.
 
 ### The two trees
 
