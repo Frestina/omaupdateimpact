@@ -38,7 +38,7 @@ def titles(findings, level):
 
 class ParseLua(unittest.TestCase):
     def test_reads_a_bind(self):
-        bind = parse('o.bind("SUPER + W", "Close", "close-it")').binds["SUPER + W"]
+        bind = parse('o.bind("SUPER + W", "Close", "close-it")').binds["SUPER + W"][0]
         self.assertEqual((bind.description, bind.command), ("Close", "close-it"))
 
     def test_key_order_and_case_do_not_matter(self):
@@ -47,7 +47,7 @@ class ParseLua(unittest.TestCase):
     def test_skips_comments_but_not_strings(self):
         parsed = parse('-- o.bind("SUPER + A", "x", "y")\no.bind("SUPER + B", "a -- b", "y")')
         self.assertEqual(list(parsed.binds), ["SUPER + B"])
-        self.assertEqual(parsed.binds["SUPER + B"].description, "a -- b")
+        self.assertEqual(parsed.binds["SUPER + B"][0].description, "a -- b")
 
     def test_skips_block_comments(self):
         self.assertEqual(parse('--[[ o.bind("SUPER + A", "x", "y") ]]').binds, {})
@@ -56,7 +56,7 @@ class ParseLua(unittest.TestCase):
         self.assertIn("SUPER + A", parse('o.bind(\n  "SUPER + A",\n  "x",\n  fn(1, 2)\n)').binds)
 
     def test_expands_toggles(self):
-        bind = parse('o.bind_toggle("SUPER + N", "Night", "nightlight")').binds["SUPER + N"]
+        bind = parse('o.bind_toggle("SUPER + N", "Night", "nightlight")').binds["SUPER + N"][0]
         self.assertEqual(bind.command, "omarchy-toggle-nightlight")
 
     def test_rebind_counts_as_unbind_and_bind(self):
@@ -65,12 +65,176 @@ class ParseLua(unittest.TestCase):
         self.assertIn("SUPER + A", parsed.binds)
 
     def test_reads_description_from_hl_bind(self):
-        bind = parse('hl.bind("SUPER + A", act(), { description = "Do it" })').binds["SUPER + A"]
+        bind = parse('hl.bind("SUPER + A", act(), { description = "Do it" })').binds["SUPER + A"][0]
         self.assertEqual(bind.description, "Do it")
 
     def test_counts_computed_keys(self):
         parsed = parse('o.bind("SUPER + " .. n, "x", "y")')
         self.assertEqual((parsed.binds, len(parsed.unread)), ({}, 1))
+
+    def test_keeps_the_expression_of_a_computed_key(self):
+        self.assertEqual(parse('o.bind("SUPER + " .. n, "x", "y")').unread[0].expression, '"SUPER + "..n')
+
+    def test_spacing_is_not_part_of_a_computed_key(self):
+        one, other = parse('o.bind( "SUPER + "  ..\n n, "x", "y")'), parse('o.bind("SUPER + "..n, "x", "y")')
+        self.assertEqual(one.unread[0].expression, other.unread[0].expression)
+
+    def test_a_computed_unbind_is_not_the_same_as_a_computed_bind(self):
+        one, other = parse('hl.unbind("SUPER + " .. n)'), parse('o.bind("SUPER + " .. n, "x", "y")')
+        self.assertNotEqual(one.unread[0].expression, other.unread[0].expression)
+
+    def test_reads_bind_hold(self):
+        binds = parse('o.bind_hold("F9", "Start", "rec start", "Stop", "rec stop")').binds["F9"]
+        self.assertEqual(
+            [(bind.description, bind.command) for bind in binds], [("Start", "rec start"), ("Stop", "rec stop")]
+        )
+
+    def test_a_computed_key_in_bind_hold_counts_once(self):
+        parsed = parse('o.bind_hold("F" .. n, "Start", "a", "Stop", "b")')
+        self.assertEqual((parsed.binds, len(parsed.unread)), ({}, 1))
+
+    def test_press_and_release_on_one_chord_survive(self):
+        parsed = parse('o.bind("F9", "Start", "a")\no.bind("F9", "Stop", "b", { release = true })')
+        self.assertEqual([bind.description for bind in parsed.binds["F9"]], ["Start", "Stop"])
+
+    def test_an_unbind_removes_the_binds_before_it(self):
+        parsed = parse('o.bind("SUPER + A", "x", "y")\nhl.unbind("SUPER + A")')
+        self.assertEqual(parsed.binds, {})
+
+    def test_an_unbind_leaves_the_binds_after_it(self):
+        self.assertIn("SUPER + A", parse('hl.unbind("SUPER + A")\no.bind("SUPER + A", "x", "y")').binds)
+
+    def test_an_unbind_removes_press_and_release_together(self):
+        self.assertEqual(parse('o.bind_hold("F9", "a", "b", "c", "d")\nhl.unbind("F9")').binds, {})
+
+    def test_a_rebind_replaces_what_was_there(self):
+        parsed = parse('o.bind("SUPER + A", "x", "y")\no.rebind("SUPER + A", "New", "z")')
+        self.assertEqual([bind.description for bind in parsed.binds["SUPER + A"]], ["New"])
+
+    def test_an_unbind_ignores_spaces_and_case(self):
+        self.assertEqual(parse('o.bind("ALT + Alt_R", "x", "y")\nhl.unbind("alt+ALT_R")').binds, {})
+
+    def test_an_unbind_goes_by_the_text_and_not_the_chord(self):
+        # Hyprland's removeKeybind compares the text the bind was written with.
+        for keys in ("CONTROL + A", "SHIFT + SUPER + A"):
+            with self.subTest(keys):
+                chord = impact.normalize_keys(keys)
+                bound = {"CONTROL + A": "CTRL + A", "SHIFT + SUPER + A": "SUPER + SHIFT + A"}[keys]
+                self.assertIn(chord, parse(f'o.bind("{bound}", "x", "y")\nhl.unbind("{keys}")').binds)
+
+    def test_unbinding_all_removes_every_bind_so_far(self):
+        parsed = parse('o.bind("SUPER + A", "x", "y")\nhl.unbind("all")\no.bind("SUPER + B", "x", "y")')
+        self.assertEqual(list(parsed.binds), ["SUPER + B"])
+
+    def test_every_modifier_spelling_is_the_same_key(self):
+        for spelled, chord in (
+            ("CONTROL + A", "CTRL + A"),
+            ("MOD1 + A", "ALT + A"),
+            ("WIN + A", "SUPER + A"),
+            ("LOGO + A", "SUPER + A"),
+            ("MOD4 + A", "SUPER + A"),
+            ("META + A", "SUPER + A"),
+        ):
+            with self.subTest(spelled):
+                self.assertEqual(impact.normalize_keys(spelled), chord)
+
+    def test_every_modifier_sorts_ahead_of_the_key(self):
+        self.assertEqual(impact.normalize_keys("MOD5 + CAPS + MOD3 + MOD2 + A"), "CAPS + MOD2 + MOD3 + MOD5 + A")
+
+    def test_a_key_named_like_a_modifier_is_still_a_key(self):
+        self.assertEqual(impact.normalize_keys("ALT + Alt_R"), "ALT + ALT_R")
+
+    def test_reads_a_table_command_as_one_value(self):
+        bind = parse('o.bind("SUPER + A", "x", { webapp = "https://a.example/?b,c", focus = true })').binds[
+            "SUPER + A"
+        ][0]
+        self.assertEqual(bind.command, '{webapp="https://a.example/?b,c",focus=true}')
+
+    def test_the_layout_of_a_table_command_does_not_matter(self):
+        one = parse('o.bind("SUPER + A", "x", { webapp = "https://a.example" })').binds["SUPER + A"][0]
+        other = parse('o.bind("SUPER + A", "x", {\n  webapp="https://a.example",\n})').binds["SUPER + A"][0]
+        self.assertEqual(one.command, other.command)
+
+    def test_a_string_in_a_table_keeps_its_spaces(self):
+        bind = parse('o.bind("SUPER + A", "x", { tui = "a  b" })').binds["SUPER + A"][0]
+        self.assertIn('"a  b"', bind.command)
+
+    def test_reads_long_strings_as_literals(self):
+        for text, command in (
+            ("[[run it]]", "run it"),
+            ("[[\nrun it]]", "run it"),
+            ("""[[say "it's, fine"]]""", """say "it's, fine\""""),
+            ("[==[a ]] b]==]", "a ]] b"),
+        ):
+            with self.subTest(text):
+                bind = parse(f'o.bind("SUPER + A", "x", {text})').binds["SUPER + A"][0]
+                self.assertEqual(bind.command, command)
+
+    def test_reads_a_long_string_key(self):
+        self.assertIn("SUPER + A", parse('o.bind([[SUPER + A]], "x", "y")').binds)
+
+    def test_an_unclosed_long_string_is_not_a_literal(self):
+        self.assertIsNone(impact.literal("[[run it"))
+
+    def test_skips_block_comments_with_levels(self):
+        self.assertEqual(parse('--[==[ ]] o.bind("SUPER + A", "x", "y") ]==]').binds, {})
+
+    def test_a_long_string_may_hold_a_comment_marker(self):
+        bind = parse('o.bind("SUPER + A", "x", [==[a -- b]==])').binds["SUPER + A"][0]
+        self.assertEqual(bind.command, "a -- b")
+
+
+class BindingHelpers(unittest.TestCase):
+    def helpers(self, text):
+        parsed = impact.Parsed()
+        impact.parse_helpers(text, parsed, "default/hypr/helpers.lua")
+        return parsed.helpers
+
+    def test_names_a_helper_with_no_rule(self):
+        self.assertEqual(
+            self.helpers("function o.bind_foo(keys)\nend"), {"o.bind_foo": "default/hypr/helpers.lua"}
+        )
+
+    def test_finds_other_ways_to_define_a_helper(self):
+        for text in (
+            "o.bind_foo = function(keys) end",
+            "o.bind_foo = local_bind",
+            "function o:bind_foo(keys) end",
+            "function o.keys.bind_foo(keys) end",
+            "function o.keyBind(keys) end",
+        ):
+            with self.subTest(text):
+                self.assertEqual(len(self.helpers(text)), 1)
+
+    def test_every_helper_in_a_release_has_a_rule(self):
+        text = """
+        function o.bind(keys) end
+        function o.rebind(keys) end
+        function o.bind_toggle(keys) end
+        function o.bind_hold(keys) end
+        function o.preinstalled_bindings_enabled() end
+        function o.launch(command) end
+        """
+        self.assertEqual(self.helpers(text), {})
+
+    def test_tables_of_binds_are_not_helpers(self):
+        self.assertEqual(self.helpers("o.bind_commands = {}\no.bind_expressions = {}\no.bind_commands[f] = c"), {})
+
+    def test_a_helper_in_a_comment_is_not_a_helper(self):
+        self.assertEqual(self.helpers("-- function o.bind_foo(keys)"), {})
+
+    def test_an_unknown_helper_is_unknown_and_named(self):
+        parsed = impact.Parsed()
+        impact.parse_helpers("function o.bind_foo(keys) end", parsed, "default/hypr/helpers.lua")
+        findings = impact.compare_bindings(impact.Parsed(), parsed, impact.Parsed())
+        self.assertIn("o.bind_foo", titles(findings, "unknown")[0])
+        self.assertEqual(findings[0].evidence, ["default/hypr/helpers.lua"])
+
+    def test_a_helper_in_both_versions_is_one_finding(self):
+        current, target = impact.Parsed(), impact.Parsed()
+        impact.parse_helpers("function o.bind_foo(keys) end", current, "default/hypr/helpers.lua")
+        impact.parse_helpers("function o.bind_foo(keys) end", target, "default/hypr/helpers.lua")
+        self.assertEqual(len(impact.compare_bindings(current, target, impact.Parsed())), 1)
 
 
 class CompareBindings(unittest.TestCase):
@@ -87,10 +251,112 @@ class CompareBindings(unittest.TestCase):
         findings = impact.compare_bindings(impact.Parsed(), target, user)
         self.assertEqual(findings[0].evidence, ["default/hypr/tiling.lua", "~/.config/hypr/bindings.lua"])
 
-    def test_computed_keys_are_a_note(self):
-        findings = compare('o.bind("SUPER + " .. n, "x", "y")', "")
+    def test_an_unchanged_computed_key_is_a_note(self):
+        computed = 'o.bind("SUPER + " .. n, "x", "y")'
+        findings = compare(computed, computed)
         self.assertEqual(titles(findings, "unknown"), [])
         self.assertIn("1 key bindings", titles(findings, "note")[0])
+
+    def test_a_computed_call_in_both_versions_counts_once(self):
+        computed = 'o.bind("SUPER + " .. n, "x", "y")\nhl.bind(key:upper(), act(), {})'
+        self.assertIn("2 key bindings", titles(compare(computed, computed), "note")[0])
+
+    def test_a_computed_key_may_change_file_and_action(self):
+        current, target = impact.Parsed(), impact.Parsed()
+        impact.parse_lua('o.bind("SUPER + " .. n, "x", "y")', current, "default/hypr/old.lua")
+        impact.parse_lua('o.bind("SUPER + " .. n, "z", "w")', target, "default/hypr/new.lua")
+        findings = impact.compare_bindings(current, target, impact.Parsed())
+        self.assertEqual(titles(findings, "unknown"), [])
+        self.assertEqual(findings[0].evidence, ["default/hypr/new.lua", "default/hypr/old.lua"])
+
+    def test_a_changed_computed_key_is_unknown(self):
+        findings = compare('o.bind("SUPER + " .. n, "x", "y")', 'o.bind("SUPER + ALT + " .. n, "x", "y")')
+        self.assertEqual(len(titles(findings, "unknown")), 2)
+        self.assertEqual(titles(findings, "note"), [])
+        self.assertIn('"SUPER + ALT + "..n', titles(findings, "unknown")[1])
+
+    def test_a_new_computed_key_is_unknown(self):
+        self.assertEqual(len(titles(compare("", 'o.bind("SUPER + " .. n, "x", "y")'), "unknown")), 1)
+
+    def test_a_second_call_with_the_same_key_is_unknown(self):
+        computed = 'o.bind("SUPER + " .. n, "x", "y")\n'
+        findings = compare(computed, computed * 2)
+        self.assertEqual(len(titles(findings, "unknown")), 1)
+        self.assertIn("1 key bindings", titles(findings, "note")[0])
+
+    def test_a_computed_key_of_the_users_is_unknown(self):
+        findings = compare("", "", 'o.bind("SUPER + " .. n, "x", "y")')
+        self.assertIn('"SUPER + "..n', titles(findings, "unknown")[0])
+
+    def test_a_computed_unbind_of_the_users_is_unknown(self):
+        self.assertEqual(len(titles(compare("", "", 'hl.unbind("SUPER + " .. n)'), "unknown")), 1)
+
+    def test_a_computed_key_of_the_users_names_its_file(self):
+        user = impact.Parsed()
+        impact.parse_lua('o.bind("SUPER + " .. n, "x", "y")', user, "~/.config/hypr/bindings.lua")
+        finding = impact.compare_bindings(impact.Parsed(), impact.Parsed(), user)[0]
+        self.assertEqual(finding.evidence, ["~/.config/hypr/bindings.lua"])
+
+    def test_a_press_and_release_moved_to_bind_hold_has_not_gone(self):
+        current = """
+        o.bind("F9", "Start dictation (push-to-talk)", "voxtype record start")
+        o.bind("F9", "Stop dictation (push-to-talk)", "voxtype record stop", { release = true })
+        """
+        target = """
+        o.bind_hold("F9", "Start dictation (push-to-talk)", "omarchy-dictation start",
+          "Stop dictation (push-to-talk)", "omarchy-dictation stop")
+        """
+        self.assertEqual(compare(current, target), [])
+
+    def test_a_clash_with_a_modifier_key(self):
+        target = 'o.bind_hold("ALT + Alt_R", "Start", "a", "Stop", "b", { ignore_mods = true })'
+        findings = compare("", target, 'o.bind("ALT + Alt_R", "Mine", "m")')
+        self.assertIn("ALT + ALT_R", titles(findings, "attention")[0])
+        self.assertIn("Start / Stop", titles(findings, "attention")[0])
+        self.assertEqual(findings[0].fix, 'Add hl.unbind("ALT + Alt_R") or choose another key.')
+
+    def test_a_clash_across_modifier_spellings(self):
+        findings = compare("", 'o.bind("CONTROL + A", "New", "n")', 'o.bind("CTRL + A", "Mine", "m")')
+        self.assertEqual(len(titles(findings, "attention")), 1)
+
+    def test_a_fix_spells_the_keys_the_way_the_default_does(self):
+        findings = compare("", 'o.bind("CONTROL + A", "New", "n")', 'o.bind("CTRL + A", "Mine", "m")')
+        self.assertEqual(findings[0].fix, 'Add hl.unbind("CONTROL + A") or choose another key.')
+
+    def test_a_fix_names_each_way_a_default_is_spelled(self):
+        target = 'o.bind("CONTROL + A", "New", "n")\no.bind("CTRL + A", "Other", "o")'
+        findings = compare("", target, 'o.bind("CTRL + A", "Mine", "m")')
+        self.assertIn('hl.unbind("CONTROL + A") and hl.unbind("CTRL + A")', findings[0].fix)
+
+    def test_an_unbind_spelled_differently_does_not_hide_a_clash(self):
+        user = 'hl.unbind("CTRL + A")\no.bind("CTRL + A", "Mine", "m")'
+        findings = compare("", 'o.bind("CONTROL + A", "New", "n")', user)
+        self.assertEqual(len(titles(findings, "attention")), 1)
+
+    def test_an_unbind_of_one_spelling_leaves_the_other_clashing(self):
+        target = 'o.bind("CONTROL + A", "New", "n")\no.bind("CTRL + A", "Other", "o")'
+        user = 'hl.unbind("CTRL + A")\no.bind("CTRL + A", "Mine", "m")'
+        self.assertEqual(len(titles(compare("", target, user), "attention")), 1)
+
+    def test_a_shortcut_that_was_never_turned_off_does_not_come_back(self):
+        findings = compare(
+            'o.bind("CTRL + Q", "Calc", "c")', 'o.bind("CTRL + W", "Calc", "c")', 'hl.unbind("CONTROL + Q")'
+        )
+        self.assertEqual(titles(findings, "attention"), [])
+
+    def test_a_press_alone_is_not_a_press_and_release_pair(self):
+        current = 'o.bind_hold("F9", "Start", "a", "Stop", "b")'
+        findings = compare(current, 'o.bind("F9", "Start", "a")')
+        self.assertIn('F9 is now "Start", it was "Start / Stop".', titles(findings, "note"))
+
+    def test_a_default_that_unbinds_its_own_key_is_gone(self):
+        findings = compare('o.bind("SUPER + Q", "Calc", "c")', 'o.bind("SUPER + Q", "Calc", "c")\nhl.unbind("SUPER + Q")')
+        self.assertIn('Default shortcuts removed: SUPER + Q ("Calc").', titles(findings, "note"))
+
+    def test_a_default_rebind_is_a_new_action(self):
+        target = 'o.bind("SUPER + Q", "Calc", "c")\no.rebind("SUPER + Q", "Quit", "q")'
+        findings = compare('o.bind("SUPER + Q", "Calc", "c")', target)
+        self.assertIn('SUPER + Q is now "Quit", it was "Calc".', titles(findings, "note"))
 
     def test_no_clash_when_the_user_unbinds_first(self):
         user = 'hl.unbind("SUPER + M")\no.bind("SUPER + M", "Mail", "mail")'
@@ -420,6 +686,110 @@ class Program(ProgramCase):
             code, _, err = self.check("--debug")
         self.assertEqual(code, 2)
         self.assertIn("Traceback", err)
+
+
+class Bindings(ProgramCase):
+    def setUp(self):
+        super().setUp()
+        (self.home / ".config/hypr").mkdir(parents=True)
+        self.bindings = self.home / ".config/hypr/bindings.lua"
+
+    def assert_unreadable(self):
+        code, out, _ = self.check()
+        self.assertEqual(code, 3)
+        self.assertIn("bindings.lua couldn't be read", " ".join(out.split()))
+        self.assertIn("These checks didn't run: bindings.", out)
+
+    def test_no_bindings_file_is_fine(self):
+        self.assertEqual(self.check()[0], 0)
+
+    def test_a_broken_link_is_unknown(self):
+        self.bindings.symlink_to(self.base / "missing.lua")
+        self.assert_unreadable()
+
+    def test_a_folder_is_unknown(self):
+        self.bindings.mkdir()
+        self.assert_unreadable()
+
+    def test_a_pipe_is_unknown_and_not_read(self):
+        os.mkfifo(self.bindings)
+        self.assert_unreadable()
+
+    @unittest.skipIf(os.geteuid() == 0, "root reads everything")
+    def test_a_denied_file_is_unknown(self):
+        self.bindings.touch(mode=0)
+        self.assert_unreadable()
+
+    @unittest.skipIf(os.geteuid() == 0, "root reads everything")
+    def test_a_denied_folder_is_unknown(self):
+        self.bindings.touch()
+        self.bindings.parent.chmod(0)
+        self.addCleanup(self.bindings.parent.chmod, 0o755)
+        self.assert_unreadable()
+
+    def test_a_link_to_a_file_is_read(self):
+        real = self.base / "real.lua"
+        real.write_text('o.bind("SUPER + M", "Mail", "mail")')
+        self.bindings.symlink_to(real)
+        (self.base / "target/default/hypr/bindings.lua").write_text('o.bind("SUPER + M", "Minimize", "min")')
+        self.assertEqual(self.check()[0], 1)
+
+    def test_a_changed_computed_key_exits_3(self):
+        (self.base / "target/default/hypr/keys.lua").write_text('o.bind("SUPER + " .. key, "x", "y")')
+        code, out, _ = self.check()
+        self.assertEqual(code, 3)
+        self.assertIn("It could land on one of your keys.", " ".join(out.split()))
+
+    def test_an_unchanged_computed_key_exits_0(self):
+        for tree in ("current", "target"):
+            (self.base / tree / "default/hypr/keys.lua").write_text('o.bind("SUPER + " .. key, "x", "y")')
+        code, out, _ = self.check()
+        self.assertEqual(code, 0)
+        self.assertIn("1 key bindings use computed keys", out)
+
+    def test_a_computed_key_of_the_users_exits_3(self):
+        self.bindings.write_text('o.bind("SUPER + " .. key, "x", "y")')
+        self.assertEqual(self.check()[0], 3)
+
+    def test_an_unknown_helper_exits_3(self):
+        (self.base / "target/default/hypr/helpers.lua").write_text("function o.bind_foo(keys) end")
+        code, out, _ = self.check()
+        self.assertEqual(code, 3)
+        self.assertIn("o.bind_foo", out)
+
+    def test_a_helper_outside_helpers_lua_is_found(self):
+        (self.base / "target/default/hypr/keys.lua").write_text("function o.bind_foo(keys) end")
+        self.assertEqual(self.check()[0], 3)
+
+    def test_a_clash_still_exits_1_beside_an_unknown(self):
+        self.bindings.write_text('o.bind("SUPER + M", "Mail", "mail")\no.bind("SUPER + " .. key, "x", "y")')
+        (self.base / "target/default/hypr/bindings.lua").write_text('o.bind("SUPER + M", "Minimize", "min")')
+        self.assertEqual(self.check()[0], 1)
+
+    def test_dictation_from_a_release_candidate_has_not_gone(self):
+        (self.base / "current/default/hypr/voxtype.lua").write_text(
+            """
+            o.bind("SUPER + CTRL + X", "Toggle dictation", "voxtype record toggle")
+            o.bind("F9", "Start dictation (push-to-talk)", "voxtype record start")
+            o.bind("F9", "Stop dictation (push-to-talk)", "voxtype record stop", { release = true })
+            """
+        )
+        (self.base / "target/default/hypr/dictation.lua").write_text(
+            """
+            if backend and not o.cmd_missing(backend) then
+              o.bind("SUPER + CTRL + X", "Toggle dictation", "omarchy-dictation toggle")
+              o.bind_hold("F9", "Start dictation (push-to-talk)", "omarchy-dictation start", "Stop dictation (push-to-talk)", "omarchy-dictation stop")
+              -- A modifier's mask changes between its press and release.
+              o.bind_hold("ALT + Alt_R", "Start dictation (push-to-talk)", "omarchy-dictation start", "Stop dictation (push-to-talk)", "omarchy-dictation stop", { ignore_mods = true })
+            end
+            """
+        )
+        self.bindings.write_text('o.bind("ALT + Alt_R", "Mine", "mine")')
+        code, out, _ = self.check()
+        out = " ".join(out.split())
+        self.assertEqual(code, 1)
+        self.assertNotIn("removed", out)
+        self.assertIn("ALT + ALT_R: your", out)
 
 
 class Trees(ProgramCase):

@@ -45,13 +45,13 @@ and release, and the dict keeps only the last.
 
 ## Done when
 
-- [ ] On a fixture copied from v4.5.0-rc2, F9 is not reported as removed.
-- [ ] A clash with `ALT + Alt_R` is found, with a test.
-- [ ] Press and release on one chord survive parsing, with a test.
-- [ ] `CONTROL + A` clashes with `CTRL + A`, with a test.
-- [ ] An unknown `o.bind_foo` helper produces an `unknown` finding, with a test.
-- [ ] A changed computed key gives `unknown` and exit 3, and an unchanged one can
+- [x] On a fixture copied from v4.5.0-rc2, F9 is not reported as removed.
+- [x] A clash with `ALT + Alt_R` is found, with a test.
+- [x] Press and release on one chord survive parsing, with a test.
+- [x] `CONTROL + A` clashes with `CTRL + A`, with a test.
+- [x] An unknown `o.bind_foo` helper produces an `unknown` finding, with a test.
+- [x] A changed computed key gives `unknown` and exit 3, and an unchanged one can
       still exit 0, with tests.
-- [ ] A computed key in the user's bindings gives `unknown`, with a test.
-- [ ] A broken `bindings.lua` symlink gives `unknown`, with a test.
-- [ ] `tests/run` passes.
+- [x] A computed key in the user's bindings gives `unknown`, with a test.
+- [x] A broken `bindings.lua` symlink gives `unknown`, with a test.
+- [x] `tests/run` passes.

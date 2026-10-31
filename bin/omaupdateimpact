@@ -28,8 +28,13 @@ from pathlib import Path
 REPO = "omacom/omarchy"
 INSTALLED = "/usr/share/omarchy"
 TREE_PARTS = ["bin", "default/hypr", "migrations", "shell"]
-MODIFIERS = ["SUPER", "CTRL", "SHIFT", "ALT"]
-BIND_CALLS = ["o.bind_toggle", "o.rebind", "o.bind", "hl.bind", "hl.unbind"]
+MODIFIERS = ["SUPER", "CTRL", "SHIFT", "ALT", "CAPS", "MOD2", "MOD3", "MOD5"]
+MODIFIER_SPELLINGS = {"CONTROL": "CTRL", "MOD1": "ALT", "WIN": "SUPER", "LOGO": "SUPER", "MOD4": "SUPER", "META": "SUPER"}
+BIND_CALLS = ["o.bind_toggle", "o.bind_hold", "o.rebind", "o.bind", "hl.bind", "hl.unbind"]
+# o.preinstalled_bindings_enabled only says whether a file's binds apply.
+HELPERS_READ = {"o.bind_toggle", "o.bind_hold", "o.rebind", "o.bind", "o.preinstalled_bindings_enabled"}
+HELPER = re.compile(r"(?<![\w.])(?:function\s+(o[.:][\w.:]*[Bb]ind\w*)|(o\.[\w.]*[Bb]ind\w*)\s*=\s*[A-Za-z_])")
+LONG_STRING = re.compile(r"\[(=*)\[")
 TEXT_SUFFIXES = {"", ".lua", ".sh", ".hook", ".conf", ".toml", ".json", ".qml", ".js", ".py"}
 QMLLINT = "/usr/lib/qt6/bin/qmllint"
 ATTENTION, NOTE, UNKNOWN = "attention", "note", "unknown"
@@ -45,6 +50,7 @@ class Bind:
     description: str
     command: str
     source: str = ""
+    keys: str = ""
 
     def same_action(self, other):
         if self.command == other.command:
@@ -53,10 +59,17 @@ class Bind:
 
 
 @dataclass
+class Computed:
+    expression: str
+    source: str
+
+
+@dataclass
 class Parsed:
     binds: dict = field(default_factory=dict)
     unbinds: dict = field(default_factory=dict)
     unread: list = field(default_factory=list)
+    helpers: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -88,26 +101,15 @@ def blank_comments(text):
     """Remove Lua comments, leaving strings alone."""
     out, i = [], 0
     while i < len(text):
-        two = text[i : i + 2]
-        char = text[i]
-        if two == "--":
-            closer = "]]" if text[i + 2 : i + 4] == "[[" else "\n"
-            end = text.find(closer, i)
+        if text[i : i + 2] == "--":
+            end = long_string_end(text, i + 2) or text.find("\n", i)
             if end < 0:
                 break
-            i = end + (2 if closer == "]]" else 0)
-        elif two == "[[":
-            end = text.find("]]", i)
-            end = len(text) if end < 0 else end + 2
-            out.append(text[i:end])
             i = end
-        elif char in "\"'":
-            end = string_end(text, i)
-            out.append(text[i:end])
-            i = end
-        else:
-            out.append(char)
-            i += 1
+            continue
+        end = quoted_end(text, i) or i + 1
+        out.append(text[i:end])
+        i = end
     return "".join(out)
 
 
@@ -118,13 +120,27 @@ def string_end(text, start):
     return min(i + 1, len(text))
 
 
+def long_string_end(text, start):
+    """Where the long string opening at start ends, or None if none opens there."""
+    opened = LONG_STRING.match(text, start)
+    if not opened:
+        return None
+    end = text.find(f"]{opened.group(1)}]", opened.end())
+    return len(text) if end < 0 else end + len(opened.group(0))
+
+
+def quoted_end(text, start):
+    """Where the string of either kind opening at start ends, or None if none opens there."""
+    return string_end(text, start) if text[start] in "\"'" else long_string_end(text, start)
+
+
 def call_arguments(text, start):
     """Split the arguments of the call whose opening bracket is at start."""
     args, depth, current, i = [], 0, [], start
     while i < len(text):
         char = text[i]
-        if char in "\"'":
-            end = string_end(text, i)
+        end = quoted_end(text, i)
+        if end is not None:
             current.append(text[i:end])
             i = end
             continue
@@ -149,16 +165,66 @@ def call_arguments(text, start):
 
 def literal(arg):
     """The value of a plain Lua string, or None for anything computed."""
+    opened = LONG_STRING.match(arg)
+    if opened and long_string_end(arg, 0) == len(arg) and arg.endswith(f"]{opened.group(1)}]"):
+        # Lua drops a newline straight after the opening bracket.
+        return arg[opened.end() : -len(opened.group(0))].removeprefix("\n")
     if len(arg) >= 2 and arg[0] in "\"'" and string_end(arg, 0) == len(arg):
         return arg[1:-1].replace('\\"', '"').replace("\\'", "'")
     return None
 
 
+def tidy(expression):
+    """A Lua expression with its spacing evened out, so a reformat doesn't read as a change."""
+    out, code, i = [], [], 0
+
+    def flush():
+        spaced = " ".join("".join(code).split())
+        out.append(re.sub(r" ?([^\w ]) ?", r"\1", spaced).replace(",}", "}"))
+        code.clear()
+
+    while i < len(expression):
+        end = quoted_end(expression, i)
+        if end is None:
+            code.append(expression[i])
+            i += 1
+        else:
+            flush()
+            out.append(expression[i:end])
+            i = end
+    flush()
+    return "".join(out)
+
+
 def normalize_keys(keys):
     parts = [part.strip().upper() for part in keys.split("+") if part.strip()]
+    parts = [MODIFIER_SPELLINGS.get(part, part) for part in parts]
     mods = [mod for mod in MODIFIERS if mod in parts]
     rest = [part for part in parts if part not in MODIFIERS]
     return " + ".join(mods + rest)
+
+
+def spelling(keys):
+    """What hl.unbind matches: the keys as written, whatever their spaces and case, and not the chord."""
+    return keys.replace(" ", "").lower()
+
+
+def command_text(arg):
+    value = literal(arg)
+    return tidy(arg) if value is None else value
+
+
+def unbind(parsed, keys, source):
+    if keys == "all":
+        parsed.binds.clear()
+        return
+    chord = normalize_keys(keys)
+    parsed.unbinds.setdefault(chord, {})[spelling(keys)] = source
+    left = [bind for bind in parsed.binds.get(chord, []) if spelling(bind.keys) != spelling(keys)]
+    if left:
+        parsed.binds[chord] = left
+    else:
+        parsed.binds.pop(chord, None)
 
 
 def parse_lua(text, parsed, source=""):
@@ -170,26 +236,35 @@ def parse_lua(text, parsed, source=""):
         args = call_arguments(text, match.end() - 1)
         keys = literal(args[0]) if args else None
         if keys is None:
-            parsed.unread.append(source)
+            expression = tidy(args[0]) if args else ""
+            # Turning a key off isn't the same call as binding it, whatever the expression.
+            parsed.unread.append(Computed(f"hl.unbind({expression})" if name == "hl.unbind" else expression, source))
             continue
-        chord = normalize_keys(keys)
+        if name in ("hl.unbind", "o.rebind"):
+            unbind(parsed, keys, source)
         if name == "hl.unbind":
-            parsed.unbinds[chord] = source
             continue
-        if name == "o.rebind":
-            parsed.unbinds[chord] = source
+        args += [""] * (5 - len(args))
         if name == "hl.bind":
-            options = args[2] if len(args) > 2 else ""
-            found = re.search(r"description\s*=\s*([\"'])(.*?)\1", options)
-            description, command = found.group(2) if found else "", args[1] if len(args) > 1 else ""
+            found = re.search(r"description\s*=\s*([\"'])(.*?)\1", args[2])
+            pairs = [(found.group(2) if found else "", args[1])]
+        elif name == "o.bind_hold":
+            pairs = [(literal(args[1]) or "", args[2]), (literal(args[3]) or "", args[4])]
         else:
-            description = (literal(args[1]) or "") if len(args) > 1 else ""
-            command = args[2] if len(args) > 2 else ""
-        value = literal(command)
-        command = value if value is not None else command
-        if name == "o.bind_toggle":
-            command = "omarchy-toggle-" + command
-        parsed.binds[chord] = Bind(description, command, source)
+            pairs = [(literal(args[1]) or "", args[2])]
+        for description, command in pairs:
+            command = command_text(command)
+            if name == "o.bind_toggle":
+                command = "omarchy-toggle-" + command
+            parsed.binds.setdefault(normalize_keys(keys), []).append(Bind(description, command, source, keys))
+
+
+def parse_helpers(text, parsed, source):
+    """Note every binding helper the parser has no rule for."""
+    for match in HELPER.finditer(blank_comments(text)):
+        name = match.group(1) or match.group(2)
+        if name not in HELPERS_READ:
+            parsed.helpers[name] = source
 
 
 def check_tree(root, name):
@@ -201,65 +276,146 @@ def check_tree(root, name):
 def parse_defaults(root, name):
     parsed = Parsed()
     for path in sorted((root / "default/hypr").rglob("*.lua")):
+        text, source = path.read_text(errors="replace"), str(path.relative_to(root))
+        parse_helpers(text, parsed, source)
         if path.name != "helpers.lua":
-            parse_lua(path.read_text(errors="replace"), parsed, str(path.relative_to(root)))
+            parse_lua(text, parsed, source)
     if not parsed.binds:
         raise UnusableTree(f"the {name} tree {root} has no readable default bindings, so the format has moved.")
     return parsed
 
 
-def label(bind):
-    return bind.description or bind.command
+def read_user_bindings(path, shown):
+    """The user's bindings, and a finding if the file is there but can't be read."""
+    parsed = Parsed()
+    try:
+        path.lstat()
+    except (FileNotFoundError, NotADirectoryError):
+        return parsed, []
+    except OSError as error:
+        return parsed, [unreadable_bindings(shown, error.strerror)]
+    # Reading a FIFO would hang, so anything but a file stops here.
+    if not path.is_file():
+        reason = "It's a broken link" if path.is_symlink() and not path.exists() else "It isn't a file"
+        return parsed, [unreadable_bindings(shown, reason)]
+    try:
+        parse_lua(path.read_text(errors="replace"), parsed, shown)
+    except OSError as error:
+        return Parsed(), [unreadable_bindings(shown, error.strerror)]
+    return parsed, []
 
 
-def sources(*binds):
-    return sorted({bind.source for bind in binds})
+def unreadable_bindings(shown, reason):
+    return Finding(
+        "bindings", UNKNOWN, f"{shown} couldn't be read, so your bindings weren't compared.", [shown], detail=f"{reason}."
+    )
+
+
+def label(binds):
+    return " / ".join(dict.fromkeys(bind.description or bind.command for bind in binds))
+
+
+def sources(*groups):
+    return sorted({bind.source for binds in groups for bind in binds})
+
+
+def spelled(binds):
+    """The keys of these binds as written, once for each way of writing them."""
+    return list({spelling(bind.keys): bind.keys for bind in binds}.values())
+
+
+def same_actions(one, other):
+    """Whether two chords do the same. A press alone isn't the same as a press and release pair."""
+    return all(any(a.same_action(b) for b in other) for a in one) and all(
+        any(b.same_action(a) for a in one) for b in other
+    )
+
+
+def compare_computed(current, target, user):
+    before = Counter(computed.expression for computed in current.unread)
+    after = Counter(computed.expression for computed in target.unread)
+    findings = []
+    for expression in sorted(set(before) | set(after)):
+        if before[expression] != after[expression]:
+            evidence = {c.source for c in current.unread + target.unread if c.expression == expression}
+            findings.append(Finding(
+                "bindings",
+                UNKNOWN,
+                f"The computed key {expression} isn't the same in both versions, so it wasn't compared.",
+                sorted(evidence),
+                detail="It could land on one of your keys.",
+            ))
+    for expression in sorted({computed.expression for computed in user.unread}):
+        findings.append(Finding(
+            "bindings",
+            UNKNOWN,
+            f"Your computed key {expression} wasn't compared.",
+            sorted({c.source for c in user.unread if c.expression == expression}),
+            detail="It could clash with a default.",
+        ))
+    same = before & after
+    if same:
+        evidence = {c.source for c in current.unread + target.unread if c.expression in same}
+        findings.append(Finding(
+            "bindings",
+            NOTE,
+            f"{same.total()} key bindings use computed keys and weren't compared.",
+            sorted(evidence),
+        ))
+    return findings
 
 
 def compare_bindings(current, target, user):
     cur, tgt = current.binds, target.binds
-    changed = {c for c in cur if c not in tgt or not cur[c].same_action(tgt[c])}
-    arrived = {c for c in tgt if c not in cur or not cur[c].same_action(tgt[c])}
+    changed = {c for c in cur if c not in tgt or not same_actions(cur[c], tgt[c])}
+    arrived = {c for c in tgt if c not in cur or not same_actions(cur[c], tgt[c])}
     findings = []
+
+    def turned_off(chord, binds):
+        return all(spelling(bind.keys) in user.unbinds.get(chord, {}) for bind in binds)
 
     moved = {}
     for chord in sorted(changed):
         for other in sorted(arrived - {chord}):
-            if cur[chord].same_action(tgt[other]):
+            if same_actions(cur[chord], tgt[other]):
                 moved[chord] = other
                 break
 
     for chord in sorted(user.binds):
         mine = user.binds[chord]
-        if chord in user.unbinds or chord not in tgt or chord not in arrived:
+        if chord not in arrived or turned_off(chord, tgt[chord]):
             continue
+        calls = " and ".join(f'hl.unbind("{keys}")' for keys in spelled(tgt[chord]))
         findings.append(Finding(
             "bindings",
             ATTENTION,
             f'{chord}: your "{label(mine)}" will clash with the new default "{label(tgt[chord])}".',
             sources(mine, tgt[chord]),
             detail="Both will fire.",
-            fix=f'Add hl.unbind("{chord}") or choose another key.',
+            fix=f"Add {calls} or choose another key.",
         ))
 
     for chord in sorted(user.unbinds):
+        if chord not in cur or not turned_off(chord, cur[chord]):
+            continue
+        unbound = sorted(set(user.unbinds[chord].values()))
         if chord in moved:
             findings.append(Finding(
                 "bindings",
                 ATTENTION,
                 f'{chord}: you turned off "{label(cur[chord])}" here, but it moves to '
                 f"{moved[chord]}, so it comes back.",
-                [user.unbinds[chord], *sources(cur[chord], tgt[moved[chord]])],
-                fix=f"Unbind {moved[chord]} too.",
+                [*unbound, *sources(cur[chord], tgt[moved[chord]])],
+                fix=f"Unbind {' and '.join(spelled(tgt[moved[chord]]))} too.",
             ))
-        elif chord in cur and chord not in tgt:
+        elif chord not in tgt:
             findings.append(Finding(
                 "bindings",
                 NOTE,
                 f"{chord}: your unbind no longer does anything, the default is gone.",
-                [user.unbinds[chord], cur[chord].source],
+                [*unbound, *sources(cur[chord])],
             ))
-        elif chord in arrived and chord in cur and chord in user.binds:
+        elif chord in arrived and chord in user.binds and turned_off(chord, tgt[chord]):
             findings.append(Finding(
                 "bindings",
                 NOTE,
@@ -294,22 +450,22 @@ def compare_bindings(current, target, user):
             "bindings", NOTE, f"New default shortcuts: {lines}.", sources(*(tgt[c] for c in fresh))
         ))
 
-    gone = sorted(c for c in changed if c not in moved and c not in tgt and c not in user.unbinds)
+    gone = sorted(c for c in changed if c not in moved and c not in tgt and not turned_off(c, cur[c]))
     if gone:
         lines = ", ".join(f'{c} ("{label(cur[c])}")' for c in gone)
         findings.append(Finding(
             "bindings", NOTE, f"Default shortcuts removed: {lines}.", sources(*(cur[c] for c in gone))
         ))
 
-    unread = current.unread + target.unread + user.unread
-    if unread:
+    for name, source in sorted({**current.helpers, **target.helpers}.items()):
         findings.append(Finding(
             "bindings",
-            NOTE,
-            f"{len(unread)} key bindings use computed keys and weren't compared.",
-            sorted(set(unread)),
+            UNKNOWN,
+            f"The binding helper {name} isn't one this tool can read, so keys bound with it weren't compared.",
+            [source],
         ))
-    return findings
+
+    return [*findings, *compare_computed(current, target, user)]
 
 
 def installed_packages():
@@ -656,12 +812,10 @@ def run(options):
             return fail("Couldn't download the release", error, options.debug)
     check_tree(target, "release")
 
-    user = Parsed()
-    bindings = options.home / ".config/hypr/bindings.lua"
-    if bindings.is_file():
-        parse_lua(bindings.read_text(errors="replace"), user, "~/.config/hypr/bindings.lua")
+    user, unreadable = read_user_bindings(options.home / ".config/hypr/bindings.lua", "~/.config/hypr/bindings.lua")
 
     findings = [
+        *unreadable,
         *compare_bindings(parse_defaults(options.root, "installed"), parse_defaults(target, "release"), user),
         *compare_packages(target, options.home, installed_packages()),
         *compare_commands(options.root, target, options.home),

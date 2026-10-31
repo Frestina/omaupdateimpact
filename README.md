@@ -47,8 +47,11 @@ adds the traceback.
 
 - `qmllint` can't prove a plugin works. Most plugin breaks only show when the
   shell runs them, so new warnings are a hint and a clean result isn't a promise.
-- Bindings are read as text, so bindings with computed keys are counted but not
-  compared, and a binding inside an `if` counts as always on.
+- Bindings are read as text, so a computed key can't be compared. In the defaults
+  it is a note while its expression stays the same in both versions, even if a
+  loop's range changes. If the expression changes, or the key is in your own
+  bindings, it is reported as a limit. A binding or an unbind inside an `if` counts
+  as always on.
 - It doesn't read `omarchy_default_bindings = false` from your `hyprland.lua`.
 - It won't catch a failure during the update itself.
 

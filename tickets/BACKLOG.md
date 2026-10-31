@@ -48,6 +48,20 @@ Paths already ruled out are not here; they are under
 - **`omarchy_default_bindings = false`.** Documented as unread. Reading it would
   remove every default from the comparison, and it's a small change if anyone
   uses it.
+- **`hl.unbind("all")` in your bindings.** It removes every default, like
+  `omarchy_default_bindings = false`. In the defaults it is applied, but in your
+  file the defaults are still compared, so clashes can be false. Waits for a real
+  report, and should go with that limit.
+- **Default files are read in path order.** An unbind only reaches binds made before
+  it, and `omarchy.lua` loads the binding files in its own order. No release unbinds
+  anything in its defaults yet, so this waits until one does.
+- **A default that changes spelling.** `hl.unbind` goes by text, so a release that
+  rewrites `CTRL + A` as `CONTROL + A` undoes your unbind and the shortcut comes
+  back. The chord looks unchanged, so it isn't reported. Rare; waits for a real
+  report.
+- **`ignore_mods` on a default.** v4.5.0-rc2's `ALT + Alt_R` fires with any
+  modifiers held, so it also reaches a binding of yours such as `SUPER + Alt_R`.
+  Only the exact chord is compared. Waits for a real report.
 - **A binding inside an `if` counts as always on.** v4.5.0-rc2's dictation
   bindings depend on the installed backend. Reading that would mean running Lua.
 - **The first line shows this machine's version, even with `--root`.** Pointing

@@ -161,7 +161,27 @@ The tool reads Omarchy's internal formats, and they change. v4.5.0-rc2 added
 `o.bind_hold`, which the first version didn't know, and that produced a false
 "removed" finding. So the parser must notice what it doesn't understand: a
 `function o.*bind*` it has no rule for is reported as a limit, and CI watches new
-releases for it.
+releases for it. Every Lua file under `default/hypr` is searched, not only
+`helpers.lua`, so moving a helper doesn't hide it. A helper assigned to `o`, such
+as `o.bind_foo = function`, counts too. `o.preinstalled_bindings_enabled` matches
+the name but binds nothing, so it needs no rule.
+
+A chord holds every bind made on it, so a press and release pair is one action.
+Two chords do the same thing when each bind on one has a match on the other.
+
+Modifiers follow Hyprland's Lua parser (`LuaBindingsToplevel.cpp`, checked at
+v0.56.2): `CTRL` and `CONTROL`, `ALT` and `MOD1`, `SUPER`, `WIN`, `LOGO`, `MOD4` and
+`META` are the same key. `SHIFT`, `CAPS`, `MOD2`, `MOD3` and `MOD5` have one name.
+
+`hl.unbind` goes by text, not by chord: `removeKeybind` compares the keys as they
+were written, ignoring only spaces and case. So `hl.unbind("CONTROL + A")` leaves a
+bind written `CTRL + A`, and `SHIFT + SUPER + A` leaves `SUPER + SHIFT + A`. The
+same two spellings clash, because the keys are the same, but only an unbind with
+the matching text turns a default off. Fixes quote the default's own spelling.
+`hl.unbind("all")` removes every bind made so far.
+
+An unbind or `o.rebind` in the defaults removes the binds before it. The default
+files are read in path order, not in the order Omarchy loads them.
 
 ## Findings and exit codes
 
@@ -184,10 +204,15 @@ the closing line still names the checks that didn't run.
 Bindings with computed keys can't be compared, since working out the key would
 mean running Lua. Every release has them, so making them all `unknown` would make
 exit 0 impossible. A computed key in the defaults is a note while its key
-expression is the same in both versions. It is `unknown` when the expressions
-differ, and so is a computed key in your own bindings. A loop whose range changes
-while its key expression stays the same is still a note. They stay listed in the
-README's limits.
+expression is the same in both versions, spacing aside. Each expression is counted
+as many times as both versions share it, so a call in both counts once. It is
+`unknown` when the expressions differ, and so is a computed key in your own
+bindings. A loop whose range changes while its key expression stays the same is
+still a note. They stay listed in the README's limits.
+
+A `~/.config/hypr/bindings.lua` that exists but can't be read is `unknown`: a broken
+link, a denied file, or anything that isn't a file. With no such file there is
+nothing to compare, which is not a limit.
 
 ## JSON
 
