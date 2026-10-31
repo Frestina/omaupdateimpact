@@ -56,5 +56,8 @@ Paths already ruled out are not here; they are under
 - **Installed newer than the target.** Someone who moves from rc to stable has a
   version past the latest stable. The report treats that as an update, though
   nothing would be delivered until stable catches up. Waits for a real report.
+- **The message when the mirror and packages disagree.** It says "the channel is
+  stable / rc, and only stable and rc have tagged releases", which reads as a
+  contradiction. The exit 2 is right. 012 could reword it.
 - **Evidence in the text report.** Findings carry evidence, but only `--json` (016)
   will show it. 012 could print it, if it doesn't crowd the report.
