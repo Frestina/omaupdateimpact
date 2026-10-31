@@ -704,6 +704,7 @@ class Channels(ProgramCase):
                 code, out, err = self.fetch()
                 self.assertEqual((code, out, self.urls), (2, "", []))
                 self.assertEqual(len(err.splitlines()), 1)
+                self.assertTrue(err.startswith("Can't pick a release: "), err)
                 self.assertIn(f"the channel is {channel},", err)
                 self.assertIn("Pass a tag", err)
 
@@ -788,6 +789,21 @@ class Channels(ProgramCase):
                 "Newer on the stable channel: v1.2.3. To check it: omaupdateimpact v1.2.3",
             ],
         )
+
+    def test_a_newer_stable_release_is_named_once(self):
+        self.on_channel("stable", version="1.2.2-1")
+        self.listing = releases("v1.2.3", "v1.2.2")
+        out = self.fetch("v1.2.2", own_tree=True)[1]
+        self.assertEqual(out.splitlines()[1:], ["Newer on the stable channel: v1.2.3. To check it: omaupdateimpact v1.2.3"])
+
+    def test_two_unreadable_versions_are_not_the_same_version(self):
+        for version, tag in (('echo "dev (abc1234)"', "main"), ("exit 1", "trunk")):
+            with self.subTest(version=version):
+                self.stub(version, 'echo "stable"')
+                code, out, _ = self.fetch(tag, own_tree=True)
+                self.assertEqual(code, 0)
+                self.assert_downloaded(tag)
+                self.assertNotIn("There is no update", out)
 
     def test_a_candidate_a_final_release_replaced_is_not_named(self):
         self.on_channel("stable", version="1.2.2-1")

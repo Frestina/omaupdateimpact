@@ -27,6 +27,8 @@ coming.
   channel with the command to check it, and exit 0.
 - The first line of the report names the channel and whether the target is a
   prerelease.
+- Review follow-ups: tests pin the guard on two unreadable versions, the "Can't
+  pick a release" line and a newest release named once.
 
 ## Done when
 
@@ -35,4 +37,9 @@ coming.
       test.
 - [x] A tag argument overrides the channel, with a test.
 - [x] Up to date gives exit 0 and mentions the newer RC, with a test.
+- [x] A dev or unknown version with a tag that isn't a version runs the check, and
+      never says there is no update, with a test.
+- [x] A channel with no tags says "Can't pick a release", not "Unexpected
+      NoRelease", with a test.
+- [x] A newer stable release is named once, with a test.
 - [x] `tests/run` passes.
