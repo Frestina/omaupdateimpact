@@ -93,7 +93,8 @@ names any newer release on another channel, and exits 0: there is no update.
 
 - **Installed:** `$OMARCHY_PATH`, falling back to `/usr/share/omarchy`. `--root`
   overrides it.
-- **Release:** an unpacked tarball in the cache. `--target` overrides it.
+- **Release:** an unpacked tarball in the cache. `--target` overrides it. The
+  whole gzip stream must pass its checksum before anything is unpacked.
 
 Before any check runs, both trees must contain `bin`, `default/hypr`, `migrations`
 and `shell`. If one doesn't, that is exit 2.
@@ -110,6 +111,8 @@ Each check returns findings and says whether it could run.
   that Omarchy itself put there, unchanged, isn't your problem to fix.
 - **Plugins:** new `qmllint` warnings. If `qmllint` fails, that is unknown, not
   clean. These never count as "needs attention": see the Limits in the README.
+  With no plugins there is nothing to lint, so a missing `qmllint` doesn't matter.
+  When plugins were linted, a note says `qmllint` can't prove a plugin works.
 
 ### Reading release formats
 
@@ -134,8 +137,16 @@ evidence. Levels are `attention`, `note` and `unknown`.
 An unexpected exception is exit 2 with one line of explanation. It never falls
 through to Python's exit 1, which would read as a finding.
 
-Bindings with computed keys are a note, not `unknown`. Every release has them, so
-`unknown` would make exit 0 impossible. They stay listed in the README's limits.
+When something needs attention and a check also couldn't run, the exit is 1, and
+the closing line still names the checks that didn't run.
+
+Bindings with computed keys can't be compared, since working out the key would
+mean running Lua. Every release has them, so making them all `unknown` would make
+exit 0 impossible. A computed key in the defaults is a note while its key
+expression is the same in both versions. It is `unknown` when the expressions
+differ, and so is a computed key in your own bindings. A loop whose range changes
+while its key expression stays the same is still a note. They stay listed in the
+README's limits.
 
 ## JSON
 

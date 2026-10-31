@@ -487,6 +487,7 @@ def fail(what, error, debug):
 
 
 def run(options):
+    options.home = options.home or Path.home()
     target = options.target
     tag = options.tag
     if target is None:
@@ -527,7 +528,7 @@ def main():
     parser.add_argument("tag", nargs="?", help="release tag (default: the newest, including RCs)")
     parser.add_argument("--target", type=Path, help="use an unpacked release instead of downloading")
     parser.add_argument("--root", type=Path, default=Path("/usr/share/omarchy"))
-    parser.add_argument("--home", type=Path, default=Path.home())
+    parser.add_argument("--home", type=Path)
     parser.add_argument("--debug", action="store_true", help="show the traceback when something fails")
     options = parser.parse_args()
     try:

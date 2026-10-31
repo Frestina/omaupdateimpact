@@ -109,6 +109,57 @@ class CompareBindings(unittest.TestCase):
         )
         self.assertIn("comes back", titles(findings, "attention")[0])
 
+    def test_a_shortcut_that_comes_back_names_the_files_behind_it(self):
+        current, target, user = impact.Parsed(), impact.Parsed(), impact.Parsed()
+        impact.parse_lua('o.bind("SUPER + Q", "Calc", "c")', current, "default/hypr/old.lua")
+        impact.parse_lua('o.bind("SUPER + SHIFT + Q", "Calc", "c")', target, "default/hypr/new.lua")
+        impact.parse_lua('hl.unbind("SUPER + Q")', user, "~/.config/hypr/bindings.lua")
+        finding = impact.compare_bindings(current, target, user)[0]
+        self.assertEqual(
+            finding.evidence, ["~/.config/hypr/bindings.lua", "default/hypr/new.lua", "default/hypr/old.lua"]
+        )
+
+    def test_every_note_names_the_files_behind_it(self):
+        current, target, user = impact.Parsed(), impact.Parsed(), impact.Parsed()
+        old, new, mine = "default/hypr/old.lua", "default/hypr/new.lua", "~/.config/hypr/bindings.lua"
+        impact.parse_lua(
+            """
+            o.bind("SUPER + A", "Calc", "c")
+            o.bind("SUPER + N", "Night", "n")
+            o.bind("SUPER + G", "Gone", "g")
+            o.bind("SUPER + U", "Unbound", "u")
+            o.bind("SUPER + R", "Old", "r")
+            """,
+            current,
+            old,
+        )
+        impact.parse_lua(
+            """
+            o.bind("SUPER + B", "Calc", "c")
+            o.bind("SUPER + N", "Network", "w")
+            o.bind("SUPER + F", "Fresh", "f")
+            o.bind("SUPER + R", "Newer", "q")
+            """,
+            target,
+            new,
+        )
+        impact.parse_lua(
+            'hl.unbind("SUPER + U")\nhl.unbind("SUPER + R")\no.bind("SUPER + R", "Mine", "m")', user, mine
+        )
+        findings = impact.compare_bindings(current, target, user)
+        self.assertEqual(
+            [finding.evidence for finding in findings],
+            [[new, mine], [mine, old], [new, old], [new, old], [new], [old]],
+        )
+
+    def test_computed_keys_name_their_files_once(self):
+        current, target = impact.Parsed(), impact.Parsed()
+        computed = 'o.bind("SUPER + " .. n, "x", "y")'
+        impact.parse_lua(computed, current, "default/hypr/tiling.lua")
+        impact.parse_lua(computed, target, "default/hypr/tiling.lua")
+        finding = impact.compare_bindings(current, target, impact.Parsed())[0]
+        self.assertEqual(finding.evidence, ["default/hypr/tiling.lua"])
+
     def test_reports_a_shortcut_taken_over_by_another_action(self):
         findings = compare('o.bind("SUPER + N", "Night", "n")', 'o.bind("SUPER + N", "Network", "w")')
         self.assertIn('SUPER + N is now "Network", it was "Night".', titles(findings, "note"))
@@ -143,6 +194,11 @@ class Packages(unittest.TestCase):
         finding = impact.compare_packages(Path("target"), Path("home"), None)[0]
         self.assertEqual((finding.check, finding.level), ("packages", "unknown"))
 
+    def test_a_failing_pacman_counts_as_missing(self):
+        error = impact.subprocess.CalledProcessError(1, "pacman")
+        with mock.patch.object(impact.subprocess, "run", side_effect=error):
+            self.assertIsNone(impact.installed_packages())
+
     def test_a_removal_names_its_migration(self):
         with tempfile.TemporaryDirectory() as directory:
             target = Path(directory)
@@ -173,6 +229,11 @@ class Commands(unittest.TestCase):
     def test_finds_a_call_to_a_deleted_command(self):
         (self.hooks / "my.hook").write_text("omarchy-gone\nomarchy-gone again\n")
         self.assertEqual(len(self.attention()), 1)
+
+    def test_a_call_names_the_file_behind_it(self):
+        (self.hooks / "my.hook").write_text("omarchy-gone\n")
+        findings = impact.compare_commands(self.base / "current", self.base / "target", self.home)
+        self.assertEqual(findings[0].evidence, ["~/.config/omarchy/hooks/my.hook"])
 
     def test_a_line_starting_with_a_flag_is_not_a_comment(self):
         (self.hooks / "my.hook").write_text("    --exec omarchy-gone\n")
@@ -206,9 +267,14 @@ class Plugins(unittest.TestCase):
             original_which = impact.shutil.which
             impact.shutil.which = lambda name: "/bin/true"
             self.addCleanup(setattr, impact.shutil, "which", original_which)
-            notes = titles(impact.compare_plugins(Path("current"), Path("target"), home), "note")
+            findings = impact.compare_plugins(Path("current"), Path("target"), home)
+            notes = titles(findings, "note")
             self.assertEqual(len(notes), 2)
             self.assertIn("1 new qmllint warnings, such as a.qml: new", notes[0])
+            self.assertEqual(
+                [finding.evidence for finding in findings],
+                [["~/.config/omarchy/plugins/demo/a.qml"], ["~/.config/omarchy/plugins"]],
+            )
 
     def findings_without_qmllint(self, home):
         with mock.patch.object(impact.shutil, "which", return_value=None), \
@@ -221,6 +287,7 @@ class Plugins(unittest.TestCase):
             (home / ".config/omarchy/plugins/demo").mkdir(parents=True)
             finding = self.findings_without_qmllint(home)[0]
         self.assertEqual((finding.check, finding.level), ("plugins", "unknown"))
+        self.assertEqual(finding.evidence, ["~/.config/omarchy/plugins"])
 
     def test_a_missing_qmllint_does_not_matter_without_plugins(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -253,7 +320,10 @@ class ProgramCase(unittest.TestCase):
         return root
 
     def run_main(self, *args):
-        argv = ["omaupdateimpact", "--root", str(self.base / "current"), "--home", str(self.home), *args]
+        return self.run_argv("--root", str(self.base / "current"), "--home", str(self.home), *args)
+
+    def run_argv(self, *args):
+        argv = ["omaupdateimpact", *args]
         out, err = io.StringIO(), io.StringIO()
         with mock.patch("sys.argv", argv), contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
             code = impact.main()
@@ -317,6 +387,13 @@ class Program(ProgramCase):
             code, out, err = self.check()
         self.assertEqual((code, out), (2, ""))
         self.assertEqual(err, "Unexpected RuntimeError: broke badly\n")
+
+    def test_no_home_directory_exits_2_on_one_line(self):
+        trees = ("--root", str(self.base / "current"), "--target", str(self.base / "target"))
+        with mock.patch.object(impact.Path, "home", side_effect=RuntimeError("no home directory")):
+            code, out, err = self.run_argv(*trees)
+        self.assertEqual((code, out), (2, ""))
+        self.assertEqual(err, "Unexpected RuntimeError: no home directory\n")
 
     def test_debug_shows_the_traceback(self):
         with mock.patch.object(impact, "compare_commands", side_effect=RuntimeError("broke")):

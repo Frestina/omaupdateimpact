@@ -31,6 +31,8 @@ attention", and a partial run can exit 0. Most later tickets build on this.
   line says which checks didn't run instead of "nothing found".
 - Remove `Bind.keys`, which nothing reads, and use a set for `found` in
   `compare_commands`.
+- Review follow-ups: a crash while `main()` sets up is exit 2, and tests cover a
+  failing `pacman` and the evidence on each finding.
 
 ## Not in this ticket
 
@@ -44,4 +46,9 @@ attention", and a partial run can exit 0. Most later tickets build on this.
 - [x] With `pacman` missing and nothing else found, the exit is 3 and "nothing
       found" isn't printed, with a test.
 - [x] Exit codes in the README match the spec.
+- [x] When the home directory can't be found, the exit is 2 on one line, not 1,
+      with a test.
+- [x] `pacman` that runs and fails gives `unknown`, with a test.
+- [x] The commands, moved unbind and computed key findings each have a test for
+      their evidence.
 - [x] `tests/run` passes.
