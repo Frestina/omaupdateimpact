@@ -1,0 +1,68 @@
+# Tickets
+
+The work to release omaupdateimpact, one file per ticket. [SPEC.md](../SPEC.md)
+is the source of truth; each ticket links the sections it builds. Things left for
+later are in [BACKLOG.md](BACKLOG.md).
+
+## How this works
+
+- **Status lives only in the tables below.** Ticket files hold no status, so the
+  two can never disagree.
+- **Next ticket:** the lowest-numbered `todo` whose dependencies are all `done`.
+- **Starting:** set it to `in progress`. **Finishing:** every box under "Done
+  when" ticked, `tests/run` passes, set it to `done`.
+- **Commits** start with the ticket number: `006: read o.bind_hold`.
+- **Statuses:** `todo`, `in progress`, `done`, `blocked`.
+- New work found along the way goes to the backlog or a new ticket, never into
+  the current one.
+- **Fixtures are fictional.** No real paths, hostnames or personal config in the
+  tests, the docs or the demo.
+
+Every ticket has the same parts: front matter (`id`, `title`, `milestone`,
+`depends_on`), then Goal, Spec, Scope, sometimes Not in this ticket, and Done
+when.
+
+## Milestones and status
+
+### M1 Trust: every answer is right, or says it doesn't know
+
+| # | Ticket | Depends on | Status |
+| --- | --- | --- | --- |
+| 001 | [Name and project identity](001-name-and-identity.md) | | done |
+| 002 | [Typed findings and exit codes](002-findings-and-exit-codes.md) | 001 | todo |
+| 003 | [Refuse unusable trees](003-refuse-unusable-trees.md) | 002 | todo |
+| 004 | [Follow the update channel](004-follow-the-channel.md) | 003 | todo |
+| 005 | [Downloads and the cache](005-downloads-and-cache.md) | 002 | todo |
+| 006 | [Read every binding helper](006-binding-helpers.md) | 002 | todo |
+| 007 | [Read every package removal](007-package-removals.md) | 002 | todo |
+| 008 | [Find every call to a deleted command](008-command-coverage.md) | 002 | todo |
+| 009 | [Failed lints are unknown](009-plugin-lint-failures.md) | 002 | todo |
+| 010 | [Tests against real releases](010-real-release-tests.md) | 003, 006, 007, 008, 009 | todo |
+| 011 | [CI and the drift watch](011-ci-and-drift-watch.md) | 010 | todo |
+
+### M2 First release: someone else can install and trust it
+
+| # | Ticket | Depends on | Status |
+| --- | --- | --- | --- |
+| 012 | [A report worth reading](012-report-polish.md) | 010 | todo |
+| 013 | [Install, version and uninstall](013-install-and-version.md) | 001 | todo |
+| 014 | [README and project docs](014-readme-and-docs.md) | 012, 013 | todo |
+| 015 | [Release 0.1.0](015-release-0-1-0.md) | 011, 014 | todo |
+
+### M3 Better answers
+
+| # | Ticket | Depends on | Status |
+| --- | --- | --- | --- |
+| 016 | [JSON output](016-json-output.md) | 002 | todo |
+| 017 | [Migrations that touch files you changed](017-migrations-touching-your-files.md) | 002 | todo |
+| 018 | [Say why, from the release notes](018-reasons-from-release-notes.md) | 002 | todo |
+| 019 | [Reviewed findings stay quiet](019-reviewed-findings.md) | 002 | todo |
+| 020 | [An entry in the Omarchy menu](020-omarchy-menu-entry.md) | 015 | todo |
+
+### M4 Plugin: on the desktop and in the marketplace
+
+| # | Ticket | Depends on | Status |
+| --- | --- | --- | --- |
+| 021 | [Plugin design](021-plugin-design.md) | 016 | todo |
+| 022 | [Bar widget and panel](022-plugin-panel.md) | 021 | todo |
+| 023 | [Marketplace listing](023-marketplace-listing.md) | 015, 022 | todo |

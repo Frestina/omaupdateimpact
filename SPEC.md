@@ -1,0 +1,189 @@
+# omaupdateimpact spec
+
+The source of truth for what this project is and how it behaves. Tickets link
+the sections they build. When a decision changes, change this file in the same
+commit.
+
+## The problem
+
+An Omarchy update can change your shortcuts, remove packages you use and delete
+commands your scripts call. Release notes describe what changed for everyone.
+They can't say what it means for your machine, and you find out afterwards.
+
+The v4.5.0-rc2 notes list the new shortcuts that could collide with "bindings of
+your own". That list is general. Only your machine knows whether one of them
+hits you.
+
+## What it is
+
+A read-only check that compares your setup with a release before you update, and
+answers one question: what will this update do to my machine?
+
+- **Personal.** It reports what touches your setup, not everything that changed.
+- **Static.** Nothing from the release runs, so it is safe to point at an RC.
+- **Specific.** Each finding names the file or key and says what to do about it.
+- **Honest.** "I couldn't check that" is an answer, and it is never shown as clear.
+
+### Who it is for
+
+- People who customize Omarchy and update often.
+- People trying an RC who want to know what they would sign up for.
+- Later, plugin authors checking a plugin against an RC.
+
+## Where it stops
+
+- It doesn't change your setup. It says what to do, and you do it.
+- It doesn't run migrations. Sandboxed dry runs are a different product, and
+  [omaforecast](https://github.com/w-mir1/omaforecast) already does that.
+- It doesn't take snapshots or roll back. Omarchy already snapshots with Snapper.
+- It doesn't check the health of the running system. It compares two versions.
+- It doesn't replace `omarchy update` or wrap it.
+
+## What must never happen
+
+1. **A clean result when a check didn't run.** No exit 0 and no "nothing found"
+   unless every check really looked at real input.
+2. **Release code running.** Release files are read as text. `qmllint` reads QML,
+   it doesn't run it.
+3. **Changes outside its own cache**, unless the user asked for an optional
+   install step, such as the menu entry.
+4. **Anything leaving the machine.** It only makes GET requests to GitHub, with no
+   telemetry. Findings stay local.
+5. **A finding without evidence.** Each one can name the line or file behind it.
+
+## Product shape
+
+One repository with a CLI at the core and a thin plugin on top, in this order:
+
+1. **The CLI** does all the work and owns the rules. It is what the tests cover
+   and what a terminal user runs.
+2. **`--json`** is the contract between the CLI and anything else.
+3. **An Omarchy menu row** is the cheap way to reach people who don't live in a
+   terminal.
+4. **A bar plugin** shows the result on the desktop and in the marketplace, where
+   Omarchy users find tools. It holds no rules and only renders the JSON.
+
+A separate desktop app is rejected: see [Rejected](#rejected).
+
+## How it works
+
+```
+resolve target -> load both trees -> run checks -> findings -> render
+  channel, tag     installed,        bindings       typed      text or
+                   release, home     packages                  JSON
+                                     commands
+                                     plugins
+```
+
+### Choosing the release
+
+An update delivers what the user's channel delivers, so that is the default.
+
+| Channel | Default target |
+| --- | --- |
+| stable | the latest non-prerelease release |
+| rc | the newest release, prereleases included |
+| edge, dev | no tag exists: exit 2 and ask for an explicit tag |
+
+The channel comes from `omarchy-version-channel`. `--channel` overrides it and a
+tag argument overrides both. If the target is what's installed, it says so,
+names any newer release on another channel, and exits 0: there is no update.
+
+### The two trees
+
+- **Installed:** `$OMARCHY_PATH`, falling back to `/usr/share/omarchy`. `--root`
+  overrides it.
+- **Release:** an unpacked tarball in the cache. `--target` overrides it.
+
+Before any check runs, both trees must contain `bin`, `default/hypr`, `migrations`
+and `shell`. If one doesn't, that is exit 2.
+
+### Checks
+
+Each check returns findings and says whether it could run.
+
+- **Bindings:** your bindings against both versions of the defaults. Flags clashes
+  and shortcuts you turned off that come back, and lists the rest as notes.
+- **Packages:** installed packages removed by migrations you haven't run yet. A
+  removal it can't read, such as `"${targets[@]}"`, is reported as unknown.
+- **Commands:** deleted `omarchy-*` commands still called from your files. A file
+  that Omarchy itself put there, unchanged, isn't your problem to fix.
+- **Plugins:** new `qmllint` warnings. If `qmllint` fails, that is unknown, not
+  clean. These never count as "needs attention": see the Limits in the README.
+
+### Reading release formats
+
+The tool reads Omarchy's internal formats, and they change. v4.5.0-rc2 added
+`o.bind_hold`, which the first version didn't know, and that produced a false
+"removed" finding. So the parser must notice what it doesn't understand: a
+`function o.*bind*` it has no rule for is reported as a limit, and CI watches new
+releases for it.
+
+## Findings and exit codes
+
+A finding has a check, a level, a title, a detail, a fix when there is one, and
+evidence. Levels are `attention`, `note` and `unknown`.
+
+| Exit | Meaning |
+| --- | --- |
+| 0 | Every check ran and nothing needs attention, or there is no update |
+| 1 | Something needs attention |
+| 2 | No verdict: bad usage, a failed download, an unusable tree or a crash |
+| 3 | Nothing needs attention, but at least one check couldn't run |
+
+An unexpected exception is exit 2 with one line of explanation. It never falls
+through to Python's exit 1, which would read as a finding.
+
+## JSON
+
+`--json` prints one document and nothing else: `schemaVersion`, the installed
+version, the target, the channel, and the findings. Exit codes don't change. A
+breaking change bumps `schemaVersion`.
+
+## Files
+
+- `~/.cache/omaupdateimpact/<tag>`: unpacked releases, pruned automatically.
+- Reviewed findings, once they exist, in `~/.config/omaupdateimpact/`.
+
+Nothing else is written.
+
+## Neighbours
+
+Checked 2026-10-31. These are the closest tools; none compares your bindings,
+scripts and packages with a coming release.
+
+| Tool | What it does | How it differs |
+| --- | --- | --- |
+| [omaforecast](https://github.com/w-mir1/omaforecast) | Dry-runs migrations in a sandbox, shows config diffs, restores | Runs release code; its forecast covers files, not bindings or packages |
+| [OmaPreflight](https://github.com/p134c0d3/omarchy-omapreflight) | Diagnoses the current system before an update | Local only, never looks at the release |
+| [Aether Guard](https://github.com/eerengz/omarchy-plugin-aether-guard) | Local conditions before an update | Same: looks at this machine only |
+| [Update Review](https://github.com/jampick/omarchy-update-review) | Lists pending packages and restarts | About package versions, not your setup |
+| [Safe Update](https://github.com/Nejcc/omarchy-safe-update) | Checks plugins after an update | After, not before |
+
+omaforecast is a complement rather than a rival, and the README should say so:
+one reads the release and needs no sandbox, the other runs it and sees file edits.
+
+Omarchy has no pre-update hook. [PR #10398](https://github.com/omacom/omarchy/pull/10398)
+adds one before the dev checkout pull, and was open and quiet at the last check.
+So this tool can't gate an update, and users have to run it themselves.
+
+## Rejected
+
+- **A standalone desktop app.** In Omarchy the shell is the app surface. A plugin
+  reaches the same people with far less to build and maintain.
+- **Running migrations.** It would break the promise that nothing from the release
+  runs, and it would compete on omaforecast's ground.
+- **Evaluating Lua to read bindings.** Same promise. Text parsing with honest
+  limits is the trade.
+- **Wrapping `omarchy update`.** It would make this tool a point of failure in the
+  update path.
+- **Applying fixes.** Being read-only is why people can trust it. It prints the
+  exact line instead.
+- **A safety score.** It would imply precision that static reading can't give.
+
+## Open questions
+
+- Does a plugin get a second repository, or live in this one? Default: this one.
+  Settled in [021](tickets/021-plugin-design.md).
+- Are `edge` and `dev` worth supporting by comparing with the branch tip? In the
+  [backlog](tickets/BACKLOG.md).

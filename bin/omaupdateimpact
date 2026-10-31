@@ -1,0 +1,435 @@
+#!/usr/bin/env python3
+"""Check this machine's Omarchy setup against a release before updating.
+
+Read-only: nothing from the release is ever run, its files are only read as
+text. See README.md.
+"""
+
+import argparse
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tarfile
+import tempfile
+import textwrap
+import urllib.request
+from collections import Counter
+from dataclasses import dataclass, field
+from pathlib import Path
+
+REPO = "omacom/omarchy"
+MODIFIERS = ["SUPER", "CTRL", "SHIFT", "ALT"]
+BIND_CALLS = ["o.bind_toggle", "o.rebind", "o.bind", "hl.bind", "hl.unbind"]
+TEXT_SUFFIXES = {"", ".lua", ".sh", ".hook", ".conf", ".toml", ".json", ".qml", ".js", ".py"}
+QMLLINT = "/usr/lib/qt6/bin/qmllint"
+
+
+@dataclass
+class Bind:
+    keys: str
+    description: str
+    command: str
+
+    def same_action(self, other):
+        if self.command == other.command:
+            return True
+        return bool(self.description) and self.description == other.description
+
+
+@dataclass
+class Parsed:
+    binds: dict = field(default_factory=dict)
+    unbinds: set = field(default_factory=set)
+    unread: int = 0
+
+
+@dataclass
+class Report:
+    attention: list = field(default_factory=list)
+    notes: list = field(default_factory=list)
+    limits: list = field(default_factory=list)
+
+
+def blank_comments(text):
+    """Remove Lua comments, leaving strings alone."""
+    out, i = [], 0
+    while i < len(text):
+        two = text[i : i + 2]
+        char = text[i]
+        if two == "--":
+            closer = "]]" if text[i + 2 : i + 4] == "[[" else "\n"
+            end = text.find(closer, i)
+            if end < 0:
+                break
+            i = end + (2 if closer == "]]" else 0)
+        elif two == "[[":
+            end = text.find("]]", i)
+            end = len(text) if end < 0 else end + 2
+            out.append(text[i:end])
+            i = end
+        elif char in "\"'":
+            end = string_end(text, i)
+            out.append(text[i:end])
+            i = end
+        else:
+            out.append(char)
+            i += 1
+    return "".join(out)
+
+
+def string_end(text, start):
+    i = start + 1
+    while i < len(text) and text[i] != text[start]:
+        i += 2 if text[i] == "\\" else 1
+    return min(i + 1, len(text))
+
+
+def call_arguments(text, start):
+    """Split the arguments of the call whose opening bracket is at start."""
+    args, depth, current, i = [], 0, [], start
+    while i < len(text):
+        char = text[i]
+        if char in "\"'":
+            end = string_end(text, i)
+            current.append(text[i:end])
+            i = end
+            continue
+        if char in "([{":
+            depth += 1
+            if depth > 1:
+                current.append(char)
+        elif char in ")]}":
+            depth -= 1
+            if depth == 0:
+                args.append("".join(current).strip())
+                return args
+            current.append(char)
+        elif char == "," and depth == 1:
+            args.append("".join(current).strip())
+            current = []
+        else:
+            current.append(char)
+        i += 1
+    return args
+
+
+def literal(arg):
+    """The value of a plain Lua string, or None for anything computed."""
+    if len(arg) >= 2 and arg[0] in "\"'" and string_end(arg, 0) == len(arg):
+        return arg[1:-1].replace('\\"', '"').replace("\\'", "'")
+    return None
+
+
+def normalize_keys(keys):
+    parts = [part.strip().upper() for part in keys.split("+") if part.strip()]
+    mods = [mod for mod in MODIFIERS if mod in parts]
+    rest = [part for part in parts if part not in MODIFIERS]
+    return " + ".join(mods + rest)
+
+
+def parse_lua(text, parsed):
+    """Collect the bind and unbind calls in one Lua file."""
+    text = blank_comments(text)
+    names = "|".join(re.escape(name) for name in BIND_CALLS)
+    for match in re.finditer(rf"(?<![\w.])({names})\s*\(", text):
+        name = match.group(1)
+        args = call_arguments(text, match.end() - 1)
+        keys = literal(args[0]) if args else None
+        if keys is None:
+            parsed.unread += 1
+            continue
+        chord = normalize_keys(keys)
+        if name == "hl.unbind":
+            parsed.unbinds.add(chord)
+            continue
+        if name == "o.rebind":
+            parsed.unbinds.add(chord)
+        if name == "hl.bind":
+            options = args[2] if len(args) > 2 else ""
+            found = re.search(r"description\s*=\s*([\"'])(.*?)\1", options)
+            description, command = found.group(2) if found else "", args[1] if len(args) > 1 else ""
+        else:
+            description = (literal(args[1]) or "") if len(args) > 1 else ""
+            command = args[2] if len(args) > 2 else ""
+        value = literal(command)
+        command = value if value is not None else command
+        if name == "o.bind_toggle":
+            command = "omarchy-toggle-" + command
+        parsed.binds[chord] = Bind(chord, description, command)
+
+
+def parse_defaults(root):
+    parsed = Parsed()
+    for path in sorted((root / "default/hypr").rglob("*.lua")):
+        if path.name != "helpers.lua":
+            parse_lua(path.read_text(errors="replace"), parsed)
+    return parsed
+
+
+def label(bind):
+    return bind.description or bind.command
+
+
+def compare_bindings(current, target, user, report):
+    cur, tgt = current.binds, target.binds
+    changed = {c for c in cur if c not in tgt or not cur[c].same_action(tgt[c])}
+    arrived = {c for c in tgt if c not in cur or not cur[c].same_action(tgt[c])}
+
+    moved = {}
+    for chord in sorted(changed):
+        for other in sorted(arrived - {chord}):
+            if cur[chord].same_action(tgt[other]):
+                moved[chord] = other
+                break
+
+    for chord in sorted(user.binds):
+        mine = user.binds[chord]
+        if chord in user.unbinds or chord not in tgt or chord not in arrived:
+            continue
+        report.attention.append(
+            f'{chord}: your "{label(mine)}" will clash with the new default '
+            f'"{label(tgt[chord])}", and both will fire. Add hl.unbind("{chord}") '
+            "or choose another key."
+        )
+
+    for chord in sorted(user.unbinds):
+        if chord in moved:
+            report.attention.append(
+                f'{chord}: you turned off "{label(cur[chord])}" here, but it moves to '
+                f"{moved[chord]}, so it comes back. Unbind {moved[chord]} too."
+            )
+        elif chord in cur and chord not in tgt:
+            report.notes.append(f"{chord}: your unbind no longer does anything, the default is gone.")
+        elif chord in arrived and chord in cur and chord in user.binds:
+            report.notes.append(
+                f'{chord}: your binding now replaces "{label(tgt[chord])}", '
+                f'not "{label(cur[chord])}".'
+            )
+
+    for chord, other in sorted(moved.items()):
+        report.notes.append(f'Moved: "{label(cur[chord])}" from {chord} to {other}.')
+
+    for chord in sorted(c for c in arrived if c in cur and c not in user.binds):
+        report.notes.append(f'{chord} is now "{label(tgt[chord])}", it was "{label(cur[chord])}".')
+
+    fresh = sorted(
+        c for c in arrived
+        if c not in cur and c not in moved.values() and c not in user.binds and not c.startswith("SWITCH:")
+    )
+    if fresh:
+        lines = ", ".join(f'{c} ("{label(tgt[c])}")' for c in fresh)
+        report.notes.append(f"New default shortcuts: {lines}.")
+
+    gone = sorted(c for c in changed if c not in moved and c not in tgt and c not in user.unbinds)
+    if gone:
+        lines = ", ".join(f'{c} ("{label(cur[c])}")' for c in gone)
+        report.notes.append(f"Default shortcuts removed: {lines}.")
+
+    unread = current.unread + target.unread + user.unread
+    if unread:
+        report.limits.append(f"{unread} key bindings use computed keys and weren't compared.")
+
+
+def installed_packages():
+    try:
+        output = subprocess.run(["pacman", "-Qq"], capture_output=True, text=True, check=True).stdout
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    return set(output.split())
+
+
+def package_changes(migrations, already_run):
+    """Packages the pending migrations remove, with whether that is conditional."""
+    dropped = {}
+    for path in sorted(migrations.glob("*.sh")):
+        if path.name in already_run:
+            continue
+        for line in path.read_text(errors="replace").splitlines():
+            found = re.match(r"(\s*)omarchy-pkg-(drop|remove|add)\s+([^|;&>#]*)", line)
+            if not found:
+                continue
+            packages = [p for p in found.group(3).split() if re.fullmatch(r"[\w@.+-]+", p)]
+            for package in packages:
+                if found.group(2) == "add":
+                    dropped.pop(package, None)
+                else:
+                    dropped[package] = bool(found.group(1))
+    return dropped
+
+
+def compare_packages(target, home, installed, report):
+    if installed is None:
+        report.limits.append("pacman wasn't available, so packages weren't checked.")
+        return
+    state = home / ".local/state/omarchy/migrations"
+    already_run = {p.name for p in state.iterdir()} if state.is_dir() else set()
+    dropped = package_changes(target / "migrations", already_run)
+    for package in sorted(set(dropped) & installed):
+        when = "may remove" if dropped[package] else "will remove"
+        report.attention.append(f"The update {when} {package}, which is installed here.")
+
+
+def user_files(home):
+    roots = [
+        home / ".config/hypr",
+        home / ".config/omarchy/hooks",
+        home / ".config/omarchy/extensions",
+        home / ".config/omarchy/plugins",
+    ]
+    singles = [home / ".bashrc", home / ".bashrc.local", home / ".config/omarchy/shell.toml"]
+    for root in roots:
+        if root.is_dir():
+            for directory, subdirs, names in os.walk(root, followlinks=True):
+                subdirs[:] = [d for d in subdirs if d != ".git"]
+                for name in names:
+                    path = Path(directory) / name
+                    if path.suffix in TEXT_SUFFIXES and ".bak" not in name:
+                        yield path
+    yield from (path for path in singles if path.is_file())
+
+
+def compare_commands(current, target, home, report):
+    removed = {p.name for p in (current / "bin").glob("omarchy-*")}
+    removed -= {p.name for p in (target / "bin").glob("omarchy-*")}
+    if not removed:
+        return
+    pattern = re.compile(r"(?<![\w-])(" + "|".join(map(re.escape, sorted(removed))) + r")(?![\w-])")
+    found = {}
+    for path in user_files(home):
+        try:
+            lines = path.read_text(errors="strict").splitlines()
+        except (OSError, UnicodeDecodeError):
+            continue
+        comments = ("--",) if path.suffix == ".lua" else ("#", "//")
+        for line in lines:
+            if line.lstrip().startswith(comments):
+                continue
+            for command in pattern.findall(line):
+                found.setdefault((command, path), True)
+    for command, path in sorted(found, key=lambda item: (str(item[1]), item[0])):
+        shown = str(path).replace(str(home), "~", 1)
+        report.attention.append(f"{shown} calls {command}, which the release deletes.")
+
+
+def lint(plugin, shell, qmllint):
+    """Count qmllint warnings for a plugin, ignoring line numbers."""
+    files = sorted(str(p) for p in plugin.rglob("*.qml") if ".git" not in p.parts)
+    if not files:
+        return Counter()
+    with tempfile.TemporaryDirectory() as imports:
+        (Path(imports) / "qs").symlink_to(shell)
+        result = subprocess.run(
+            [qmllint, "-I", imports, *files], capture_output=True, text=True, cwd=plugin
+        )
+    warnings = Counter()
+    for line in (result.stdout + result.stderr).splitlines():
+        found = re.match(r"(Warning|Error): (.+?):\d+:\d+: (.*)", line)
+        if found:
+            warnings[(Path(found.group(2)).name, found.group(3))] += 1
+    return warnings
+
+
+def compare_plugins(current, target, home, report):
+    plugins = home / ".config/omarchy/plugins"
+    if not plugins.is_dir():
+        return
+    qmllint = shutil.which("qmllint") or (QMLLINT if Path(QMLLINT).exists() else None)
+    if not qmllint:
+        report.limits.append("qmllint wasn't found, so plugins weren't linted.")
+        return
+    for plugin in sorted(p for p in plugins.iterdir() if p.is_dir()):
+        before = lint(plugin.resolve(), current / "shell", qmllint)
+        after = lint(plugin.resolve(), target / "shell", qmllint)
+        new = after - before
+        if new:
+            sample = next(iter(new))
+            report.notes.append(
+                f"{plugin.name}: {sum(new.values())} new qmllint warnings, such as "
+                f"{sample[0]}: {sample[1]}"
+            )
+    report.limits.append(
+        "qmllint can't prove a plugin works. Most plugin breaks only show when the shell runs them."
+    )
+
+
+def latest_tag():
+    url = f"https://api.github.com/repos/{REPO}/releases?per_page=1"
+    with urllib.request.urlopen(url, timeout=30) as response:
+        return json.load(response)[0]["tag_name"]
+
+
+def fetch_release(tag, cache):
+    root = cache / tag
+    if not root.is_dir():
+        cache.mkdir(parents=True, exist_ok=True)
+        url = f"https://github.com/{REPO}/archive/refs/tags/{tag}.tar.gz"
+        with tempfile.TemporaryDirectory(dir=cache) as scratch:
+            archive = Path(scratch) / "release.tar.gz"
+            with urllib.request.urlopen(url, timeout=120) as response, archive.open("wb") as out:
+                shutil.copyfileobj(response, out)
+            with tarfile.open(archive) as tar:
+                tar.extractall(scratch, filter="data")
+            unpacked = next(p for p in Path(scratch).iterdir() if p.is_dir())
+            unpacked.rename(root)
+    return root
+
+
+def installed_version():
+    try:
+        output = subprocess.run(["pacman", "-Q", "omarchy"], capture_output=True, text=True, check=True).stdout
+    except (OSError, subprocess.CalledProcessError):
+        return "unknown"
+    return output.split()[-1]
+
+
+def print_section(title, lines):
+    if lines:
+        print(f"\n{title}")
+        for line in lines:
+            print(textwrap.fill(line, 88, initial_indent="  - ", subsequent_indent="    "))
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Check your Omarchy setup against a release.")
+    parser.add_argument("tag", nargs="?", help="release tag (default: the newest, including RCs)")
+    parser.add_argument("--target", type=Path, help="use an unpacked release instead of downloading")
+    parser.add_argument("--root", type=Path, default=Path("/usr/share/omarchy"))
+    parser.add_argument("--home", type=Path, default=Path.home())
+    options = parser.parse_args()
+
+    target = options.target
+    tag = options.tag
+    if target is None:
+        cache = Path(os.environ.get("XDG_CACHE_HOME", options.home / ".cache")) / "omaupdateimpact"
+        try:
+            tag = tag or latest_tag()
+            target = fetch_release(tag, cache)
+        except OSError as error:
+            print(f"Couldn't download the release: {error}", file=sys.stderr)
+            return 2
+
+    report = Report()
+    user = Parsed()
+    bindings = options.home / ".config/hypr/bindings.lua"
+    if bindings.is_file():
+        parse_lua(bindings.read_text(errors="replace"), user)
+
+    compare_bindings(parse_defaults(options.root), parse_defaults(target), user, report)
+    compare_packages(target, options.home, installed_packages(), report)
+    compare_commands(options.root, target, options.home, report)
+    compare_plugins(options.root, target, options.home, report)
+
+    print(f"Omarchy {installed_version()} -> {tag or target.name}. Nothing was changed.")
+    print_section("Needs attention", report.attention)
+    print_section("Worth knowing", report.notes)
+    print_section("Limits of this check", report.limits)
+    if not report.attention:
+        print("\nNothing found that needs attention.")
+    return 1 if report.attention else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

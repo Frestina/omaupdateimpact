@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# Runs the unit tests. Exits non-zero if anything fails.
+set -uo pipefail
+
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+cd "$root" || exit 1
+python3 -m unittest discover -s tests -t .
