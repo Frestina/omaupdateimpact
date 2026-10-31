@@ -25,6 +25,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 REPO = "omacom/omarchy"
+INSTALLED = "/usr/share/omarchy"
+TREE_PARTS = ["bin", "default/hypr", "migrations", "shell"]
 MODIFIERS = ["SUPER", "CTRL", "SHIFT", "ALT"]
 BIND_CALLS = ["o.bind_toggle", "o.rebind", "o.bind", "hl.bind", "hl.unbind"]
 TEXT_SUFFIXES = {"", ".lua", ".sh", ".hook", ".conf", ".toml", ".json", ".qml", ".js", ".py"}
@@ -63,6 +65,10 @@ class Finding:
 
     def text(self):
         return " ".join(part for part in (self.title, self.detail, self.fix) if part)
+
+
+class UnusableTree(Exception):
+    """A tree that can't be compared: going on would report nothing to worry about."""
 
 
 def blank_comments(text):
@@ -173,11 +179,19 @@ def parse_lua(text, parsed, source=""):
         parsed.binds[chord] = Bind(description, command, source)
 
 
-def parse_defaults(root):
+def check_tree(root, name):
+    missing = [part for part in TREE_PARTS if not (root / part).is_dir() or not any((root / part).iterdir())]
+    if missing:
+        raise UnusableTree(f"the {name} tree {root} has nothing in {', '.join(missing)}.")
+
+
+def parse_defaults(root, name):
     parsed = Parsed()
     for path in sorted((root / "default/hypr").rglob("*.lua")):
         if path.name != "helpers.lua":
             parse_lua(path.read_text(errors="replace"), parsed, str(path.relative_to(root)))
+    if not parsed.binds:
+        raise UnusableTree(f"the {name} tree {root} has no readable default bindings, so the format has moved.")
     return parsed
 
 
@@ -464,10 +478,10 @@ def fetch_release(tag, cache):
 
 def installed_version():
     try:
-        output = subprocess.run(["pacman", "-Q", "omarchy"], capture_output=True, text=True, check=True).stdout
+        output = subprocess.run(["omarchy-version"], capture_output=True, text=True, check=True).stdout
     except (OSError, subprocess.CalledProcessError):
         return "unknown"
-    return output.split()[-1]
+    return output.strip() or "unknown"
 
 
 def print_section(title, findings, level):
@@ -488,6 +502,7 @@ def fail(what, error, debug):
 
 def run(options):
     options.home = options.home or Path.home()
+    check_tree(options.root, "installed")
     target = options.target
     tag = options.tag
     if target is None:
@@ -497,6 +512,7 @@ def run(options):
             target = fetch_release(tag, cache)
         except DOWNLOAD_ERRORS as error:
             return fail("Couldn't download the release", error, options.debug)
+    check_tree(target, "release")
 
     user = Parsed()
     bindings = options.home / ".config/hypr/bindings.lua"
@@ -504,7 +520,7 @@ def run(options):
         parse_lua(bindings.read_text(errors="replace"), user, "~/.config/hypr/bindings.lua")
 
     findings = [
-        *compare_bindings(parse_defaults(options.root), parse_defaults(target), user),
+        *compare_bindings(parse_defaults(options.root, "installed"), parse_defaults(target, "release"), user),
         *compare_packages(target, options.home, installed_packages()),
         *compare_commands(options.root, target, options.home),
         *compare_plugins(options.root, target, options.home),
@@ -527,12 +543,19 @@ def main():
     parser = argparse.ArgumentParser(description="Check your Omarchy setup against a release.")
     parser.add_argument("tag", nargs="?", help="release tag (default: the newest, including RCs)")
     parser.add_argument("--target", type=Path, help="use an unpacked release instead of downloading")
-    parser.add_argument("--root", type=Path, default=Path("/usr/share/omarchy"))
+    parser.add_argument(
+        "--root",
+        type=Path,
+        default=Path(os.environ.get("OMARCHY_PATH") or INSTALLED),
+        help="the installed tree (default: $OMARCHY_PATH, then /usr/share/omarchy)",
+    )
     parser.add_argument("--home", type=Path)
     parser.add_argument("--debug", action="store_true", help="show the traceback when something fails")
     options = parser.parse_args()
     try:
         return run(options)
+    except UnusableTree as error:
+        return fail("Can't compare", error, options.debug)
     except Exception as error:
         return fail(f"Unexpected {type(error).__name__}", error, options.debug)
 

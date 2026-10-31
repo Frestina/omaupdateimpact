@@ -50,5 +50,12 @@ Paths already ruled out are not here; they are under
   uses it.
 - **A binding inside an `if` counts as always on.** v4.5.0-rc2's dictation
   bindings depend on the installed backend. Reading that would mean running Lua.
+- **A relative `--root`, `--target` or `$OMARCHY_PATH` breaks `lint()`.** The `qs`
+  symlink is made relative to the temporary directory, so it points nowhere, and
+  both lints fail the same way. No new warnings looks like a clean plugin. Fix
+  with 009, or resolve both trees where they're chosen.
+- **The first line shows this machine's version, even with `--root`.** Pointing
+  `--root` at another tree still prints what `omarchy-version` says. Only people
+  testing the tool use it that way, so it waits for 012.
 - **Evidence in the text report.** Findings carry evidence, but only `--json` (016)
   will show it. 012 could print it, if it doesn't crowd the report.

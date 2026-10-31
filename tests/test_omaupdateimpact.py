@@ -4,6 +4,7 @@ import importlib.machinery
 import importlib.util
 import io
 import os
+import shutil
 import tarfile
 import tempfile
 import unittest
@@ -314,8 +315,9 @@ class ProgramCase(unittest.TestCase):
 
     def tree(self, name, bindings):
         root = self.base / name
-        for part in ("bin", "default/hypr", "migrations", "shell"):
+        for part in impact.TREE_PARTS:
             (root / part).mkdir(parents=True)
+            (root / part / "keep").touch()
         (root / "default/hypr/bindings.lua").write_text(bindings)
         return root
 
@@ -400,6 +402,164 @@ class Program(ProgramCase):
             code, _, err = self.check("--debug")
         self.assertEqual(code, 2)
         self.assertIn("Traceback", err)
+
+
+class Trees(ProgramCase):
+    def setUp(self):
+        super().setUp()
+        self.root = self.base / "current"
+        self.target = self.base / "target"
+        self.empty = self.base / "empty"
+        self.empty.mkdir()
+
+    def compare(self, root, target):
+        return self.run_argv("--root", str(root), "--target", str(target), "--home", str(self.home))
+
+    def assert_refused(self, result, *names):
+        code, out, err = result
+        self.assertEqual((code, out), (2, ""))
+        self.assertEqual(len(err.splitlines()), 1)
+        for name in names:
+            self.assertIn(name, err)
+
+    def test_a_good_pair_of_trees_is_accepted(self):
+        self.assertEqual(self.check()[0], 0)
+
+    def test_a_missing_or_empty_root_exits_2(self):
+        for tree in (self.base / "nonexistent", self.empty):
+            with self.subTest(tree=tree):
+                self.assert_refused(self.compare(tree, self.target), str(tree), "installed", *impact.TREE_PARTS)
+
+    def test_a_missing_or_empty_target_exits_2(self):
+        for tree in (self.base / "nonexistent", self.empty):
+            with self.subTest(tree=tree):
+                self.assert_refused(self.compare(self.root, tree), str(tree), "release", *impact.TREE_PARTS)
+
+    def test_both_trees_missing_exits_2(self):
+        missing = self.base / "nonexistent"
+        self.assert_refused(self.compare(missing, missing), str(missing))
+
+    def test_a_file_is_not_a_tree(self):
+        path = self.base / "file"
+        path.touch()
+        self.assert_refused(self.compare(path, self.target), str(path))
+
+    def test_names_only_the_part_that_is_missing(self):
+        for part in impact.TREE_PARTS:
+            with self.subTest(part=part):
+                tree = self.tree(f"without-{part.replace('/', '-')}", 'o.bind("SUPER + W", "Close", "close-it")')
+                shutil.rmtree(tree / part)
+                result = self.compare(self.root, tree)
+                self.assert_refused(result, f"nothing in {part}.")
+
+    def test_a_part_with_nothing_in_it_counts_as_missing(self):
+        for part in ("bin", "migrations", "shell"):
+            with self.subTest(part=part):
+                tree = self.tree(f"hollow-{part}", 'o.bind("SUPER + W", "Close", "close-it")')
+                (tree / part / "keep").unlink()
+                self.assert_refused(self.compare(self.root, tree), f"nothing in {part}.")
+
+    def test_a_bad_root_stops_before_the_download(self):
+        with mock.patch.object(impact.urllib.request, "urlopen") as urlopen:
+            result = self.run_argv("--root", str(self.base / "nonexistent"), "--home", str(self.home), "v1.2.3")
+        self.assert_refused(result, "installed")
+        urlopen.assert_not_called()
+
+    def test_a_downloaded_release_must_be_usable_too(self):
+        shutil.rmtree(self.target / "shell")
+        self.assert_refused(self.download(io.BytesIO(self.archive())), "release", "nothing in shell.")
+
+    def test_no_readable_bindings_exits_2(self):
+        unreadable = {
+            "no bindings": "",
+            "only comments": '-- o.bind("SUPER + W", "Close", "close-it")',
+            "only computed keys": 'o.bind("SUPER + " .. n, "x", "y")',
+            "a format it doesn't know": 'o.key("SUPER + W", "Close", "close-it")',
+        }
+        for reason, text in unreadable.items():
+            with self.subTest(reason=reason):
+                tree = self.tree(f"unreadable-{len(reason)}", text)
+                self.assert_refused(self.compare(tree, self.target), str(tree), "installed", "bindings")
+                self.assert_refused(self.compare(self.root, tree), str(tree), "release", "bindings")
+
+    def test_no_lua_files_exits_2(self):
+        (self.target / "default/hypr/bindings.lua").unlink()
+        self.assert_refused(self.compare(self.root, self.target), "release", "bindings")
+
+    def test_bindings_in_the_helpers_file_do_not_count(self):
+        (self.target / "default/hypr/bindings.lua").rename(self.target / "default/hypr/helpers.lua")
+        self.assert_refused(self.compare(self.root, self.target), "release", "bindings")
+
+
+class InstalledTree(ProgramCase):
+    def run_with(self, *args, **environment):
+        target = ("--target", str(self.base / "target"), "--home", str(self.home))
+        with mock.patch.dict(os.environ, environment), \
+                mock.patch.object(impact, "INSTALLED", str(self.base / "fallback")), \
+                mock.patch.object(impact, "installed_packages", return_value=set()):
+            if "OMARCHY_PATH" not in environment:
+                os.environ.pop("OMARCHY_PATH", None)
+            return self.run_argv(*target, *args)
+
+    def test_omarchy_path_is_used_when_set(self):
+        self.assertEqual(self.run_with(OMARCHY_PATH=str(self.base / "current"))[0], 0)
+
+    def test_omarchy_path_is_what_gets_refused(self):
+        code, _, err = self.run_with(OMARCHY_PATH=str(self.base / "nowhere"))
+        self.assertEqual(code, 2)
+        self.assertIn(str(self.base / "nowhere"), err)
+
+    def test_without_omarchy_path_it_falls_back(self):
+        code, _, err = self.run_with()
+        self.assertEqual(code, 2)
+        self.assertIn(str(self.base / "fallback"), err)
+
+    def test_an_empty_omarchy_path_falls_back(self):
+        code, _, err = self.run_with(OMARCHY_PATH="")
+        self.assertEqual(code, 2)
+        self.assertIn(str(self.base / "fallback"), err)
+
+    def test_root_overrides_omarchy_path(self):
+        root = str(self.base / "current")
+        self.assertEqual(self.run_with("--root", root, OMARCHY_PATH=str(self.base / "nowhere"))[0], 0)
+
+
+class InstalledVersion(ProgramCase):
+    def stub(self, script):
+        directory = self.base / "stub"
+        directory.mkdir()
+        command = directory / "omarchy-version"
+        command.write_text(f"#!/bin/sh\n{script}\n")
+        command.chmod(0o755)
+        return str(directory)
+
+    def first_line(self, path):
+        with mock.patch.dict(os.environ, PATH=path):
+            return self.check()[1].splitlines()[0]
+
+    def test_shows_what_omarchy_version_says(self):
+        self.assertIn("Omarchy 4.0.6-1 ->", self.first_line(self.stub("echo 4.0.6-1")))
+
+    def test_keeps_a_dev_version_whole(self):
+        self.assertIn("Omarchy dev (abc1234) ->", self.first_line(self.stub('echo "dev (abc1234)"')))
+
+    def test_a_failing_command_is_unknown(self):
+        self.assertIn("Omarchy unknown ->", self.first_line(self.stub("exit 1")))
+
+    def test_no_output_is_unknown(self):
+        self.assertIn("Omarchy unknown ->", self.first_line(self.stub("true")))
+
+    def test_a_missing_command_is_unknown(self):
+        self.assertIn("Omarchy unknown ->", self.first_line(str(self.base / "nowhere")))
+
+    def test_the_copy_in_a_tree_is_never_run(self):
+        marker = self.base / "ran"
+        for name in ("current", "target"):
+            command = self.base / name / "bin/omarchy-version"
+            command.write_text(f"#!/bin/sh\ntouch {marker}\n")
+            command.chmod(0o755)
+        self.assertIn("Omarchy unknown ->", self.first_line(str(self.base / "nowhere")))
+        self.assertFalse(marker.exists())
 
 
 class Downloads(ProgramCase):

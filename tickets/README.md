@@ -30,7 +30,7 @@ when.
 | --- | --- | --- | --- |
 | 001 | [Name and project identity](001-name-and-identity.md) | | done |
 | 002 | [Typed findings and exit codes](002-findings-and-exit-codes.md) | 001 | done |
-| 003 | [Refuse unusable trees](003-refuse-unusable-trees.md) | 002 | todo |
+| 003 | [Refuse unusable trees](003-refuse-unusable-trees.md) | 002 | done |
 | 004 | [Follow the update channel](004-follow-the-channel.md) | 003 | todo |
 | 005 | [Downloads and the cache](005-downloads-and-cache.md) | 002 | todo |
 | 006 | [Read every binding helper](006-binding-helpers.md) | 002 | todo |

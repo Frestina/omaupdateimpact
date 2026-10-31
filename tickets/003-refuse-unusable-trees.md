@@ -30,7 +30,7 @@ installed tree is hardcoded.
 
 ## Done when
 
-- [ ] Missing and empty trees exit 2 for both `--root` and `--target`, with tests.
-- [ ] `OMARCHY_PATH` is used when set, with a test.
-- [ ] A tree with no readable bindings exits 2, with a test.
-- [ ] `tests/run` passes.
+- [x] Missing and empty trees exit 2 for both `--root` and `--target`, with tests.
+- [x] `OMARCHY_PATH` is used when set, with a test.
+- [x] A tree with no readable bindings exits 2, with a test.
+- [x] `tests/run` passes.

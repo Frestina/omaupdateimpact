@@ -96,8 +96,18 @@ names any newer release on another channel, and exits 0: there is no update.
 - **Release:** an unpacked tarball in the cache. `--target` overrides it. The
   whole gzip stream must pass its checksum before anything is unpacked.
 
-Before any check runs, both trees must contain `bin`, `default/hypr`, `migrations`
-and `shell`. If one doesn't, that is exit 2.
+Before any check runs, both trees must hold `bin`, `default/hypr`, `migrations`
+and `shell`, each with something in it. If one doesn't, that is exit 2, and the
+line names what's missing. The installed tree is checked first, so a bad one
+stops before any download.
+
+A tree with no readable default bindings is also exit 2: the format has moved.
+Computed keys don't count as readable.
+
+The installed version comes from `omarchy-version`, which also handles
+`omarchy-dev` and dev checkouts. It is the command on `PATH`, never the copy in a
+tree: `--root` can point at a release, and nothing from a release runs. If it
+fails, the version shows as "unknown".
 
 ### Checks
 
