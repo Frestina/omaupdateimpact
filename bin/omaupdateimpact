@@ -36,6 +36,7 @@ ATTENTION, NOTE, UNKNOWN = "attention", "note", "unknown"
 DOWNLOAD_ERRORS = (OSError, EOFError, ValueError, zlib.error, tarfile.TarError, http.client.HTTPException)
 VERSION = re.compile(r"(?:\d+:)?v?(\d+)\.(\d+)\.(\d+)(?:-?rc(\d+))?(?:-\d+)?")
 TAG = re.compile(r"v\d+\.\d+\.\d+(?:-rc\d+)?", re.ASCII)
+TOKEN = re.compile(r"[\x21-\x7e]+")
 KEPT_RELEASES = 2
 
 
@@ -487,7 +488,10 @@ def github(url, timeout, token=None, advice="Try again later."):
 
 
 def api(path):
-    token = os.environ.get("GITHUB_TOKEN")
+    token = os.environ.get("GITHUB_TOKEN", "").strip()
+    if token and not TOKEN.fullmatch(token):
+        # http.client's own complaint would quote the value.
+        raise ValueError("GITHUB_TOKEN holds characters a request header can't carry")
     advice = "Try again later." if token else "Try again later, or set GITHUB_TOKEN."
     with github(f"https://api.github.com/repos/{REPO}/{path}", 30, token, advice) as response:
         return json.load(response)

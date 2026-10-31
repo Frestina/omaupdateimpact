@@ -27,6 +27,8 @@ removes it, so an RC cycle fills the disk quietly.
   when it's set.
 - Say that it's downloading, and how large, on a terminal. A first run looks hung
   today.
+- Review follow-ups: a malformed `GITHUB_TOKEN` is never printed, and the test for
+  unreadable installed versions gets a name that fits.
 
 ## Done when
 
@@ -34,4 +36,7 @@ removes it, so an RC cycle fills the disk quietly.
 - [x] A third release prunes the oldest, with a test.
 - [x] Empty `XDG_CACHE_HOME` uses `~/.cache`, with a test.
 - [x] A 403 with a rate-limit header gives its own message, with a test.
+- [x] A `GITHUB_TOKEN` with a trailing newline still works, with a test.
+- [x] A `GITHUB_TOKEN` a header can't carry exits 2 on one line and isn't printed,
+      with or without `--debug`, with a test.
 - [x] `tests/run` passes.

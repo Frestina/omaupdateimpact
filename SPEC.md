@@ -132,8 +132,9 @@ a release runs. If it fails, the version shows as "unknown".
 ### Downloads
 
 `GITHUB_TOKEN`, when it's set, goes to `api.github.com` and nowhere else: a
-redirect doesn't carry it on, and the archive doesn't need it. A 403 or 429 with no
-requests left, or with `Retry-After`, is reported as the rate limit.
+redirect doesn't carry it on, and the archive doesn't need it. It is never printed,
+even when it's malformed. A 403 or 429 with no requests left, or with
+`Retry-After`, is reported as the rate limit.
 
 On a terminal, stderr says what is downloading and counts the megabytes. GitHub
 doesn't send the archive's size, so the count is all there is to show. Off a

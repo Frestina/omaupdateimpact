@@ -810,6 +810,27 @@ class Tokens(ProgramCase):
                 self.assertFalse(listing.has_header("Authorization"))
                 shutil.rmtree(self.cache)
 
+    def test_a_token_with_a_trailing_newline_still_works(self):
+        for token in ("fictional\n", "fictional\r\n", "  fictional "):
+            with self.subTest(token=token), mock.patch.dict(os.environ, GITHUB_TOKEN=token):
+                listing, _ = self.requests()
+                self.assertEqual(listing.get_header("Authorization"), "Bearer fictional")
+                shutil.rmtree(self.cache)
+
+    def test_a_token_a_header_cannot_carry_is_never_printed(self):
+        for token in ("fictional\nsecret", "fictional\r\nsecret", "fictional secret", "fictional\u00e9secret"):
+            for flags in ((), ("--debug",)):
+                with self.subTest(token=token, flags=flags), mock.patch.dict(os.environ, GITHUB_TOKEN=token), \
+                        mock.patch.object(impact.urllib.request, "urlopen") as urlopen:
+                    code, out, err = self.run_main("--channel", "stable", *flags)
+                    self.assertEqual((code, out), (2, ""))
+                    self.assertTrue(err.endswith("Couldn't download the release: GITHUB_TOKEN holds characters a request header can't carry\n"))
+                    self.assertNotIn("fictional", err)
+                    self.assertNotIn("secret", err)
+                    urlopen.assert_not_called()
+                    if not flags:
+                        self.assertEqual(len(err.splitlines()), 1)
+
     def test_a_redirect_drops_the_token(self):
         with mock.patch.dict(os.environ, GITHUB_TOKEN="fictional"):
             listing, _ = self.requests()
@@ -1012,7 +1033,7 @@ class Channels(ProgramCase):
         out = self.fetch("v1.2.2", own_tree=True)[1]
         self.assertEqual(out.splitlines()[1:], ["Newer on the stable channel: v1.2.3. To check it: omaupdateimpact v1.2.3"])
 
-    def test_two_unreadable_versions_are_not_the_same_version(self):
+    def test_an_unreadable_installed_version_matches_no_release(self):
         for version, tag in (('echo "dev (abc1234)"', "v1.2.3"), ("exit 1", "v1.2.2")):
             with self.subTest(version=version):
                 self.stub(version, 'echo "stable"')
