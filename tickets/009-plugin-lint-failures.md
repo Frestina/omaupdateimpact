@@ -24,10 +24,13 @@ warnings, the same result as a perfect plugin.
   exits non-zero with no parseable warnings, or it runs past a timeout.
 - Add a timeout. There is none today, so a hung `qmllint` hangs the tool.
 - Fix "1 new qmllint warnings".
+- Lint with an absolute path to each tree. With a relative `--root`, `--target` or
+  `$OMARCHY_PATH`, the `qs` symlink points nowhere, so new warnings never show.
 
 ## Done when
 
 - [ ] A failing `qmllint` gives `unknown` and exit 3, with a test.
 - [ ] A hanging `qmllint` is stopped, with a test.
 - [ ] Warning parsing is tested against captured real output, not a stub.
+- [ ] Relative tree paths find the same new warnings as absolute ones, with a test.
 - [ ] `tests/run` passes.
