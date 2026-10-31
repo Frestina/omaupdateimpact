@@ -31,7 +31,8 @@ alarms about files that aren't theirs. The README says extensions are scanned, b
   files.
 - A user file that can't be read, such as a broken symlink or a denied one, is
   `unknown` and names the file. This covers the single files too, like `.bashrc`,
-  which `is_file()` drops today when the link is broken. A binary file is still
+  which `is_file()` drops today when the link is broken, and a scanned folder that
+  is a broken link, which `is_dir()` drops the same way. A binary file is still
   skipped.
 
 ## Done when

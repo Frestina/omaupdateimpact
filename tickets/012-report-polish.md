@@ -27,6 +27,8 @@ notes after the findings, and one change can appear twice.
 - Colour on a terminal only, and honour `NO_COLOR`.
 - Show what was checked, so a clean result shows its work: bindings, migrations
   and plugins compared.
+- Reword the closing line for a check that ran in part. "These checks didn't run:
+  bindings." overstates it when only one computed key couldn't be compared.
 
 ## Not in this ticket
 
