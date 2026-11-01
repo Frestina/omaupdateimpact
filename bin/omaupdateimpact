@@ -5,6 +5,15 @@ Read-only: nothing from the release is ever run, its files are only read as
 text. See README.md.
 """
 
+import sys
+
+# Before the other imports, and this file must still parse on an old Python, or it
+# gets a traceback instead. tarfile's filter= needs 3.11.4.
+if sys.version_info < (3, 11, 4):
+    found = ".".join(map(str, sys.version_info[:3]))
+    print("omaupdateimpact needs Python 3.11.4 or newer, and this is " + found + ".", file=sys.stderr)
+    sys.exit(2)
+
 import argparse
 import gzip
 import http.client
@@ -13,7 +22,6 @@ import os
 import re
 import shutil
 import subprocess
-import sys
 import tarfile
 import tempfile
 import textwrap
@@ -25,6 +33,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 
+__version__ = "0.1.0"
 REPO = "omacom/omarchy"
 INSTALLED = "/usr/share/omarchy"
 TREE_PARTS = ["bin", "default/hypr", "migrations", "shell"]
@@ -1237,7 +1246,7 @@ def save(response, out, tag):
     done = 0
     try:
         print(f"Downloading {tag}...", end="", file=sys.stderr, flush=True)
-        while chunk := response.read(1 << 20):
+        for chunk in iter(lambda: response.read(1 << 20), b""):
             out.write(chunk)
             done += len(chunk)
             print(f"\rDownloading {tag}: {done / (1 << 20):.0f} MB", end="", file=sys.stderr, flush=True)
@@ -1423,14 +1432,18 @@ def run(options):
 def main():
     parser = argparse.ArgumentParser(description="Check your Omarchy setup against a release.")
     parser.add_argument("tag", nargs="?", help="release tag (default: what your channel would deliver)")
-    parser.add_argument("--channel", help="follow this channel (default: omarchy-version-channel)")
-    parser.add_argument("--target", type=Path, help="use an unpacked release instead of downloading")
+    parser.add_argument("--version", action="version", version=f"omaupdateimpact {__version__}")
+    parser.add_argument(
+        "--channel",
+        help="follow this channel: stable or rc; any other needs a tag (default: omarchy-version-channel)",
+    )
+    parser.add_argument("--target", type=Path, help="compare with this unpacked release instead of downloading one")
     parser.add_argument(
         "--root",
         type=Path,
         help="the installed tree (default: $OMARCHY_PATH, then /usr/share/omarchy)",
     )
-    parser.add_argument("--home", type=Path)
+    parser.add_argument("--home", type=Path, help="read your config from this folder (default: your home)")
     parser.add_argument("--all", action="store_true", help="show every note, not only how many there are")
     parser.add_argument("--debug", action="store_true", help="show the traceback when something fails")
     options = parser.parse_args()

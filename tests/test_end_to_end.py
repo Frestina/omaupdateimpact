@@ -1,3 +1,4 @@
+import ast
 import contextlib
 import io
 import json
@@ -343,6 +344,43 @@ class BindHold(RealCommand):
 
     def test_the_helper_is_no_limit(self):
         self.assertNotIn("isn't one this tool can read", flat(self.compare(self.clean_home).stdout))
+
+
+class Version(RealCommand):
+    def old_python(self, *version):
+        """Runs the real file with sys.version_info set to version."""
+        script = f"import runpy, sys; sys.version_info = {version}; sys.argv = ['x', '--version']; runpy.run_path({str(COMMAND)!r}, run_name='__main__')"
+        return subprocess.run(
+            [sys.executable, "-c", script], env=self.env(), capture_output=True, text=True, timeout=60, check=False
+        )
+
+    def test_version_comes_from_one_place(self):
+        result = self.command("--version")
+        self.assert_exit(result, 0)
+        self.assertEqual(result.stdout, f"omaupdateimpact {impact.__version__}\n")
+
+    def test_the_aur_package_has_the_same_version(self):
+        package = (COMMAND.parent.parent / "packaging/aur/PKGBUILD").read_text()
+        self.assertIn(f"\npkgver={impact.__version__}\n", package)
+
+    def test_help_explains_the_options_for_other_trees(self):
+        text = flat(self.command("--help").stdout)
+        for option in ("--channel CHANNEL follow", "--target TARGET compare", "--root ROOT the installed", "--home HOME read"):
+            self.assertIn(option, text)
+
+    def test_an_old_python_gets_one_line(self):
+        result = self.old_python(3, 11, 3, "final", 0)
+        self.assert_no_verdict(result, "omaupdateimpact needs Python 3.11.4 or newer, and this is 3.11.3.")
+        self.assertEqual(len(result.stderr.splitlines()), 1)
+
+    def test_the_oldest_python_it_takes_runs(self):
+        result = self.old_python(3, 11, 4, "final", 0)
+        self.assert_exit(result, 0)
+        self.assertIn("omaupdateimpact", result.stdout)
+
+    def test_an_old_python_can_parse_the_file(self):
+        # A syntax error comes before the check, and would be a traceback. 3.7 is as far back as ast reads.
+        ast.parse(COMMAND.read_text(), feature_version=(3, 7))
 
 
 class Promises(RealCommand):

@@ -373,6 +373,28 @@ breaking change bumps `schemaVersion`.
 
 Nothing else is written.
 
+## Install
+
+It needs Python 3.11.4, because `tarfile`'s `filter=` does. An older Python gets one
+line on stderr and exit 2. That check comes before the other imports, and the file
+has to parse on an old Python for it to run, so it uses no syntax newer than 3.7.
+`--version` reads `__version__` in the command, and the AUR package repeats that
+number because a `PKGBUILD` must state it. A test holds the two together.
+
+`install.sh` links the command into `~/.local/bin`, which Omarchy puts on `PATH`,
+and creates that folder if it's missing. It runs `--version` first, so a Python
+that's too old stops it with that one line and no link. It only ever touches its
+own link, meaning a link that resolves to the checkout the script is in. Anything
+else there, including a link to another checkout or a broken one, is left alone and
+is exit 1. Finding its own link already there is exit 0.
+
+`install.sh --uninstall` removes that link and nothing else. It names the cache
+when there is one, and leaves it for the user to delete. `~/.local/bin` stays, even
+if the install created it, because other tools share it.
+
+The AUR package is in `packaging/aur`. It installs to `/usr/bin` and doesn't use
+`install.sh`.
+
 ## Neighbours
 
 Checked 2026-10-31. These are the closest tools; none compares your bindings,

@@ -1,0 +1,25 @@
+# Maintainer: Frestina
+
+pkgname=omaupdateimpact
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Check your Omarchy setup against a release before you update"
+arch=('any')
+url="https://github.com/Frestina/omaupdateimpact"
+license=('MIT')
+depends=('python>=3.11.4')
+optdepends=('qt6-declarative: qmllint, for the plugin check')
+source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
+sha256sums=('SKIP') # Set from the tagged tarball when publishing.
+
+check() {
+  cd "$pkgname-$pkgver"
+  [[ "$(python bin/omaupdateimpact --version)" == "omaupdateimpact $pkgver" ]]
+}
+
+package() {
+  cd "$pkgname-$pkgver"
+  install -Dm755 bin/omaupdateimpact "$pkgdir/usr/bin/omaupdateimpact"
+  install -Dm644 README.md "$pkgdir/usr/share/doc/$pkgname/README.md"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

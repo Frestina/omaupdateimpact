@@ -21,7 +21,8 @@ machine first.
 - Once the repo is public, make CI's jobs required checks on `main`, with admins
   exempt, so ticket commits still go directly to `main`.
 - Tag `v0.1.0` with release notes taken from the changelog.
-- Publish the AUR package from 013.
+- Publish the AUR package from 013. Its checksum is `SKIP` until the tag exists, so
+  set it from the tagged tarball and generate `.SRCINFO` first.
 - Share it where Omarchy users are, after the owner has reviewed the text.
 
 ## Done when

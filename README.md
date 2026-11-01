@@ -75,11 +75,25 @@ prints one line, and `--debug` adds the traceback.
 
 ## Install
 
-Needs Python 3.11 or newer. `qmllint` is optional and comes with Qt.
+Needs Python 3.11.4 or newer. `qmllint` is optional and comes with Qt.
+
+From a clone of this repository:
 
 ```
-ln -s "$PWD/bin/omaupdateimpact" ~/.local/bin/omaupdateimpact
+./install.sh
 ```
+
+That links the command into `~/.local/bin`, so keep the clone where it is. Running
+it twice is harmless, and it won't replace a file that isn't its own link.
+
+To remove it:
+
+```
+./install.sh --uninstall
+```
+
+That removes the link and tells you where the cache is, which it leaves for you to
+delete.
 
 ## Tests
 

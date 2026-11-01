@@ -27,7 +27,7 @@ Make it one step to install and one step to remove, with no `curl | bash` requir
 
 ## Done when
 
-- [ ] Installing twice is harmless, and an existing regular file is left alone.
-- [ ] Uninstall leaves nothing behind but the cache, and says so.
-- [ ] An old Python gets one line, not a traceback.
-- [ ] `tests/run` passes.
+- [x] Installing twice is harmless, and an existing regular file is left alone.
+- [x] Uninstall leaves nothing behind but the cache, and says so.
+- [x] An old Python gets one line, not a traceback.
+- [x] `tests/run` passes.
