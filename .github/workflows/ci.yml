@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    name: tests on Python ${{ matrix.python }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.15"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install the tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qt6-declarative-dev-tools shellcheck
+          pip install ruff==0.17.3
+      # tests/run skips a tool that is missing, and CI must not pass that way.
+      - name: Check the tools are there
+        run: |
+          /usr/lib/qt6/bin/qmllint --version
+          shellcheck --version
+          ruff --version
+      - run: tests/run
+
+  arch:
+    # Ubuntu's qmllint is frozen at an old Qt. This one is what Omarchy users get, so
+    # this is the job that sees its output change.
+    name: tests on Arch
+    runs-on: ubuntu-24.04
+    container: archlinux:latest
+    timeout-minutes: 15
+    steps:
+      - name: Install the tools
+        run: pacman -Syu --noconfirm --needed python qt6-declarative
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Check qmllint is there
+        run: /usr/lib/qt6/bin/qmllint --version
+      # Root reads everything, so the tests of unreadable folders need a normal user.
+      - name: Run the tests as a normal user
+        run: |
+          useradd --create-home tester
+          chown -R tester .
+          su tester -c tests/run

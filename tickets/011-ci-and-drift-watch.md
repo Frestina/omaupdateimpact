@@ -30,5 +30,5 @@ That is the project's biggest long-term risk.
 ## Done when
 
 - [ ] CI runs on a pull request and blocks on failure.
-- [ ] The scheduled job has been run by hand once and passes.
-- [ ] A deliberately unknown helper in a fixture makes the job fail.
+- [x] The scheduled job has been run by hand once and passes.
+- [x] A deliberately unknown helper in a fixture makes the job fail.

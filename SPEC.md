@@ -175,6 +175,10 @@ One plugin failing doesn't stop the others. Warnings with no file, such as
 `Warning: 2:1: Failed to import`, aren't counted: the line with the file comes
 just before them. The tests read output captured from `qmllint` 6.12.0.
 
+CI runs the real `qmllint` too. Its `RealQmllint` tests fail if the output stops
+reading. Ubuntu's version is frozen at an old Qt, so a CI job on rolling Arch runs
+the same version Omarchy users get, and that is the job that sees a change.
+
 ### Reading release formats
 
 The tool reads Omarchy's internal formats, and they change. v4.5.0-rc2 added
@@ -185,6 +189,13 @@ releases for it. Every Lua file under `default/hypr` is searched, not only
 `helpers.lua`, so moving a helper doesn't hide it. A helper assigned to `o`, such
 as `o.bind_foo = function`, counts too. `o.preinstalled_bindings_enabled` matches
 the name but binds nothing, so it needs no rule.
+
+A daily job, the drift watch, reads the newest release, RCs included. It fails on
+a helper with no rule, on zero default bindings and on a missing tree folder, and
+also when it can't fetch the release. It has read access only and reads the release
+as text, as the tool does. A failed run reaches the owner through GitHub's own
+notice for failed scheduled runs. CI and the watch are in `.github/workflows`, and
+`python3 -m tests.drift_watch --target PATH` runs the watch on an unpacked tree.
 
 A chord holds every bind made on it, so a press and release pair is one action.
 Two chords do the same thing when each bind on one has a match on the other.
