@@ -327,3 +327,5 @@ end
 function o.transparent_window(match, opacity)
   o.window(match, { opacity = opacity or "0.985 0.96", tag = "+transparent-window" })
 end
+
+function o.bind_mystery(keys) end
