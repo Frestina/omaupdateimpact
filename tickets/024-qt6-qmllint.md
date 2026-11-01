@@ -37,5 +37,5 @@ breaks [rule 1](../SPEC.md#what-must-never-happen).
 - [x] A Qt 5 `qmllint` first on `PATH` isn't used when the Qt 6 one exists, with a test.
 - [x] With only a Qt 5 `qmllint`, plugins are `unknown` and never exit 0, with a test.
 - [x] A `--version` that can't be read counts as not Qt 6, with a test.
-- [ ] The desktop-style setup gives "4 plugins linted" on a real machine with both.
+- [x] The desktop-style setup gives "4 plugins linted" on a real machine with both.
 - [x] `tests/run` passes.
