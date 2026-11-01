@@ -1,3 +1,5 @@
+import contextlib
+import io
 import json
 import os
 import re
@@ -12,6 +14,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from unittest import mock
 
+from tests import drift_watch
 from tests.test_omaupdateimpact import QMLLINT_OUTPUT, ProgramCase, impact
 
 COMMAND = Path(__file__).parent.parent / "bin/omaupdateimpact"
@@ -294,6 +297,53 @@ class Promises(RealCommand):
             self.assertNotIn(b"/home/", data, path)
 
 
+class DriftWatch(unittest.TestCase):
+    """The command the scheduled job runs, on a copy of a real release."""
+
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.release = Path(directory.name) / "v4.5.0-rc2"
+        shutil.copytree(NEW, self.release)
+
+    def watch(self):
+        return subprocess.run(
+            [sys.executable, "-m", "tests.drift_watch", "--target", str(self.release)],
+            cwd=COMMAND.parent.parent, capture_output=True, text=True, timeout=60, check=False,
+        )
+
+    def assert_fails(self, message):
+        result = self.watch()
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn(message, result.stdout)
+
+    def test_a_release_it_can_read_passes(self):
+        result = self.watch()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(result.stdout, "v4.5.0-rc2 fits the parser.\n")
+
+    def test_an_unknown_helper_fails(self):
+        with (self.release / "default/hypr/helpers.lua").open("a") as helpers:
+            helpers.write("\nfunction o.bind_mystery(keys) end\n")
+        self.assert_fails("default/hypr/helpers.lua defines o.bind_mystery")
+
+    def test_an_unknown_helper_in_another_file_fails(self):
+        (self.release / "default/hypr/extra.lua").write_text("o.bind_mystery = function(keys) end\n")
+        self.assert_fails("default/hypr/extra.lua defines o.bind_mystery")
+
+    def test_zero_bindings_fails(self):
+        shutil.rmtree(self.release / "default/hypr/bindings")
+        self.assert_fails("no readable default bindings")
+
+    def test_a_missing_tree_directory_fails(self):
+        for part in impact.TREE_PARTS:
+            with self.subTest(part=part):
+                moved = self.release.parent / "moved"
+                (self.release / part).rename(moved)
+                self.assert_fails(f"has nothing in {part}")
+                moved.rename(self.release / part)
+
+
 class Handler(BaseHTTPRequestHandler):
     """Answers from server.routes. A method other than GET gets a 501 and fails the test."""
 
@@ -316,6 +366,7 @@ class LocalDownloads(ProgramCase):
     ARCHIVE = "/omacom/omarchy/archive/refs/tags/v4.5.0-rc2.tar.gz"
     CODELOAD = "/codeload/v4.5.0-rc2.tar.gz"
     LATEST = "/api/repos/omacom/omarchy/releases/latest"
+    RELEASES = "/api/repos/omacom/omarchy/releases?per_page=100"
 
     def setUp(self):
         super().setUp()
@@ -382,6 +433,35 @@ class LocalDownloads(ProgramCase):
 
     def test_a_tag_that_isnt_there_exits_2(self):
         self.assert_download_failed(self.run_tag("v4.5.0-rc2"))
+
+    def test_the_drift_watch_reads_the_newest_release_by_version(self):
+        self.routes[self.RELEASES] = (200, {}, json.dumps([{"tag_name": "v4.0.6"}, {"tag_name": "v4.5.0-rc2"}]).encode())
+        self.serve(self.real_archive())
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            code = drift_watch.main([])
+        self.assertEqual((code, out.getvalue()), (0, "v4.5.0-rc2 fits the parser.\n"))
+        self.assertEqual([path for path, _ in self.seen], [self.RELEASES, self.ARCHIVE, self.CODELOAD])
+
+    def test_the_drift_watch_finds_a_new_helper_in_a_download(self):
+        self.routes[self.RELEASES] = (200, {}, json.dumps([{"tag_name": "v4.5.0-rc2"}]).encode())
+        self.real_archive()
+        with (self.base / "target/default/hypr/helpers.lua").open("a") as helpers:
+            helpers.write("\nfunction o.bind_mystery(keys) end\n")
+        self.serve(self.archive())
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(drift_watch.main([]), 1)
+        self.assertIn("o.bind_mystery", out.getvalue())
+
+    def test_the_drift_watch_fails_when_the_list_has_no_release(self):
+        self.routes[self.RELEASES] = (200, {}, b"[]")
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(drift_watch.main([]), 1)
+        self.assertIn("no usable release", out.getvalue())
+
+    def test_the_drift_watch_fails_when_the_download_does(self):
+        self.routes[self.RELEASES] = (200, {}, json.dumps([{"tag_name": "v4.5.0-rc2"}]).encode())
+        with self.assertRaises(impact.urllib.error.HTTPError):
+            drift_watch.main([])
 
     def test_the_rate_limit_is_named(self):
         self.routes[self.ARCHIVE] = (403, {"x-ratelimit-remaining": "0"}, b"")

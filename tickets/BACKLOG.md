@@ -76,7 +76,18 @@ Paths already ruled out are not here; they are under
 - **`qmllint` output that stops parsing with exit 0.** A format change would read
   as no warnings, the same as a clean plugin. A non-zero exit is caught, and exit 0
   can't be told from Info lines alone without knowing the new format. The real
-  `qmllint` test catches it where `qmllint` is installed, and 011 runs that in CI.
+  `qmllint` test catches it where `qmllint` is installed, and CI runs that on Arch.
+- **A new `qmllint` waits for the next push.** Arch's `qmllint` only runs in CI on a
+  push or a pull request, not daily like the drift watch. A quiet repo could miss a
+  new Qt for a while. Adding the Arch job to a schedule is small; waits to see how
+  quiet the repo gets after 0.1.0.
+- **A new tag shape hides from the drift watch.** Tags that don't look like `v1.2.3`
+  or `v1.2.3-rc1` are dropped from the list, so a `v4.6.0-beta1` would leave the
+  watch reading the release before it, and passing. Waits for Omarchy to change its
+  tags.
+- **The watch stops if the repo goes quiet.** GitHub turns off scheduled workflows
+  after 60 days with no activity in a public repo, and warns by email first. Waits
+  for 0.1.0, since it only applies once the repo is public.
 - **A plugin folder named like a systemd one.** The walk shared with the commands
   check skips `.wants` and `.requires` folders, so QML in one isn't linted. No QML
   project names a folder that way, so this waits for a real report.
