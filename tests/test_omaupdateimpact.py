@@ -22,6 +22,10 @@ impact = importlib.util.module_from_spec(spec)
 loader.exec_module(impact)
 
 
+QMLLINT_OUTPUT = Path(__file__).parent / "fixtures/qmllint-6.12.0"
+REAL_QMLLINT = shutil.which("qmllint") or (impact.QMLLINT if Path(impact.QMLLINT).exists() else None)
+
+
 def parse(text):
     parsed = impact.Parsed()
     impact.parse_lua(text, parsed)
@@ -1109,7 +1113,7 @@ class Plugins(unittest.TestCase):
             findings = impact.compare_plugins(Path("current"), Path("target"), home)
             notes = titles(findings, "note")
             self.assertEqual(len(notes), 2)
-            self.assertIn("1 new qmllint warnings, such as a.qml: new", notes[0])
+            self.assertIn("1 new qmllint warning, such as a.qml: new", notes[0])
             self.assertEqual(
                 [finding.evidence for finding in findings],
                 [["~/.config/omarchy/plugins/demo/a.qml"], ["~/.config/omarchy/plugins"]],
@@ -1133,6 +1137,174 @@ class Plugins(unittest.TestCase):
             home = Path(directory)
             (home / ".config/omarchy/plugins").mkdir(parents=True)
             self.assertEqual(self.findings_without_qmllint(home), [])
+
+    def test_two_new_warnings_are_plural(self):
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            (home / ".config/omarchy/plugins/demo").mkdir(parents=True)
+            found = [impact.Counter(), impact.Counter({("a.qml", "new"): 2})]
+            with mock.patch.object(impact, "lint", side_effect=found), \
+                    mock.patch.object(impact.shutil, "which", return_value="/bin/true"):
+                findings = impact.compare_plugins(Path("current"), Path("target"), home)
+        self.assertIn("2 new qmllint warnings, such as", findings[0].title)
+
+
+class Lint(unittest.TestCase):
+    """lint() on a fictional plugin, with a script in place of qmllint."""
+
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.base = Path(directory.name)
+        self.home = self.base / "home"
+        self.plugin = self.home / ".config/omarchy/plugins/demo"
+        self.plugin.mkdir(parents=True)
+        (self.plugin / "Demo.qml").write_text("import QtQuick\nItem {}\n")
+        for tree in ["current", "target"]:
+            (self.base / tree / "shell").mkdir(parents=True)
+
+    def qmllint(self, script):
+        path = self.base / "qmllint"
+        path.write_text(f"#!/bin/sh\n{script}\n")
+        path.chmod(0o755)
+        return path
+
+    def replay(self, name, code=0):
+        """A qmllint that prints what the real one printed, on stderr like the real one."""
+        return self.qmllint(f"cat '{QMLLINT_OUTPUT / name}' >&2\nexit {code}")
+
+    def lint(self, qmllint, tree="current"):
+        return impact.lint(self.plugin, self.base / tree / "shell", str(qmllint))
+
+    def findings(self, qmllint):
+        with mock.patch.object(impact.shutil, "which", return_value=str(qmllint)):
+            return impact.compare_plugins(self.base / "current", self.base / "target", self.home)
+
+    def test_reads_real_warnings(self):
+        self.assertEqual(self.lint(self.replay("current.txt")), {
+            ("Demo.qml", "Unqualified access [unqualified]"): 1,
+        })
+
+    def test_a_warning_with_no_file_is_not_counted(self):
+        self.assertEqual(self.lint(self.replay("release.txt")), {
+            ("Demo.qml", 'Warnings occurred while importing module "qs.Palette": [import]'): 1,
+            ("Demo.qml", "Unqualified access [unqualified]"): 2,
+        })
+
+    def test_info_lines_are_not_warnings(self):
+        qmllint = self.qmllint("echo 'Info: /plugins/demo/Demo.qml:3:1: Unused import [unused-imports]' >&2")
+        self.assertEqual(self.lint(qmllint), {})
+
+    def test_warnings_from_a_failed_exit_still_count(self):
+        warnings = self.lint(self.replay("syntax-error.txt", 255))
+        self.assertEqual(warnings, {("Broken.qml", "Expected token `;' [syntax]"): 1})
+
+    def test_new_warnings_between_real_runs(self):
+        output = {"current": "current.txt", "target": "release.txt"}
+        qmllint = self.qmllint(
+            'case "$(readlink "$2/qs")" in\n'
+            + "".join(f"  */{tree}/shell) cat '{QMLLINT_OUTPUT / name}' >&2 ;;\n" for tree, name in output.items())
+            + "esac"
+        )
+        findings = self.findings(qmllint)
+        self.assertEqual(len(titles(findings, "note")), 2)
+        self.assertIn("demo: 2 new qmllint warnings, such as Demo.qml", findings[0].title)
+
+    def assert_unknown(self, qmllint, reason):
+        findings = self.findings(qmllint)
+        self.assertEqual([finding.level for finding in findings], ["unknown"])
+        self.assertEqual(findings[0].check, "plugins")
+        self.assertIn("demo couldn't be linted", findings[0].title)
+        self.assertIn(reason, findings[0].detail)
+        self.assertEqual(findings[0].evidence, ["~/.config/omarchy/plugins/demo"])
+
+    def test_a_failing_qmllint_is_unknown(self):
+        self.assert_unknown("/bin/false", "exited 1")
+
+    def test_a_signal_is_unknown(self):
+        self.assert_unknown(self.qmllint("kill -SEGV $$"), "signal 11")
+
+    def test_a_signal_is_unknown_even_with_warnings(self):
+        qmllint = self.qmllint(f"cat '{QMLLINT_OUTPUT / 'current.txt'}' >&2\nkill -KILL $$")
+        self.assert_unknown(qmllint, "signal 9")
+
+    def test_a_failure_on_the_release_alone_is_unknown(self):
+        qmllint = self.qmllint('case "$(readlink "$2/qs")" in\n  */target/shell) exit 1 ;;\nesac')
+        self.assert_unknown(qmllint, "exited 1")
+
+    def test_a_file_it_could_not_open_is_unknown_even_with_warnings(self):
+        self.assert_unknown(self.replay("unreadable-file.txt", 255), "couldn't open Gone.qml")
+
+    def test_a_qmllint_that_cant_start_is_unknown(self):
+        qmllint = self.qmllint("")
+        qmllint.chmod(0o644)
+        self.assert_unknown(qmllint, "couldn't start")
+
+    def test_output_that_isnt_text_is_still_read(self):
+        qmllint = self.qmllint(r"printf 'caf\351\n' >&2; cat '%s' >&2" % (QMLLINT_OUTPUT / "current.txt"))
+        self.assertEqual(sum(self.lint(qmllint).values()), 1)
+
+    def test_a_hanging_qmllint_is_stopped(self):
+        pid = self.base / "pid"
+        qmllint = self.qmllint(f"echo $$ > '{pid}'\nexec sleep 30")
+        with mock.patch.object(impact, "LINT_TIMEOUT", 0.2):
+            self.assert_unknown(qmllint, "ran past 0.2 seconds")
+        self.assertFalse(Path("/proc", pid.read_text().strip()).exists())
+
+    def test_one_failure_does_not_hide_another_plugin(self):
+        other = self.plugin.parent / "other"
+        other.mkdir()
+        (other / "Other.qml").write_text("import QtQuick\nItem {}\n")
+        findings = self.findings(self.qmllint('case "$PWD" in\n  */demo) exit 1 ;;\nesac'))
+        self.assertEqual([finding.level for finding in findings], ["unknown", "note"])
+
+    def test_no_qml_needs_no_lint(self):
+        (self.plugin / "Demo.qml").unlink()
+        self.assertEqual(self.lint("/bin/false"), {})
+
+    def test_relative_trees_find_the_same_warnings_as_absolute_ones(self):
+        (self.base / "current/shell/Palette").mkdir()
+        qmllint = self.qmllint(
+            'if [ ! -d "$2/qs/Palette" ]; then\n'
+            "  echo 'Warning: /plugins/demo/Demo.qml:2:1: Palette is gone [import]' >&2\n"
+            "fi"
+        )
+        with mock.patch.object(impact.shutil, "which", return_value=str(qmllint)):
+            absolute = impact.compare_plugins(self.base / "current", self.base / "target", self.home)
+            with contextlib.chdir(self.base):
+                relative = impact.compare_plugins(Path("current"), Path("target"), self.home)
+        self.assertIn("1 new qmllint warning, such as Demo.qml: Palette is gone", absolute[0].title)
+        self.assertEqual(relative, absolute)
+
+
+@unittest.skipUnless(REAL_QMLLINT, "qmllint isn't installed")
+class RealQmllint(unittest.TestCase):
+    """The fictional plugin through the real qmllint, when there is one."""
+
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.base = Path(directory.name)
+        self.home = self.base / "home"
+        plugin = self.home / ".config/omarchy/plugins/demo"
+        plugin.mkdir(parents=True)
+        shutil.copy(QMLLINT_OUTPUT / "plugin/Demo.qml", plugin)
+        shutil.copytree(QMLLINT_OUTPUT / "shell", self.base / "current/shell")
+        (self.base / "target/shell").mkdir(parents=True)
+
+    def findings(self, current, target):
+        with mock.patch.object(impact.shutil, "which", return_value=REAL_QMLLINT):
+            return impact.compare_plugins(current, target, self.home)
+
+    def test_a_module_the_release_removes_is_a_new_warning(self):
+        findings = self.findings(self.base / "current", self.base / "target")
+        self.assertIn("2 new qmllint warnings", findings[0].title)
+
+    def test_relative_trees_find_the_same_warnings_as_absolute_ones(self):
+        absolute = self.findings(self.base / "current", self.base / "target")
+        with contextlib.chdir(self.base):
+            relative = self.findings(Path("current"), Path("target"))
+        self.assertEqual(relative, absolute)
 
 
 class Terminal(io.StringIO):
@@ -1236,6 +1408,17 @@ class Program(ProgramCase):
         self.assertEqual(code, 3)
         self.assertNotIn("nothing found", out.lower())
         self.assertEqual(out.splitlines()[-1], "These checks didn't run: packages.")
+
+    def test_a_failing_qmllint_exits_3_and_names_the_plugin(self):
+        plugin = self.home / ".config/omarchy/plugins/demo"
+        plugin.mkdir(parents=True)
+        (plugin / "Demo.qml").write_text("import QtQuick\nItem {}\n")
+        with mock.patch.object(impact.shutil, "which", return_value="/bin/false"):
+            code, out, _ = self.check()
+        self.assertEqual(code, 3)
+        self.assertIn("demo couldn't be linted", out)
+        self.assertEqual(out.splitlines()[-1], "These checks didn't run: plugins.")
+        self.assertNotIn("nothing found", out.lower())
 
     def test_attention_outranks_unknown(self):
         (self.home / ".config/hypr").mkdir(parents=True)

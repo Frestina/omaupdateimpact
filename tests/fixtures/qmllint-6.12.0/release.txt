@@ -1,0 +1,13 @@
+Warning: /plugins/demo/Demo.qml:2:1: Warnings occurred while importing module "qs.Palette": [import]
+import qs.Palette
+^^^^^^
+---
+Warning: 2:1: Failed to import qs.Palette. Are your import paths set up properly? [import]
+---
+
+Warning: /plugins/demo/Demo.qml:5:20: Unqualified access [unqualified]
+    implicitWidth: Theme.gap
+                   ^^^^^
+Warning: /plugins/demo/Demo.qml:6:12: Unqualified access [unqualified]
+    width: missing
+           ^^^^^^^

@@ -29,8 +29,8 @@ warnings, the same result as a perfect plugin.
 
 ## Done when
 
-- [ ] A failing `qmllint` gives `unknown` and exit 3, with a test.
-- [ ] A hanging `qmllint` is stopped, with a test.
-- [ ] Warning parsing is tested against captured real output, not a stub.
-- [ ] Relative tree paths find the same new warnings as absolute ones, with a test.
-- [ ] `tests/run` passes.
+- [x] A failing `qmllint` gives `unknown` and exit 3, with a test.
+- [x] A hanging `qmllint` is stopped, with a test.
+- [x] Warning parsing is tested against captured real output, not a stub.
+- [x] Relative tree paths find the same new warnings as absolute ones, with a test.
+- [x] `tests/run` passes.

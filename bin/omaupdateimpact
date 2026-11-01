@@ -42,6 +42,7 @@ STARTUP_FILES = [
 ]
 LARGEST_SCANNED = 10 * 1024 * 1024
 QMLLINT = "/usr/lib/qt6/bin/qmllint"
+LINT_TIMEOUT = 60
 ATTENTION, NOTE, UNKNOWN = "attention", "note", "unknown"
 DOWNLOAD_ERRORS = (OSError, EOFError, ValueError, zlib.error, tarfile.TarError, http.client.HTTPException)
 VERSION = re.compile(r"(?:\d+:)?v?(\d+)\.(\d+)\.(\d+)(?:-?rc(\d+))?(?:-\d+)?")
@@ -120,6 +121,10 @@ class NoRelease(Exception):
 
 class ShellUnread(Exception):
     """A script this reader lost its place in."""
+
+
+class LintFailed(Exception):
+    """A lint that gave no answer, so it says nothing about the plugin."""
 
 
 class Op(str):
@@ -1001,20 +1006,36 @@ def compare_commands(current, target, home):
 
 
 def lint(plugin, shell, qmllint):
-    """Count qmllint warnings for a plugin, ignoring line numbers."""
+    """Count qmllint warnings for a plugin, ignoring line numbers.
+
+    qmllint exits 255 on a syntax error, so warnings can come with a failure.
+    """
     files = sorted(str(p) for p in plugin.rglob("*.qml") if ".git" not in p.parts)
     if not files:
         return Counter()
     with tempfile.TemporaryDirectory() as imports:
-        (Path(imports) / "qs").symlink_to(shell)
-        result = subprocess.run(
-            [qmllint, "-I", imports, *files], capture_output=True, text=True, cwd=plugin
-        )
+        (Path(imports) / "qs").symlink_to(shell.resolve())
+        try:
+            result = subprocess.run(
+                [qmllint, "-I", imports, *files],
+                capture_output=True, text=True, errors="replace", cwd=plugin, timeout=LINT_TIMEOUT,
+            )
+        except subprocess.TimeoutExpired:
+            raise LintFailed(f"qmllint ran past {LINT_TIMEOUT} seconds and was stopped") from None
+        except OSError as error:
+            raise LintFailed(f"qmllint couldn't start: {error.strerror}") from None
+    if result.returncode < 0:
+        raise LintFailed(f"qmllint died from signal {-result.returncode}")
     warnings = Counter()
     for line in (result.stdout + result.stderr).splitlines():
+        unread = re.match(r"(?:Warning|Error): (.+?):: Failed to open file", line)
+        if unread:
+            raise LintFailed(f"qmllint couldn't open {Path(unread.group(1)).name}")
         found = re.match(r"(Warning|Error): (.+?):\d+:\d+: (.*)", line)
         if found:
             warnings[(Path(found.group(2)).name, found.group(3))] += 1
+    if result.returncode and not warnings:
+        raise LintFailed(f"qmllint exited {result.returncode} with no warnings to read")
     return warnings
 
 
@@ -1028,25 +1049,34 @@ def compare_plugins(current, target, home):
     if not qmllint:
         return [Finding("plugins", UNKNOWN, "qmllint wasn't found, so plugins weren't linted.", [shown])]
     findings = []
+    linted = False
     for plugin in installed:
-        before = lint(plugin.resolve(), current / "shell", qmllint)
-        after = lint(plugin.resolve(), target / "shell", qmllint)
+        try:
+            before = lint(plugin.resolve(), current / "shell", qmllint)
+            after = lint(plugin.resolve(), target / "shell", qmllint)
+        except LintFailed as error:
+            title = f"{plugin.name} couldn't be linted, so it wasn't checked for new warnings."
+            findings.append(Finding("plugins", UNKNOWN, title, [f"{shown}/{plugin.name}"], detail=f"{error}."))
+            continue
+        linted = True
         new = after - before
         if new:
             sample = next(iter(new))
+            count = sum(new.values())
             findings.append(Finding(
                 "plugins",
                 NOTE,
-                f"{plugin.name}: {sum(new.values())} new qmllint warnings, such as "
+                f"{plugin.name}: {count} new qmllint {'warning' if count == 1 else 'warnings'}, such as "
                 f"{sample[0]}: {sample[1]}",
                 [f"{shown}/{plugin.name}/{sample[0]}"],
             ))
-    findings.append(Finding(
-        "plugins",
-        NOTE,
-        "qmllint can't prove a plugin works. Most plugin breaks only show when the shell runs them.",
-        [shown],
-    ))
+    if linted:
+        findings.append(Finding(
+            "plugins",
+            NOTE,
+            "qmllint can't prove a plugin works. Most plugin breaks only show when the shell runs them.",
+            [shown],
+        ))
     return findings
 
 

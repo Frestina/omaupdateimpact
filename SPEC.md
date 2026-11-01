@@ -155,7 +155,20 @@ Each check returns findings and says whether it could run.
 - **Plugins:** new `qmllint` warnings. If `qmllint` fails, that is unknown, not
   clean. These never count as "needs attention": see the Limits in the README.
   With no plugins there is nothing to lint, so a missing `qmllint` doesn't matter.
-  When plugins were linted, a note says `qmllint` can't prove a plugin works.
+  When plugins were linted, a note says `qmllint` can't prove a plugin works. See
+  [Linting plugins](#linting-plugins).
+
+### Linting plugins
+
+Each plugin is linted against both shells, as absolute paths. A plugin is `unknown`,
+and named, when `qmllint` can't start, dies from a signal, runs past 60 seconds, or
+can't open one of the plugin's files. It is also `unknown` when `qmllint` exits
+non-zero with no warnings to read. Warnings on a non-zero exit do count, because
+`qmllint` exits 255 on a syntax error, and a broken plugin is still an answer.
+
+One plugin failing doesn't stop the others. Warnings with no file, such as
+`Warning: 2:1: Failed to import`, aren't counted: the line with the file comes
+just before them. The tests read output captured from `qmllint` 6.12.0.
 
 ### Reading release formats
 

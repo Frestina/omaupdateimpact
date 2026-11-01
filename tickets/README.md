@@ -37,7 +37,7 @@ when.
 | 006 | [Read every binding helper](006-binding-helpers.md) | 002 | done |
 | 007 | [Read every package removal](007-package-removals.md) | 002 | done |
 | 008 | [Find every call to a deleted command](008-command-coverage.md) | 002 | done |
-| 009 | [Failed lints are unknown](009-plugin-lint-failures.md) | 002 | todo |
+| 009 | [Failed lints are unknown](009-plugin-lint-failures.md) | 002 | done |
 | 010 | [Tests against real releases](010-real-release-tests.md) | 003, 006, 007, 008, 009 | todo |
 | 011 | [CI and the drift watch](011-ci-and-drift-watch.md) | 010 | todo |
 

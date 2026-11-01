@@ -1,0 +1,3 @@
+Warning: /plugins/demo/Demo.qml:6:12: Unqualified access [unqualified]
+    width: missing
+           ^^^^^^^
