@@ -18,6 +18,8 @@ machine first.
   customization and one with several plugins.
 - Run `/audit` again and clear everything High or above.
 - Run a history scan for secrets and personal data before publishing.
+- Once the repo is public, make CI's jobs required checks on `main`, with admins
+  exempt, so ticket commits still go directly to `main`.
 - Tag `v0.1.0` with release notes taken from the changelog.
 - Publish the AUR package from 013.
 - Share it where Omarchy users are, after the owner has reviewed the text.
@@ -27,4 +29,5 @@ machine first.
 - [ ] Both machine runs have been read by a person, and every finding was right or
       became a ticket.
 - [ ] The audit has nothing High or above.
+- [ ] A pull request with a red check can't be merged.
 - [ ] The tag and release exist, and the AUR package installs on a clean machine.

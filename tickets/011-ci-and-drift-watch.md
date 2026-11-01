@@ -29,6 +29,7 @@ That is the project's biggest long-term risk.
 
 ## Done when
 
-- [ ] CI runs on a pull request and blocks on failure.
+- [x] CI runs on a pull request and fails on failure. Making it block is in 015,
+      since GitHub refuses branch protection on a private free-plan repo.
 - [x] The scheduled job has been run by hand once and passes.
 - [x] A deliberately unknown helper in a fixture makes the job fail.
