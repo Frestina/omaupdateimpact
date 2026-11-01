@@ -77,6 +77,9 @@ Paths already ruled out are not here; they are under
   as no warnings, the same as a clean plugin. A non-zero exit is caught, and exit 0
   can't be told from Info lines alone without knowing the new format. The real
   `qmllint` test catches it where `qmllint` is installed, and 011 runs that in CI.
+- **A plugin folder named like a systemd one.** The walk shared with the commands
+  check skips `.wants` and `.requires` folders, so QML in one isn't linted. No QML
+  project names a folder that way, so this waits for a real report.
 - **A plugin's own `.qmllint.ini`.** `qmllint` runs in the plugin's folder and reads
   it, so a plugin can turn warnings off. That's the same in both runs, so it only
   hides warnings. `--ignore-settings` would stop it. Waits for a real report.
