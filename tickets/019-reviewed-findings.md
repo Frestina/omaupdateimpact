@@ -27,6 +27,8 @@ user who has decided to let a package go.
 - A reviewed finding moves to a count at the end of the report and no longer
   affects the exit code.
 - A review applies to one target release, so a new release asks again.
+- `install.sh --uninstall` names that file and leaves it, as it does the cache, so
+  it never says nothing is left behind while the file is there.
 
 ## Done when
 

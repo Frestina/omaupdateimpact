@@ -74,6 +74,9 @@ Paths already ruled out are not here; they are under
   as no warnings, the same as a clean plugin. A non-zero exit is caught, and exit 0
   can't be told from Info lines alone without knowing the new format. The real
   `qmllint` test catches it where `qmllint` is installed, and CI runs that on Arch.
+- **CI's oldest Python is the newest 3.11.** The minimum is 3.11.4, and `3.11` in the
+  matrix follows the patch releases. The suite passed on 3.11.4 by hand when 013
+  set it. Pinning it is small; waits to see if a later change touches `tarfile`.
 - **A new `qmllint` waits for the next push.** Arch's `qmllint` only runs in CI on a
   push or a pull request, not daily like the drift watch. A quiet repo could miss a
   new Qt for a while. Adding the Arch job to a schedule is small; waits to see how
