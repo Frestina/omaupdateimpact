@@ -2,7 +2,6 @@ import contextlib
 import io
 import json
 import os
-import re
 import shutil
 import subprocess
 import sys
@@ -32,8 +31,8 @@ def files(*roots):
 
 
 def flat(text):
-    """Report text with its line wrapping undone. A line can also break after a hyphen."""
-    return " ".join(re.sub(r"(?<=\w-)\n\s+", "", text).split())
+    """Report text with its line wrapping undone."""
+    return " ".join(text.split())
 
 
 class RealCommand(unittest.TestCase):
@@ -128,7 +127,7 @@ class ExitCodes(RealCommand):
         result = self.compare(self.clean_home)
         self.assert_exit(result, 3)
         self.assertIn(f"Couldn't read what migrations/{UNREADABLE_MIGRATION} removes", flat(result.stdout))
-        self.assertEqual(result.stdout.splitlines()[-1], "These checks didn't run: packages.")
+        self.assertEqual(result.stdout.splitlines()[-1], "These checks ran in part: packages.")
 
     def test_a_missing_pacman_exits_3(self):
         (self.stubs / "pacman").unlink()
@@ -191,7 +190,8 @@ class Report(RealCommand):
         super().setUp()
         self.packages("dua-cli", "dust", "t3code-bin", "tensaku", "fictional-editor")
         self.result = self.compare(HOME)
-        self.output = flat(self.result.stdout)
+        self.everything = self.compare(HOME, "--all")
+        self.output = flat(self.everything.stdout)
 
     def attention(self):
         return flat(self.result.stdout.partition("Needs attention")[2].partition("Worth knowing")[0])
@@ -199,12 +199,82 @@ class Report(RealCommand):
     def test_it_exits_1_and_still_names_what_it_couldnt_read(self):
         self.assert_exit(self.result, 1)
         self.assertEqual(self.result.stderr, "")
-        self.assertEqual(self.result.stdout.splitlines()[-1], "These checks didn't run: packages.")
+        self.assertEqual(self.result.stdout.splitlines()[-1], "These checks ran in part: packages.")
+
+    def test_a_typical_report_fits_on_one_screen(self):
+        self.assertLessEqual(len(self.result.stdout.splitlines()), 40)
+        self.assertIn("Worth knowing: 11 notes. Add --all to see them.", self.result.stdout)
+        self.assertNotIn("Moved:", self.result.stdout)
+
+    def test_all_shows_the_notes_and_keeps_the_rest(self):
+        self.assertIn("Moved:", self.everything.stdout)
+        self.assertNotIn("--all", self.everything.stdout)
+        self.assertEqual(self.everything.returncode, self.result.returncode)
+        section = self.everything.stdout.partition("Needs attention")[2].partition("Worth knowing")[0]
+        self.assertEqual(section, self.result.stdout.partition("Needs attention")[2].partition("Worth knowing")[0])
+        self.assertIn("Limits of this check", self.everything.stdout)
+
+    def test_limits_are_never_collapsed(self):
+        self.assertIn(f"Couldn't read what migrations/{UNREADABLE_MIGRATION} removes", flat(self.result.stdout))
+
+    def test_no_command_is_split_across_lines(self):
+        for command in ("omarchy-voxtype-install", "omarchy-voxtype-status", "omarchy-system-shutdown"):
+            self.assertIn(command, self.everything.stdout)
+
+    def test_every_finding_that_needs_attention_has_a_fix(self):
+        lines = self.result.stdout.partition("Needs attention")[2].partition("Worth knowing")[0].splitlines()
+        self.assertEqual(sum(line.startswith("  - ") for line in lines), 10)
+        self.assertEqual(sum(line.startswith("    Fix: ") for line in lines), 10)
+
+    def test_a_removed_package_has_the_line_that_brings_it_back(self):
+        self.assertIn(
+            "Fix: After the update, run omarchy pkg add dua-cli (aur-add for an AUR package).",
+            self.result.stdout,
+        )
+        self.assertIn(
+            "Fix: If it goes, run omarchy pkg add t3code-bin (aur-add for an AUR package).",
+            self.result.stdout,
+        )
+
+    def test_a_deleted_command_says_why_it_has_no_exact_fix(self):
+        self.assertIn(
+            "~/.bashrc calls omarchy-voxtype-remove, which the release deletes. "
+            "Fix: Change or remove line 1. This tool can't tell what replaces the command.",
+            self.attention(),
+        )
+
+    def test_a_clean_result_and_this_one_show_what_was_checked(self):
+        self.assertIn(
+            "Checked 207 default bindings, 3 of yours, 27 pending migrations, "
+            "7 of your files for 6 deleted commands, 1 plugin linted.",
+            flat(self.result.stdout),
+        )
+        clean = self.compare(self.clean_home).stdout.splitlines()
+        self.assertEqual(clean[1:3], [
+            "Checked 207 default bindings, 0 of yours, 28 pending migrations, 0 of your files for 6",
+            "deleted commands, no plugins.",
+        ])
+
+    def test_a_move_and_what_it_displaced_are_one_finding(self):
+        self.assertIn(
+            'Moved: "Network" from SUPER + CTRL + W to SUPER + CTRL + N, replacing "Toggle nightlight". '
+            'SUPER + CTRL + W is now "Background switcher".',
+            self.output,
+        )
+        self.assertNotIn("SUPER + CTRL + N is now", self.output)
+        self.assertNotIn('it was "Network"', self.output)
+
+    def test_a_change_with_no_move_keeps_its_line(self):
+        self.assertIn('SUPER + ALT + SPACE is now "Apps", it was "Apps menu".', self.output)
+
+    def test_piped_output_has_no_colour(self):
+        for result in (self.result, self.everything, self.compare(self.clean_home)):
+            self.assertNotIn("\x1b", result.stdout)
 
     def test_a_new_default_on_your_key_is_a_clash(self):
         self.assertIn(
             'SUPER + M: your "Music" will clash with the new default "Minimize window to the dock". Both will fire. '
-            'Add hl.unbind("SUPER + M") or choose another key.',
+            'Fix: Add hl.unbind("SUPER + M") above your binding, or choose another key.',
             self.attention(),
         )
 
@@ -213,7 +283,8 @@ class Report(RealCommand):
 
     def test_a_shortcut_you_turned_off_that_moves_comes_back(self):
         self.assertIn(
-            'SUPER + CTRL + T: you turned off "Activity" here, but it moves to SUPER + SHIFT + T, so it comes back.',
+            'SUPER + CTRL + T: you turned off "Activity" here, but it moves to SUPER + SHIFT + T, so it comes back. '
+            'Fix: Add hl.unbind("SUPER + SHIFT + T") too.',
             self.attention(),
         )
 
@@ -255,12 +326,12 @@ class BindHold(RealCommand):
     """v4.5.0-rc2 moved its dictation keys to o.bind_hold, which the first version couldn't read."""
 
     def test_a_key_moved_to_the_helper_is_not_removed(self):
-        result = self.compare(self.clean_home)
+        result = self.compare(self.clean_home, "--all")
         self.assertNotIn("F9", result.stdout)
         self.assertNotIn("Default shortcuts removed", flat(result.stdout))
 
     def test_a_key_bound_with_the_helper_is_new(self):
-        output = flat(self.compare(self.clean_home).stdout)
+        output = flat(self.compare(self.clean_home, "--all").stdout)
         self.assertIn('ALT + ALT_R ("Start dictation (push-to-talk) / Stop dictation (push-to-talk)")', output)
 
     def test_your_key_clashes_with_the_helper(self):
@@ -462,6 +533,14 @@ class LocalDownloads(ProgramCase):
         self.routes[self.RELEASES] = (200, {}, json.dumps([{"tag_name": "v4.5.0-rc2"}]).encode())
         with self.assertRaises(impact.urllib.error.HTTPError):
             drift_watch.main([])
+
+    def test_a_rejected_token_is_named_and_never_printed(self):
+        self.routes[self.LATEST] = (401, {}, b"")
+        with mock.patch.dict(os.environ, GITHUB_TOKEN="fictional-token"):
+            result = self.run_tag()
+        self.assert_download_failed(result)
+        self.assertIn("GitHub rejected GITHUB_TOKEN", result[2])
+        self.assertNotIn("fictional-token", result[2])
 
     def test_the_rate_limit_is_named(self):
         self.routes[self.ARCHIVE] = (403, {"x-ratelimit-remaining": "0"}, b"")

@@ -15,6 +15,8 @@ notes after the findings, and one change can appear twice.
 ## Spec
 
 - [What it is](../SPEC.md#what-it-is)
+- [Choosing the release](../SPEC.md#choosing-the-release)
+- [Downloads](../SPEC.md#downloads)
 
 ## Scope
 
@@ -30,6 +32,11 @@ notes after the findings, and one change can appear twice.
   and plugins compared.
 - Reword the closing line for a check that ran in part. "These checks didn't run:
   bindings." overstates it when only one computed key couldn't be compared.
+- When the mirror and the packages disagree, say so instead of "the channel is
+  stable / rc, and only stable and rc have tagged releases". Name which is which:
+  `omarchy-version-channel` prints `mirror / packages`. It stays exit 2.
+- Name the token on a rejected `GITHUB_TOKEN`: a 401 with a token set says the token
+  was rejected, rather than `HTTP Error 401`. The token itself is never printed.
 
 ## Not in this ticket
 
@@ -37,8 +44,10 @@ notes after the findings, and one change can appear twice.
 
 ## Done when
 
-- [ ] No command name is ever split across lines, with a test.
-- [ ] Every attention finding has a fix, or a reason it can't have one.
-- [ ] A typical report fits on one screen, with `--all` for the rest.
-- [ ] Piped output has no colour codes, with a test.
-- [ ] `tests/run` passes.
+- [x] No command name is ever split across lines, with a test.
+- [x] Every attention finding has a fix, or a reason it can't have one.
+- [x] A typical report fits on one screen, with `--all` for the rest.
+- [x] Piped output has no colour codes, with a test.
+- [x] The mismatch message names the mirror and the packages, with a test.
+- [x] A 401 with a token set names the token and doesn't print it, with a test.
+- [x] `tests/run` passes.

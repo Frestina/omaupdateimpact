@@ -70,9 +70,6 @@ Paths already ruled out are not here; they are under
 - **Installed newer than the target.** Someone who moves from rc to stable has a
   version past the latest stable. The report treats that as an update, though
   nothing would be delivered until stable catches up. Waits for a real report.
-- **The message when the mirror and packages disagree.** It says "the channel is
-  stable / rc, and only stable and rc have tagged releases", which reads as a
-  contradiction. The exit 2 is right. 012 could reword it.
 - **`qmllint` output that stops parsing with exit 0.** A format change would read
   as no warnings, the same as a clean plugin. A non-zero exit is caught, and exit 0
   can't be told from Info lines alone without knowing the new format. The real
@@ -103,8 +100,13 @@ Paths already ruled out are not here; they are under
   it before then.
 - **A relative `XDG_CACHE_HOME`.** The XDG spec says to ignore it, and it's used as
   given. Waits for a real report.
-- **A rejected `GITHUB_TOKEN`.** A stale token shows as `HTTP Error 401`, with no
-  mention of the token. 012 could name it.
+- **Control characters in text from a release.** A description in a binding goes to
+  the terminal as written, so an escape code in one would reach it. It only shows
+  text, and nothing runs. Strip them in the report, and in `--json` (016) if it
+  matters there.
+- **"Is now" on a key you turned off.** `hl.unbind` goes by text, so yours also turns
+  off the default that lands on that key, and `SUPER + CTRL + T is now "Theme menu"`
+  isn't true for you. It's a note and needs no action. Say the new default stays off.
 - **A removal in a heredoc fed to a shell.** `bash <<EOF` isn't seen. Neither v4.0.6
   nor v4.5.0-rc2 does this, and the README lists it. Waits for a release that does.
 - **A release file named by a variable.** `source "$x"` isn't followed, and the

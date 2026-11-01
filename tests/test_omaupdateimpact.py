@@ -5,6 +5,7 @@ import importlib.util
 import io
 import json
 import os
+import re
 import shutil
 import tarfile
 import tempfile
@@ -261,7 +262,7 @@ class CompareBindings(unittest.TestCase):
         findings = compare("", 'o.bind("SUPER + M", "Minimize", "min")', 'o.bind("SUPER + M", "Mail", "mail")')
         self.assertEqual(len(titles(findings, "attention")), 1)
         self.assertIn("clash", titles(findings, "attention")[0])
-        self.assertEqual(findings[0].fix, 'Add hl.unbind("SUPER + M") or choose another key.')
+        self.assertEqual(findings[0].fix, 'Add hl.unbind("SUPER + M") above your binding, or choose another key.')
 
     def test_a_clash_names_the_files_behind_it(self):
         target, user = impact.Parsed(), impact.Parsed()
@@ -332,7 +333,7 @@ class CompareBindings(unittest.TestCase):
         findings = compare("", target, 'o.bind("ALT + Alt_R", "Mine", "m")')
         self.assertIn("ALT + ALT_R", titles(findings, "attention")[0])
         self.assertIn("Start / Stop", titles(findings, "attention")[0])
-        self.assertEqual(findings[0].fix, 'Add hl.unbind("ALT + Alt_R") or choose another key.')
+        self.assertEqual(findings[0].fix, 'Add hl.unbind("ALT + Alt_R") above your binding, or choose another key.')
 
     def test_a_clash_across_modifier_spellings(self):
         findings = compare("", 'o.bind("CONTROL + A", "New", "n")', 'o.bind("CTRL + A", "Mine", "m")')
@@ -340,7 +341,7 @@ class CompareBindings(unittest.TestCase):
 
     def test_a_fix_spells_the_keys_the_way_the_default_does(self):
         findings = compare("", 'o.bind("CONTROL + A", "New", "n")', 'o.bind("CTRL + A", "Mine", "m")')
-        self.assertEqual(findings[0].fix, 'Add hl.unbind("CONTROL + A") or choose another key.')
+        self.assertEqual(findings[0].fix, 'Add hl.unbind("CONTROL + A") above your binding, or choose another key.')
 
     def test_a_fix_names_each_way_a_default_is_spelled(self):
         target = 'o.bind("CONTROL + A", "New", "n")\no.bind("CTRL + A", "Other", "o")'
@@ -409,6 +410,56 @@ class CompareBindings(unittest.TestCase):
         findings = compare('o.bind("SUPER + Q", "Calc", "c")', 'o.bind("SUPER + SHIFT + Q", "Calc", "c")')
         self.assertIn('Moved: "Calc" from SUPER + Q to SUPER + SHIFT + Q.', titles(findings, "note"))
 
+    def test_a_move_names_the_default_it_replaces(self):
+        findings = compare(
+            'o.bind("SUPER + A", "Calc", "c")\no.bind("SUPER + B", "Night", "n")',
+            'o.bind("SUPER + B", "Calc", "c")',
+        )
+        self.assertEqual(titles(findings, "note")[0], 'Moved: "Calc" from SUPER + A to SUPER + B, replacing "Night".')
+        self.assertFalse([title for title in titles(findings, "note") if " is now " in title])
+
+    def test_a_move_names_what_takes_its_place(self):
+        findings = compare('o.bind("SUPER + A", "Calc", "c")', 'o.bind("SUPER + B", "Calc", "c")\no.bind("SUPER + A", "Fresh", "f")')
+        self.assertEqual(titles(findings, "note")[0], 'Moved: "Calc" from SUPER + A to SUPER + B. SUPER + A is now "Fresh".')
+        self.assertFalse([title for title in titles(findings, "note") if "it was" in title])
+
+    def test_a_merged_move_names_every_file_behind_it(self):
+        current, target = impact.Parsed(), impact.Parsed()
+        impact.parse_lua('o.bind("SUPER + A", "Calc", "c")', current, "old-a.lua")
+        impact.parse_lua('o.bind("SUPER + B", "Night", "n")', current, "old-b.lua")
+        impact.parse_lua('o.bind("SUPER + B", "Calc", "c")', target, "new-b.lua")
+        impact.parse_lua('o.bind("SUPER + A", "Fresh", "f")', target, "new-a.lua")
+        finding = impact.compare_bindings(current, target, impact.Parsed())[0]
+        self.assertEqual(finding.evidence, ["new-a.lua", "new-b.lua", "old-a.lua", "old-b.lua"])
+
+    def test_two_keys_that_swap_are_two_moves_and_nothing_else(self):
+        findings = compare(
+            'o.bind("SUPER + A", "Calc", "c")\no.bind("SUPER + B", "Night", "n")',
+            'o.bind("SUPER + B", "Calc", "c")\no.bind("SUPER + A", "Night", "n")',
+        )
+        self.assertEqual(titles(findings, "note"), [
+            'Moved: "Calc" from SUPER + A to SUPER + B.',
+            'Moved: "Night" from SUPER + B to SUPER + A.',
+        ])
+
+    def test_a_default_that_moved_on_isnt_replaced(self):
+        findings = compare(
+            'o.bind("SUPER + A", "Calc", "c")\no.bind("SUPER + B", "Night", "n")',
+            'o.bind("SUPER + B", "Calc", "c")\no.bind("SUPER + C", "Night", "n")',
+        )
+        self.assertEqual(titles(findings, "note"), [
+            'Moved: "Calc" from SUPER + A to SUPER + B.',
+            'Moved: "Night" from SUPER + B to SUPER + C.',
+        ])
+
+    def test_a_move_onto_your_key_says_nothing_about_the_old_default(self):
+        findings = compare(
+            'o.bind("SUPER + A", "Calc", "c")\no.bind("SUPER + B", "Night", "n")',
+            'o.bind("SUPER + B", "Calc", "c")',
+            'o.bind("SUPER + B", "Mine", "m")',
+        )
+        self.assertIn('Moved: "Calc" from SUPER + A to SUPER + B.', titles(findings, "note"))
+
     def test_a_turned_off_shortcut_that_moves_comes_back(self):
         findings = compare(
             'o.bind("SUPER + Q", "Calc", "c")',
@@ -438,7 +489,7 @@ class CompareBindings(unittest.TestCase):
         findings = compare(
             'o.bind("CTRL + Q", "Calc", "c")', 'o.bind("CONTROL + W", "Calc", "c")', 'hl.unbind("CTRL + Q")'
         )
-        self.assertEqual(findings[0].fix, "Unbind CONTROL + W too.")
+        self.assertEqual(findings[0].fix, 'Add hl.unbind("CONTROL + W") too.')
 
     def test_a_shortcut_that_comes_back_names_the_files_behind_it(self):
         current, target, user = impact.Parsed(), impact.Parsed(), impact.Parsed()
@@ -710,12 +761,21 @@ class Packages(unittest.TestCase):
         for text in ("x='open\n", 'x="open\n', "cat <<EOF\nno end\n", "x=$(open\n", "if x; then\n", "fi\n", "y)\n", "x=${open\n", "[[ open\n", "case x in\n", "x=`open\nomarchy-pkg-drop a\n"):
             self.assertEqual(self.unread(text), {("1.sh",)}, text)
 
+    def test_a_removal_comes_with_the_line_to_undo_it(self):
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory)
+            (target / "migrations").mkdir()
+            (target / "migrations/1.sh").write_text("omarchy-pkg-drop a\nif x; then omarchy-pkg-drop b; fi\n")
+            certain, possible = impact.compare_packages(target, target, {"a", "b"}, [])
+        self.assertEqual(certain.fix, "After the update, run omarchy pkg add a (aur-add for an AUR package).")
+        self.assertEqual(possible.fix, "If it goes, run omarchy pkg add b (aur-add for an AUR package).")
+
     def test_every_unreadable_argument_is_one_finding(self):
         with tempfile.TemporaryDirectory() as directory:
             target = Path(directory)
             (target / "migrations").mkdir()
             (target / "migrations/1.sh").write_text('omarchy-pkg-drop "$a" "$b"\nsudo pacman -Rns "${c[@]}"\n')
-            findings = impact.compare_packages(target, target, set())
+            findings = impact.compare_packages(target, target, set(), [])
         self.assertEqual([(finding.level, finding.evidence) for finding in findings], [("unknown", ["migrations/1.sh"])])
 
     def test_an_unreadable_migration_already_run_is_no_limit(self):
@@ -746,7 +806,7 @@ class Packages(unittest.TestCase):
         self.assertEqual(impact.package_changes(migrations, set()), (expected, {("1785351479.sh",)}))
 
     def test_a_missing_pacman_is_unknown(self):
-        finding = impact.compare_packages(Path("target"), Path("home"), None)[0]
+        finding = impact.compare_packages(Path("target"), Path("home"), None, [])[0]
         self.assertEqual((finding.check, finding.level), ("packages", "unknown"))
 
     def test_a_failing_pacman_counts_as_missing(self):
@@ -759,7 +819,7 @@ class Packages(unittest.TestCase):
             target = Path(directory)
             (target / "migrations").mkdir()
             (target / "migrations/1.sh").write_text("omarchy-pkg-drop a\n")
-            finding = impact.compare_packages(target, target, {"a"})[0]
+            finding = impact.compare_packages(target, target, {"a"}, [])[0]
         self.assertEqual((finding.level, finding.evidence), ("attention", ["migrations/1.sh"]))
 
 
@@ -786,7 +846,7 @@ class ReachedFiles(unittest.TestCase):
     def test_the_finding_names_both_files(self):
         self.command("omarchy-tool", "omarchy-pkg-drop a\n")
         (self.tree / "migrations/1.sh").write_text("omarchy-tool\n")
-        finding = impact.compare_packages(self.tree, self.tree, {"a"})[0]
+        finding = impact.compare_packages(self.tree, self.tree, {"a"}, [])[0]
         self.assertEqual(finding.evidence, ["migrations/1.sh", "bin/omarchy-tool"])
         self.assertIn("may remove a", finding.title)
 
@@ -868,7 +928,7 @@ class ReachedFiles(unittest.TestCase):
     def test_an_unknown_in_a_reached_file_names_both_files(self):
         self.command("omarchy-tool", 'omarchy-pkg-drop "$1"\n')
         (self.tree / "migrations/1.sh").write_text("omarchy-tool\n")
-        finding = impact.compare_packages(self.tree, self.tree, set())[0]
+        finding = impact.compare_packages(self.tree, self.tree, set(), [])[0]
         self.assertEqual((finding.level, finding.evidence), ("unknown", ["migrations/1.sh", "bin/omarchy-tool"]))
         self.assertEqual(finding.title, "Couldn't read what bin/omarchy-tool removes, called from migrations/1.sh, so check by hand.")
 
@@ -876,7 +936,7 @@ class ReachedFiles(unittest.TestCase):
         self.command("omarchy-one", 'omarchy-pkg-drop "$1"\n')
         self.command("omarchy-two", 'omarchy-pkg-drop "$1"\n')
         (self.tree / "migrations/1.sh").write_text('omarchy-two\nomarchy-one\nomarchy-pkg-drop "$x"\n')
-        findings = impact.compare_packages(self.tree, self.tree, set())
+        findings = impact.compare_packages(self.tree, self.tree, set(), [])
         self.assertEqual([finding.evidence for finding in findings], [["migrations/1.sh", "bin/omarchy-one", "bin/omarchy-two"]])
         self.assertIn("bin/omarchy-one and bin/omarchy-two remove,", findings[0].title)
 
@@ -909,7 +969,7 @@ class Commands(unittest.TestCase):
         (self.base / "target/bin/omarchy-gone-too").touch()
 
     def findings(self):
-        return impact.compare_commands(self.base / "current", self.base / "target", self.home)
+        return impact.compare_commands(self.base / "current", self.base / "target", self.home, [])
 
     def attention(self):
         return titles(self.findings(), "attention")
@@ -1120,7 +1180,7 @@ class Plugins(unittest.TestCase):
             original_which = impact.shutil.which
             impact.shutil.which = lambda name: "/bin/true"
             self.addCleanup(setattr, impact.shutil, "which", original_which)
-            findings = impact.compare_plugins(Path("current"), Path("target"), home)
+            findings = impact.compare_plugins(Path("current"), Path("target"), home, [])
             notes = titles(findings, "note")
             self.assertEqual(len(notes), 2)
             self.assertIn("1 new qmllint warning, such as a.qml: new", notes[0])
@@ -1132,7 +1192,7 @@ class Plugins(unittest.TestCase):
     def findings_without_qmllint(self, home):
         with mock.patch.object(impact.shutil, "which", return_value=None), \
                 mock.patch.object(impact, "QMLLINT", "/nonexistent/qmllint"):
-            return impact.compare_plugins(Path("current"), Path("target"), home)
+            return impact.compare_plugins(Path("current"), Path("target"), home, [])
 
     def test_a_missing_qmllint_is_unknown_when_there_are_plugins(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -1155,7 +1215,7 @@ class Plugins(unittest.TestCase):
             found = [impact.Counter(), impact.Counter({("a.qml", "new"): 2})]
             with mock.patch.object(impact, "lint", side_effect=found), \
                     mock.patch.object(impact.shutil, "which", return_value="/bin/true"):
-                findings = impact.compare_plugins(Path("current"), Path("target"), home)
+                findings = impact.compare_plugins(Path("current"), Path("target"), home, [])
         self.assertIn("2 new qmllint warnings, such as", findings[0].title)
 
 
@@ -1188,7 +1248,30 @@ class Lint(unittest.TestCase):
 
     def findings(self, qmllint):
         with mock.patch.object(impact.shutil, "which", return_value=str(qmllint)):
-            return impact.compare_plugins(self.base / "current", self.base / "target", self.home)
+            return impact.compare_plugins(self.base / "current", self.base / "target", self.home, [])
+
+    def checked(self, qmllint):
+        checked = []
+        with mock.patch.object(impact.shutil, "which", return_value=qmllint):
+            findings = impact.compare_plugins(self.base / "current", self.base / "target", self.home, checked)
+        return checked, findings
+
+    def test_only_linted_plugins_are_counted(self):
+        (self.plugin.parent / "gone").symlink_to(self.base / "missing")
+        checked, findings = self.checked(str(self.qmllint("exit 0")))
+        self.assertEqual(checked, ["1 plugin linted"])
+        self.assertEqual([finding.partial for finding in findings if finding.level == "unknown"], [True])
+
+    def test_nothing_linted_isnt_counted_and_didnt_run(self):
+        checked, findings = self.checked(str(self.qmllint("kill -TERM $$")))
+        self.assertEqual(checked, [])
+        self.assertFalse(findings[0].partial)
+
+    def test_no_qmllint_isnt_counted_and_didnt_run(self):
+        with mock.patch.object(impact, "QMLLINT", str(self.base / "missing")):
+            checked, findings = self.checked(None)
+        self.assertEqual(checked, [])
+        self.assertFalse(findings[0].partial)
 
     def test_reads_real_warnings(self):
         self.assertEqual(self.lint(self.replay("current.txt")), {
@@ -1284,7 +1367,7 @@ class Lint(unittest.TestCase):
         (self.plugin.parent / "gone").symlink_to("nowhere")
         with mock.patch.object(impact.shutil, "which", return_value=None), \
                 mock.patch.object(impact, "QMLLINT", "/nonexistent/qmllint"):
-            findings = impact.compare_plugins(self.base / "current", self.base / "target", self.home)
+            findings = impact.compare_plugins(self.base / "current", self.base / "target", self.home, [])
         self.assertEqual(len(titles(findings, "unknown")), 2)
         self.assertIn("qmllint wasn't found", findings[0].title)
         self.assertIn("gone is a broken link", findings[1].title)
@@ -1383,9 +1466,9 @@ class Lint(unittest.TestCase):
             "fi"
         )
         with mock.patch.object(impact.shutil, "which", return_value=str(qmllint)):
-            absolute = impact.compare_plugins(self.base / "current", self.base / "target", self.home)
+            absolute = impact.compare_plugins(self.base / "current", self.base / "target", self.home, [])
             with contextlib.chdir(self.base):
-                relative = impact.compare_plugins(Path("current"), Path("target"), self.home)
+                relative = impact.compare_plugins(Path("current"), Path("target"), self.home, [])
         self.assertIn("1 new qmllint warning, such as Demo.qml: Palette is gone", absolute[0].title)
         self.assertEqual(relative, absolute)
 
@@ -1407,7 +1490,7 @@ class RealQmllint(unittest.TestCase):
 
     def findings(self, current, target):
         with mock.patch.object(impact.shutil, "which", return_value=REAL_QMLLINT):
-            return impact.compare_plugins(current, target, self.home)
+            return impact.compare_plugins(current, target, self.home, [])
 
     def test_a_module_the_release_removes_is_a_new_warning(self):
         findings = self.findings(self.base / "current", self.base / "target")
@@ -1434,6 +1517,21 @@ class RealQmllint(unittest.TestCase):
         with contextlib.chdir(self.base):
             relative = self.findings(Path("current"), Path("target"))
         self.assertEqual(relative, absolute)
+
+
+class Wrapping(unittest.TestCase):
+    def test_a_command_isnt_split_at_a_hyphen(self):
+        text = f"{'x' * 70} omarchy-voxtype-install calls"
+        self.assertEqual(impact.wrapped(text), f"{'x' * 70}\nomarchy-voxtype-install calls")
+
+    def test_a_name_past_the_width_isnt_split(self):
+        name = "omarchy-" + "x" * 100
+        self.assertEqual(impact.wrapped(f"a {name} b"), f"a\n{name}\nb")
+
+    def test_a_line_to_copy_isnt_split_at_its_spaces(self):
+        for line in ('hl.unbind("SUPER + CTRL + SHIFT + DOWN")', "omarchy pkg add fictional-editor"):
+            text = f"{'x' * 70} {line} too"
+            self.assertEqual(impact.wrapped(text), f"{'x' * 70}\n{line} too")
 
 
 class Terminal(io.StringIO):
@@ -1465,6 +1563,7 @@ class ProgramCase(unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
         os.environ.pop("GITHUB_TOKEN", None)
+        os.environ.pop("NO_COLOR", None)
         self.terminal = False
 
     def tree(self, name, bindings):
@@ -1480,7 +1579,7 @@ class ProgramCase(unittest.TestCase):
 
     def run_argv(self, *args):
         argv = ["omaupdateimpact", *args]
-        out, err = io.StringIO(), Terminal() if self.terminal else io.StringIO()
+        out, err = (Terminal(), Terminal()) if self.terminal else (io.StringIO(), io.StringIO())
         with mock.patch("sys.argv", argv), contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
             code = impact.main()
         return code, out.getvalue(), err.getvalue()
@@ -1569,6 +1668,63 @@ class Program(ProgramCase):
             code, out, err = self.run_argv(*trees)
         self.assertEqual((code, out), (2, ""))
         self.assertEqual(err, "Unexpected RuntimeError: no home directory\n")
+
+    def test_what_was_checked_is_shown(self):
+        (self.base / "target/migrations/1.sh").write_text("true\n")
+        (self.base / "target/migrations/2.sh").write_text("true\n")
+        self.assertIn(
+            "Checked 1 default binding, 0 of yours, 2 pending migrations, no deleted commands, no plugins.",
+            " ".join(self.check()[1].split()),
+        )
+
+    def test_migrations_already_run_arent_counted(self):
+        (self.base / "target/migrations/1.sh").write_text("true\n")
+        (self.base / "target/migrations/2.sh").write_text("true\n")
+        state = self.home / ".local/state/omarchy/migrations"
+        state.mkdir(parents=True)
+        (state / "1.sh").touch()
+        self.assertIn("1 pending migration,", self.check()[1])
+
+    def test_a_check_that_didnt_run_isnt_listed_as_checked(self):
+        out = self.check(packages=None)[1]
+        self.assertNotIn("migration", out.splitlines()[1])
+
+    def test_unreadable_migrations_arent_counted(self):
+        (self.base / "target/migrations/1.sh").write_text('omarchy-pkg-drop "$a"\n')
+        (self.base / "target/migrations/2.sh").write_text("true\n")
+        self.assertIn("1 pending migration,", self.check(packages={"a"})[1])
+
+    def test_a_removal_with_every_migration_unreadable_isnt_listed(self):
+        (self.base / "target/migrations/1.sh").write_text('omarchy-pkg-drop "$a"\n')
+        self.assertNotIn("pending migration", self.check(packages={"a"})[1])
+
+    def test_a_migration_it_cant_read_beside_one_it_can_ran_in_part(self):
+        (self.base / "target/migrations/1.sh").write_text('omarchy-pkg-drop "$a"\n')
+        (self.base / "target/migrations/2.sh").write_text("true\n")
+        code, out, _ = self.check()
+        self.assertEqual(code, 3)
+        self.assertEqual(out.splitlines()[-1], "These checks ran in part: packages.")
+
+    def test_notes_collapse_unless_all_is_given(self):
+        for tree in ("current", "target"):
+            (self.base / tree / "default/hypr/keys.lua").write_text('o.bind("SUPER + " .. key, "x", "y")')
+        code, out, _ = self.check()
+        self.assertEqual(code, 0)
+        self.assertIn("Worth knowing: 1 note. Add --all to see them.", out)
+        self.assertNotIn("computed", out)
+        self.assertIn("Nothing found", out)
+
+    def test_no_notes_means_no_line_about_them(self):
+        self.assertNotIn("Worth knowing", self.check()[1])
+        self.assertNotIn("Worth knowing", self.check("--all")[1])
+
+    def test_a_check_that_didnt_run_is_named_beside_one_that_ran_in_part(self):
+        (self.base / "target/default/hypr/helpers.lua").write_text("function o.bind_foo(keys) end")
+        code, out, _ = self.check(packages=None)
+        self.assertEqual(code, 3)
+        self.assertEqual(
+            out.splitlines()[-1], "These checks didn't run: packages. These checks ran in part: bindings."
+        )
 
     def test_debug_shows_the_traceback(self):
         with mock.patch.object(impact, "compare_commands", side_effect=RuntimeError("broke")):
@@ -1664,11 +1820,30 @@ class Bindings(ProgramCase):
             (self.base / tree / "default/hypr/keys.lua").write_text('o.bind("SUPER + " .. key, "x", "y")')
         code, out, _ = self.check()
         self.assertEqual(code, 0)
-        self.assertIn("1 key bindings use computed keys", out)
+        self.assertIn("1 key bindings use computed keys", self.check("--all")[1])
+        self.assertIn("Nothing found", out)
 
     def test_a_computed_key_of_the_users_exits_3(self):
         self.bindings.write_text('o.bind("SUPER + " .. key, "x", "y")')
         self.assertEqual(self.check()[0], 3)
+
+    def test_a_computed_key_that_changed_ran_in_part(self):
+        (self.base / "target/default/hypr/keys.lua").write_text('o.bind("SUPER + " .. key, "x", "y")')
+        code, out, _ = self.check()
+        self.assertEqual(code, 3)
+        self.assertEqual(out.splitlines()[-1], "These checks ran in part: bindings.")
+        self.assertNotIn("Nothing found", out)
+
+    def test_your_own_computed_key_ran_in_part(self):
+        self.bindings.write_text('o.bind("SUPER + " .. key, "x", "y")')
+        self.assertEqual(self.check()[1].splitlines()[-1], "These checks ran in part: bindings.")
+
+    def test_an_unreadable_bindings_file_outranks_a_computed_key(self):
+        self.bindings.symlink_to(self.base / "missing.lua")
+        (self.base / "target/default/hypr/keys.lua").write_text('o.bind("SUPER + " .. key, "x", "y")')
+        out = self.check()[1]
+        self.assertEqual(out.splitlines()[-1], "These checks didn't run: bindings.")
+        self.assertNotIn("of yours", out.splitlines()[1])
 
     def test_an_unknown_helper_exits_3(self):
         (self.base / "target/default/hypr/helpers.lua").write_text("function o.bind_foo(keys) end")
@@ -1788,13 +1963,18 @@ class UnreadableFiles(ProgramCase):
         (self.hooks / "my.hook").write_text("omarchy-gone\n")
         code, out, _ = self.check()
         self.assertEqual(code, 1)
-        self.assertIn("These checks didn't run: commands.", out)
+        self.assertIn("These checks ran in part: commands.", out)
+        self.assertIn("1 of your files for 1 deleted command", " ".join(out.split()))
+
+    def test_a_call_names_every_line_to_change(self):
+        (self.hooks / "my.hook").write_text("omarchy-gone\n# omarchy-gone\nomarchy-gone again\n")
+        self.assertIn("Fix: Change or remove lines 1, 3.", self.check()[1])
 
     def test_an_unchanged_shipped_file_exits_0(self):
         (self.base / "current/install").mkdir()
         (self.base / "current/install/tool.hook").write_text("omarchy-gone\n")
         (self.hooks / "tool.hook").write_text("omarchy-gone\n")
-        code, out, _ = self.check()
+        code, out, _ = self.check("--all")
         self.assertEqual(code, 0)
         self.assertIn("Omarchy's own", " ".join(out.split()))
         self.assertIn("Nothing found", out)
@@ -2021,6 +2201,33 @@ class Terminals(ProgramCase):
         self.assertRegex(err, r"\d MB\n$")
         self.assertNotIn("Downloading", out)
 
+    def attention(self):
+        (self.home / ".config/hypr").mkdir(parents=True)
+        (self.home / ".config/hypr/bindings.lua").write_text('o.bind("SUPER + M", "Mail", "mail")')
+        (self.base / "target/default/hypr/bindings.lua").write_text('o.bind("SUPER + M", "Minimize", "min")')
+        return self.check()
+
+    def test_a_terminal_gets_colour(self):
+        out = self.attention()[1]
+        self.assertIn("\033[1;31mNeeds attention\033[0m", out)
+        self.assertIn("\033[1;32mFix:\033[0m", out)
+
+    def test_colour_doesnt_change_where_lines_break(self):
+        colour = self.attention()[1]
+        self.terminal = False
+        self.assertEqual(re.sub(r"\033\[[\d;]*m", "", colour), self.check()[1])
+
+    def test_no_color_turns_it_off(self):
+        with mock.patch.dict(os.environ, NO_COLOR="1"):
+            self.assertNotIn("\033", self.attention()[1])
+
+    def test_an_empty_no_color_changes_nothing(self):
+        with mock.patch.dict(os.environ, NO_COLOR=""):
+            self.assertIn("\033", self.attention()[1])
+
+    def test_a_clean_result_is_coloured_too(self):
+        self.assertIn("\033[1;32mNothing found that needs attention.\033[0m", self.check()[1])
+
     def test_a_failed_download_ends_the_progress_line(self):
         response = mock.MagicMock()
         response.__enter__.return_value.read.side_effect = IncompleteRead(b"")
@@ -2163,7 +2370,7 @@ class RateLimits(ProgramCase):
         self.assert_limited(self.download(refused(429, retry_after="60")), "Try again later.")
 
     def test_other_refusals_stay_as_they_are(self):
-        for error in (refused(403), refused(403, x_ratelimit_remaining="12"), refused(404), refused(500, retry_after="60")):
+        for error in (refused(401), refused(403), refused(403, x_ratelimit_remaining="12"), refused(404), refused(500, retry_after="60")):
             with self.subTest(code=error.code):
                 code, _, err = self.api_failure(error)
                 self.assertEqual(code, 2)
@@ -2214,6 +2421,15 @@ class Tokens(ProgramCase):
                     urlopen.assert_not_called()
                     if not flags:
                         self.assertEqual(len(err.splitlines()), 1)
+
+    def test_a_rejected_token_is_named_and_never_printed(self):
+        for flags in ((), ("--debug",)):
+            with self.subTest(flags=flags), mock.patch.dict(os.environ, GITHUB_TOKEN="fictional"), \
+                    mock.patch.object(impact.urllib.request, "urlopen", side_effect=refused(401)):
+                code, out, err = self.run_main("--channel", "stable", *flags)
+                self.assertEqual((code, out), (2, ""))
+                self.assertTrue(err.endswith("Couldn't download the release: GitHub rejected GITHUB_TOKEN. Fix it or unset it.\n"))
+                self.assertNotIn("fictional", err)
 
     def test_a_redirect_drops_the_token(self):
         with mock.patch.dict(os.environ, GITHUB_TOKEN="fictional"):
@@ -2319,7 +2535,7 @@ class Channels(ProgramCase):
         self.assert_downloaded("v2.0.0")
 
     def test_a_channel_without_tags_exits_2_and_asks_for_one(self):
-        for channel in ("edge", "dev", "unknown", "stable / rc"):
+        for channel in ("edge", "dev", "unknown"):
             with self.subTest(channel=channel):
                 self.on_channel(channel)
                 code, out, err = self.fetch()
@@ -2328,6 +2544,18 @@ class Channels(ProgramCase):
                 self.assertTrue(err.startswith("Can't pick a release: "), err)
                 self.assertIn(f"the channel is {channel},", err)
                 self.assertIn("Pass a tag", err)
+
+    def test_a_mirror_and_packages_that_disagree_are_each_named(self):
+        for channel, mirror, packages in (("stable / rc", "stable", "rc"), ("edge / unknown", "edge", "unknown")):
+            with self.subTest(channel=channel):
+                self.on_channel(channel)
+                code, out, err = self.fetch()
+                self.assertEqual((code, out, self.urls), (2, "", []))
+                self.assertEqual(
+                    err,
+                    f"Can't pick a release: the mirror says {mirror} and the packages say {packages}, "
+                    "so no one channel applies. Pass a tag, such as omaupdateimpact v4.5.0.\n",
+                )
 
     def test_a_failing_channel_command_counts_as_unknown(self):
         self.stub('echo "1.0.0-1"', "exit 1")
@@ -2445,6 +2673,15 @@ class Channels(ProgramCase):
         code, out, _ = self.fetch(own_tree=True)
         self.assertEqual(code, 0)
         self.assertIn("Couldn't check for newer releases on other channels. GitHub's rate limit", out)
+
+    def test_up_to_date_names_a_rejected_token_when_that_stopped_the_listing(self):
+        self.on_channel("stable", version="1.2.3-1")
+        self.listing_error = refused(401)
+        with mock.patch.dict(os.environ, GITHUB_TOKEN="fictional"):
+            code, out, _ = self.fetch(own_tree=True)
+        self.assertEqual(code, 0)
+        self.assertIn("Couldn't check for newer releases on other channels. GitHub rejected GITHUB_TOKEN.", out)
+        self.assertNotIn("fictional", out)
 
     def test_a_tree_given_by_hand_is_compared_even_at_the_same_version(self):
         (self.base / "target/migrations/1.sh").write_text("omarchy-pkg-drop a\n")

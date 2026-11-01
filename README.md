@@ -7,6 +7,7 @@ the update would do to *your* machine, not what changed in general.
 omaupdateimpact               # the release your update channel would deliver
 omaupdateimpact --channel rc  # the release another channel would deliver
 omaupdateimpact v4.5.0-rc2    # a specific release
+omaupdateimpact --all         # every note, not only how many there are
 ```
 
 If you already have that release, it says so, names any newer release on another
@@ -16,7 +17,7 @@ those need a tag.
 It changes nothing on your system, and nothing from the release is ever run:
 the release is downloaded to `~/.cache/omaupdateimpact` and read as text. Two
 releases stay there and older ones are removed. If GitHub's rate limit gets in the
-way, set `GITHUB_TOKEN`.
+way, set `GITHUB_TOKEN`. Colour shows on a terminal only, and `NO_COLOR` turns it off.
 
 ## What it checks
 
@@ -42,8 +43,8 @@ way, set `GITHUB_TOKEN`.
 | 2 | No verdict: bad usage, a failed download, an unusable tree or a crash |
 | 3 | Nothing needs attention, but at least one check couldn't run |
 
-Exit 3 names the checks that didn't run. A failure prints one line, and `--debug`
-adds the traceback.
+Exit 3 names the checks that didn't run, and those that ran in part. A failure
+prints one line, and `--debug` adds the traceback.
 
 ## Limits
 

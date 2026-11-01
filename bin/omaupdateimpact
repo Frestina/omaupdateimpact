@@ -65,6 +65,11 @@ NAMES_REMOVAL = re.compile(
 )
 SHELL_OPERATOR = re.compile(r"\(\s*\)|&>>|&>|<<<|<<-|<<|<&|<>|<|>>|>&|>\||>|&&|\|\||\|&|;;&|;;|;&|[;&|()\n]")
 TEST_END = re.compile(r"\s\]\]")
+# A line to copy stays on one line of the report.
+COPIED = re.compile(r'hl\.unbind\("[^"]*"\)|omarchy pkg add \S+')
+REPORT_WIDTH = 88
+KEPT_SPACE = "\xa0"
+GREEN, RED, YELLOW, BOLD = "1;32", "1;31", "1;33", "1"
 
 
 @dataclass
@@ -102,9 +107,11 @@ class Finding:
     evidence: list
     detail: str = ""
     fix: str = ""
+    # An unknown that leaves the rest of its check standing.
+    partial: bool = False
 
     def text(self):
-        return " ".join(part for part in (self.title, self.detail, self.fix) if part)
+        return " ".join(part for part in (self.title, self.detail) if part)
 
 
 class UnusableTree(Exception):
@@ -113,6 +120,10 @@ class UnusableTree(Exception):
 
 class RateLimited(OSError):
     """GitHub turned a request down because of its rate limit."""
+
+
+class TokenRejected(OSError):
+    """GitHub turned down the GITHUB_TOKEN it was given."""
 
 
 class NoRelease(Exception):
@@ -371,6 +382,10 @@ def spelled(binds):
     return list({spelling(bind.keys): bind.keys for bind in binds}.values())
 
 
+def unbind_calls(binds):
+    return " and ".join(f'hl.unbind("{keys}")' for keys in spelled(binds))
+
+
 def same_actions(one, other):
     """Whether two chords do the same. A press alone isn't the same as a press and release pair."""
     return all(any(a.same_action(b) for b in other) for a in one) and all(
@@ -391,6 +406,7 @@ def compare_computed(current, target, user):
                 f"The computed key {expression} isn't the same in both versions, so it wasn't compared.",
                 sorted(evidence),
                 detail="It could land on one of your keys.",
+                partial=True,
             ))
     for expression in sorted({computed.expression for computed in user.unread}):
         findings.append(Finding(
@@ -399,6 +415,7 @@ def compare_computed(current, target, user):
             f"Your computed key {expression} wasn't compared.",
             sorted({c.source for c in user.unread if c.expression == expression}),
             detail="It could clash with a default.",
+            partial=True,
         ))
     same = before & after
     if same:
@@ -421,6 +438,7 @@ def compare_bindings(current, target, user):
     def turned_off(chord, binds):
         return all(spelling(bind.keys) in user.unbinds.get(chord, {}) for bind in binds)
 
+    taken_over = {c for c in arrived if c in cur and c not in user.binds}
     moved = {}
     for chord in sorted(changed):
         for other in sorted(arrived - {chord}):
@@ -432,14 +450,14 @@ def compare_bindings(current, target, user):
         mine = user.binds[chord]
         if chord not in arrived or turned_off(chord, tgt[chord]):
             continue
-        calls = " and ".join(f'hl.unbind("{keys}")' for keys in spelled(tgt[chord]))
         findings.append(Finding(
             "bindings",
             ATTENTION,
             f'{chord}: your "{label(mine)}" will clash with the new default "{label(tgt[chord])}".',
             sources(mine, tgt[chord]),
             detail="Both will fire.",
-            fix=f"Add {calls} or choose another key.",
+            # Below your binding it would turn that off as well.
+            fix=f"Add {unbind_calls(tgt[chord])} above your binding, or choose another key.",
         ))
 
     for chord in sorted(user.unbinds):
@@ -454,7 +472,7 @@ def compare_bindings(current, target, user):
                     f'{chord}: you turned off "{label(cur[chord])}" here, but it moves to '
                     f"{moved[chord]}, so it comes back.",
                     [*unbound, *sources(cur[chord], tgt[moved[chord]])],
-                    fix=f"Unbind {' and '.join(spelled(tgt[moved[chord]]))} too.",
+                    fix=f"Add {unbind_calls(tgt[moved[chord]])} too.",
                 ))
         elif chord not in tgt:
             findings.append(Finding(
@@ -472,15 +490,20 @@ def compare_bindings(current, target, user):
                 sources(user.binds[chord], tgt[chord]),
             ))
 
+    # A move is one change, with what it replaced and what took its place. A key that
+    # another move accounts for is told there.
     for chord, other in sorted(moved.items()):
-        findings.append(Finding(
-            "bindings",
-            NOTE,
-            f'Moved: "{label(cur[chord])}" from {chord} to {other}.',
-            sources(cur[chord], tgt[other]),
-        ))
+        title, evidence = f'Moved: "{label(cur[chord])}" from {chord} to {other}', [cur[chord], tgt[other]]
+        if other in taken_over and other not in moved:
+            title += f', replacing "{label(cur[other])}"'
+            evidence.append(cur[other])
+        title += "."
+        if chord in taken_over and chord not in moved.values():
+            title += f' {chord} is now "{label(tgt[chord])}".'
+            evidence.append(tgt[chord])
+        findings.append(Finding("bindings", NOTE, title, sources(*evidence)))
 
-    for chord in sorted(c for c in arrived if c in cur and c not in user.binds):
+    for chord in sorted(taken_over - set(moved) - set(moved.values())):
         findings.append(Finding(
             "bindings",
             NOTE,
@@ -511,6 +534,7 @@ def compare_bindings(current, target, user):
             UNKNOWN,
             f"The binding helper {name} isn't one this tool can read, so keys bound with it weren't compared.",
             [source],
+            partial=True,
         ))
 
     return [*findings, *compare_computed(current, target, user)]
@@ -862,29 +886,34 @@ def package_changes(migrations, already_run):
     return dropped, {(migration, *sorted(files)) for migration, files in unread.items()}
 
 
-def compare_packages(target, home, installed):
+def compare_packages(target, home, installed, checked):
     if installed is None:
         title = "pacman wasn't available, so packages weren't checked."
         return [Finding("packages", UNKNOWN, title, ["pacman -Qq"])]
     state = home / ".local/state/omarchy/migrations"
     already_run = {p.name for p in state.iterdir()} if state.is_dir() else set()
     dropped, unread = package_changes(target / "migrations", already_run)
+    read = sum(p.name not in already_run for p in (target / "migrations").glob("*.sh")) - len(unread)
+    if read or not unread:
+        checked.append(counted(read, "pending migration"))
     findings = []
     for package in sorted(set(dropped) & installed):
         conditional, migration, *other = dropped[package]
         when = "may remove" if conditional else "will remove"
+        after = "If it goes" if conditional else "After the update"
         findings.append(Finding(
             "packages",
             ATTENTION,
             f"The update {when} {package}, which is installed here.",
             [f"migrations/{migration}", *other],
+            fix=f"{after}, run omarchy pkg add {package} (aur-add for an AUR package).",
         ))
     for migration, *files in sorted(unread):
         title = f"Couldn't read what migrations/{migration} removes, so check it by hand."
         if files:
             verb = "removes" if len(files) == 1 else "remove"
             title = f"Couldn't read what {' and '.join(files)} {verb}, called from migrations/{migration}, so check by hand."
-        findings.append(Finding("packages", UNKNOWN, title, [f"migrations/{migration}", *files]))
+        findings.append(Finding("packages", UNKNOWN, title, [f"migrations/{migration}", *files], partial=read > 0))
     return findings
 
 
@@ -965,19 +994,21 @@ def shipped_copy(data, root, shipped):
     return None
 
 
-def compare_commands(current, target, home):
+def compare_commands(current, target, home, checked):
     removed = {p.name for p in (current / "bin").glob("omarchy-*")}
     removed -= {p.name for p in (target / "bin").glob("omarchy-*")}
     if not removed:
+        checked.append("no deleted commands")
         return []
     pattern = re.compile(r"(?<![\w-])(" + "|".join(map(re.escape, sorted(removed))) + r")(?![\w-])")
     shipped = shipped_files(current)
-    calls, unread = [], {}
+    calls, unread, read = [], {}, 0
     for path, reason in user_files(home):
         data, reason = scanned_bytes(path) if reason is None else (b"", reason)
         if reason:
             unread[path] = reason
             continue
+        read += 1
         comments = ("--",) if path.suffix == ".lua" else ("#", "//")
         found = {}
         # Not splitlines: it also splits on characters an editor doesn't count as lines.
@@ -988,6 +1019,8 @@ def compare_commands(current, target, home):
                 found.setdefault(command, []).append(number)
         original = shipped_copy(data, current, shipped) if found else None
         calls.extend((str(path), command, numbers, original) for command, numbers in found.items())
+    if read or not unread:
+        checked.append(f"{read} of your files for {counted(len(removed), 'deleted command')}")
     findings = []
     for path, command, numbers, original in sorted(calls, key=lambda call: call[:2]):
         shown = path.replace(str(home), "~", 1)
@@ -997,11 +1030,13 @@ def compare_commands(current, target, home):
             detail = "It's Omarchy's own file, unchanged, so there's nothing for you to fix."
             findings.append(Finding("commands", NOTE, title, [*lines, original], detail=detail))
         else:
-            findings.append(Finding("commands", ATTENTION, title, lines))
+            where = f"line {numbers[0]}" if len(numbers) == 1 else f"lines {', '.join(map(str, numbers))}"
+            fix = f"Change or remove {where}. This tool can't tell what replaces the command."
+            findings.append(Finding("commands", ATTENTION, title, lines, fix=fix))
     for path, reason in sorted(unread.items()):
         shown = str(path).replace(str(home), "~", 1)
         title = f"{shown} couldn't be read, so it wasn't checked for deleted commands."
-        findings.append(Finding("commands", UNKNOWN, title, [shown], detail=f"{reason}."))
+        findings.append(Finding("commands", UNKNOWN, title, [shown], detail=f"{reason}.", partial=read > 0))
     return findings
 
 
@@ -1062,7 +1097,7 @@ def plugin_folders(plugins):
         return [], error.strerror
 
 
-def compare_plugins(current, target, home):
+def compare_plugins(current, target, home, checked):
     plugins = home / ".config/omarchy/plugins"
     shown = "~/.config/omarchy/plugins"
     installed, reason = plugin_folders(plugins)
@@ -1070,6 +1105,7 @@ def compare_plugins(current, target, home):
         title = f"{shown} couldn't be read, so plugins weren't linted."
         return [Finding("plugins", UNKNOWN, title, [shown], detail=f"{reason}.")]
     if not installed:
+        checked.append("no plugins")
         return []
     findings = [
         Finding("plugins", UNKNOWN, f"{p.name} is a broken link, so it wasn't linted.", [f"{shown}/{p.name}"])
@@ -1078,7 +1114,7 @@ def compare_plugins(current, target, home):
     qmllint = shutil.which("qmllint") or (QMLLINT if Path(QMLLINT).exists() else None)
     if not qmllint:
         return [Finding("plugins", UNKNOWN, "qmllint wasn't found, so plugins weren't linted.", [shown]), *findings]
-    linted = False
+    linted = 0
     for plugin in (p for p in installed if p.exists()):
         try:
             before = lint(plugin.resolve(), current / "shell", qmllint)
@@ -1087,7 +1123,7 @@ def compare_plugins(current, target, home):
             title = f"{plugin.name} couldn't be linted, so it wasn't checked for new warnings."
             findings.append(Finding("plugins", UNKNOWN, title, [f"{shown}/{plugin.name}"], detail=f"{error}."))
             continue
-        linted = True
+        linted += 1
         new = after - before
         if new:
             sample = next(iter(new))
@@ -1095,11 +1131,13 @@ def compare_plugins(current, target, home):
             findings.append(Finding(
                 "plugins",
                 NOTE,
-                f"{plugin.name}: {count} new qmllint {'warning' if count == 1 else 'warnings'}, such as "
-                f"{sample[0]}: {sample[1]}",
+                f"{plugin.name}: {counted(count, 'new qmllint warning')}, such as {sample[0]}: {sample[1]}",
                 [f"{shown}/{plugin.name}/{sample[0]}"],
             ))
     if linted:
+        checked.append(f"{counted(linted, 'plugin')} linted")
+        for finding in findings:
+            finding.partial = finding.level == UNKNOWN
         findings.append(Finding(
             "plugins",
             NOTE,
@@ -1138,6 +1176,8 @@ def github(url, timeout, token=None, advice="Try again later."):
             limited = error.headers.get("x-ratelimit-remaining") == "0" or "retry-after" in error.headers
             if error.code in (403, 429) and limited:
                 raise RateLimited(f"GitHub's rate limit is used up. {advice}") from error
+            if error.code == 401 and token:
+                raise TokenRejected("GitHub rejected GITHUB_TOKEN. Fix it or unset it.") from error
             raise
 
 
@@ -1170,10 +1210,12 @@ def channel_tag(channel):
     if channel == "stable":
         return stable_tag()
     if channel != "rc":
-        raise NoRelease(
-            f"the channel is {channel}, and only stable and rc have tagged releases. "
-            "Pass a tag, such as omaupdateimpact v4.5.0."
-        )
+        # omarchy-version-channel prints two words when they disagree.
+        mirror, disagree, packages = channel.partition(" / ")
+        problem = f"the channel is {channel}, and only stable and rc have tagged releases"
+        if disagree:
+            problem = f"the mirror says {mirror} and the packages say {packages}, so no one channel applies"
+        raise NoRelease(f"{problem}. Pass a tag, such as omaupdateimpact v4.5.0.")
     tags = release_tags()
     if not tags:
         raise ValueError("the releases API gave no usable release")
@@ -1261,7 +1303,7 @@ def report_no_update(version, tag, channel):
     try:
         newer = newer_releases(version)
     except DOWNLOAD_ERRORS as error:
-        reason = f" {error}" if isinstance(error, RateLimited) else ""
+        reason = f" {error}" if isinstance(error, (RateLimited, TokenRejected)) else ""
         print(f"Couldn't check for newer releases on other channels.{reason}")
         return 0
     for release in newer:
@@ -1270,12 +1312,51 @@ def report_no_update(version, tag, channel):
     return 0
 
 
-def print_section(title, findings, level):
-    lines = [finding.text() for finding in findings if finding.level == level]
+def counted(number, noun):
+    return f"{number} {noun}{'' if number == 1 else 's'}"
+
+
+def painted(text, colour):
+    """Text in a colour on a terminal. NO_COLOR, unless it's empty, turns that off."""
+    if not sys.stdout.isatty() or os.environ.get("NO_COLOR"):
+        return text
+    return f"\033[{colour}m{text}\033[0m"
+
+
+def wrapped(text, first="", rest=""):
+    """Fill text. A command is never split, and neither is a line to copy."""
+    text = COPIED.sub(lambda found: found.group().replace(" ", KEPT_SPACE), text)
+    filled = textwrap.fill(
+        text, REPORT_WIDTH, initial_indent=first, subsequent_indent=rest, break_long_words=False, break_on_hyphens=False
+    )
+    return filled.replace(KEPT_SPACE, " ")
+
+
+def print_section(title, findings, level, colour):
+    found = [finding for finding in findings if finding.level == level]
+    if found:
+        print(f"\n{painted(title, colour)}")
+        for finding in found:
+            print(wrapped(finding.text(), "  - ", "    "))
+            if finding.fix:
+                # Painted after filling, because colour codes would count as width.
+                print(wrapped(finding.fix, "    Fix: ", " " * 9).replace("Fix:", painted("Fix:", GREEN), 1))
+
+
+def print_closing(findings):
+    levels = {finding.level for finding in findings}
+    unknown = [finding for finding in findings if finding.level == UNKNOWN]
+    not_run = {finding.check for finding in unknown if not finding.partial}
+    in_part = {finding.check for finding in unknown if finding.partial} - not_run
+    lines = []
+    if not_run:
+        lines.append(f"These checks didn't run: {', '.join(sorted(not_run))}.")
+    if in_part:
+        lines.append(f"These checks ran in part: {', '.join(sorted(in_part))}.")
     if lines:
-        print(f"\n{title}")
-        for line in lines:
-            print(textwrap.fill(line, 88, initial_indent="  - ", subsequent_indent="    "))
+        print(f"\n{painted(' '.join(lines), YELLOW)}")
+    elif ATTENTION not in levels:
+        print(f"\n{painted('Nothing found that needs attention.', GREEN)}")
 
 
 def fail(what, error, debug):
@@ -1311,25 +1392,31 @@ def run(options):
     check_tree(target, "release")
 
     user, unreadable = read_user_bindings(options.home / ".config/hypr/bindings.lua", "~/.config/hypr/bindings.lua")
+    current_defaults, target_defaults = parse_defaults(options.root, "installed"), parse_defaults(target, "release")
 
+    # Only what was really looked at goes in here, so a check that didn't run isn't listed.
+    checked = [counted(len(target_defaults.binds), "default binding")]
+    if not unreadable:
+        checked.append(f"{len(user.binds)} of yours")
     findings = [
         *unreadable,
-        *compare_bindings(parse_defaults(options.root, "installed"), parse_defaults(target, "release"), user),
-        *compare_packages(target, options.home, installed_packages()),
-        *compare_commands(options.root, target, options.home),
-        *compare_plugins(options.root, target, options.home),
+        *compare_bindings(current_defaults, target_defaults, user),
+        *compare_packages(target, options.home, installed_packages(), checked),
+        *compare_commands(options.root, target, options.home, checked),
+        *compare_plugins(options.root, target, options.home, checked),
     ]
 
     print(f"Omarchy {version} -> {described(tag or target.name, channel)}. Nothing was changed.")
-    print_section("Needs attention", findings, ATTENTION)
-    print_section("Worth knowing", findings, NOTE)
-    print_section("Limits of this check", findings, UNKNOWN)
+    print(wrapped(f"Checked {', '.join(checked)}."))
+    print_section("Needs attention", findings, ATTENTION, RED)
+    notes = sum(finding.level == NOTE for finding in findings)
+    if options.all:
+        print_section("Worth knowing", findings, NOTE, BOLD)
+    elif notes:
+        print(f"\n{painted('Worth knowing', BOLD)}: {counted(notes, 'note')}. Add --all to see them.")
+    print_section("Limits of this check", findings, UNKNOWN, YELLOW)
+    print_closing(findings)
     levels = {finding.level for finding in findings}
-    not_run = sorted({finding.check for finding in findings if finding.level == UNKNOWN})
-    if not_run:
-        print(f"\nThese checks didn't run: {', '.join(not_run)}.")
-    elif ATTENTION not in levels:
-        print("\nNothing found that needs attention.")
     return 1 if ATTENTION in levels else 3 if UNKNOWN in levels else 0
 
 
@@ -1344,6 +1431,7 @@ def main():
         help="the installed tree (default: $OMARCHY_PATH, then /usr/share/omarchy)",
     )
     parser.add_argument("--home", type=Path)
+    parser.add_argument("--all", action="store_true", help="show every note, not only how many there are")
     parser.add_argument("--debug", action="store_true", help="show the traceback when something fails")
     options = parser.parse_args()
     try:

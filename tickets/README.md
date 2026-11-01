@@ -45,7 +45,7 @@ when.
 
 | # | Ticket | Depends on | Status |
 | --- | --- | --- | --- |
-| 012 | [A report worth reading](012-report-polish.md) | 010 | todo |
+| 012 | [A report worth reading](012-report-polish.md) | 010 | done |
 | 013 | [Install, version and uninstall](013-install-and-version.md) | 001 | todo |
 | 014 | [README and project docs](014-readme-and-docs.md) | 012, 013 | todo |
 | 015 | [Release 0.1.0](015-release-0-1-0.md) | 011, 014 | todo |

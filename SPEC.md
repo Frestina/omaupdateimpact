@@ -86,10 +86,10 @@ An update delivers what the user's channel delivers, so that is the default.
 | edge, dev, anything else | no tag exists: exit 2 and ask for an explicit tag |
 
 The channel comes from `omarchy-version-channel`. It is looked up on `PATH`, like
-`omarchy-version`. It prints two words when the mirror and the packages disagree,
-and that counts as anything else. It can't see a linked checkout, so an installed
-version of `dev` means the dev channel. `--channel` overrides it and a tag
-argument overrides both.
+`omarchy-version`. It prints `mirror / packages` when the two disagree, and that
+counts as anything else: the message says they disagree and names each. It can't
+see a linked checkout, so an installed version of `dev` means the dev channel.
+`--channel` overrides it and a tag argument overrides both.
 
 "Newest" goes by version, not date, because the API sorts by date and a stable
 patch can come after an RC. Whether a release is a prerelease goes by its tag.
@@ -133,8 +133,9 @@ a release runs. If it fails, the version shows as "unknown".
 
 `GITHUB_TOKEN`, when it's set, goes to `api.github.com` and nowhere else: a
 redirect doesn't carry it on, and the archive doesn't need it. It is never printed,
-even when it's malformed. A 403 or 429 with no requests left, or with
-`Retry-After`, is reported as the rate limit.
+even when it's malformed. A 401 with a token set is reported as a rejected token.
+A 403 or 429 with no requests left, or with `Retry-After`, is reported as the rate
+limit.
 
 On a terminal, stderr says what is downloading and counts the megabytes. GitHub
 doesn't send the archive's size, so the count is all there is to show. Off a
@@ -291,7 +292,8 @@ nothing is read, so nothing is unknown.
 ## Findings and exit codes
 
 A finding has a check, a level, a title, a detail, a fix when there is one, and
-evidence. Levels are `attention`, `note` and `unknown`.
+evidence. Levels are `attention`, `note` and `unknown`. An `unknown` also says
+whether the rest of its check still stood.
 
 | Exit | Meaning |
 | --- | --- |
@@ -305,6 +307,40 @@ through to Python's exit 1, which would read as a finding.
 
 When something needs attention and a check also couldn't run, the exit is 1, and
 the closing line still names the checks that didn't run.
+
+The closing line tells a check that didn't run from one that ran in part. It ran in
+part when it still compared something: bindings around a computed key or a helper it
+can't read, the other migrations, files or plugins around one it couldn't read. A
+`~/.config/hypr/bindings.lua` it can't read means your bindings weren't compared, so
+that check didn't run. Both count the same for the exit code.
+
+### The report
+
+The report answers in five seconds. It goes: the two versions, what was checked,
+what needs attention, a count of notes, the limits, and the closing line. `--all`
+shows the notes in place of their count. Limits are never collapsed.
+
+The "Checked" line counts only what was really looked at, and leaves out a check
+that didn't run, so it can't read as clear. A migration, file or plugin that couldn't
+be read isn't counted. Your bindings are left out when the file can't be read. A file
+that is skipped as binary counts: it was looked at, and holds nothing to read.
+
+Every attention finding has a `Fix:` line, or says why it can't have an exact one.
+
+- A clash: the `hl.unbind` line, with the default's own spelling, above your binding.
+  Below it, the unbind would turn yours off too, as text is all it goes by.
+- A shortcut that comes back: the `hl.unbind` line for its new key.
+- A package: `omarchy pkg add` after the update. That runs `pacman`, so the line also
+  names `aur-add`, as nothing here tells an AUR package from a repository one.
+- A deleted command: the lines to change. A release doesn't say what replaces a
+  command, and some are renamed and some are gone, so the tool can't say either.
+
+A move is one finding, with what else changed on its two keys: the default it
+replaces, and what now sits on the key it left. If another move accounts for one of
+those keys, that move's line tells it, so two keys that swap are just two moves.
+
+A command or a line to copy is never split across lines. Colour goes to a terminal
+only, and `NO_COLOR` turns it off unless it's empty.
 
 Bindings with computed keys can't be compared, since working out the key would
 mean running Lua. Every release has them, so making them all `unknown` would make
