@@ -52,6 +52,12 @@ adds the traceback.
   loop's range changes. If the expression changes, or the key is in your own
   bindings, it is reported as a limit. A binding or an unbind inside an `if` counts
   as always on.
+- Migrations are read as text. A removal it can't name, such as
+  `"${targets[@]}"`, is reported as a limit, and you check that migration by hand.
+  A removal inside a string, as with `bash -c` or `eval`, isn't seen.
+- A removal is "will remove" unless it sits inside an `if`, a loop, a `case`, a
+  function, or after `&&` or `||`. A migration that exits early, as with
+  `x || exit 0`, still says "will remove".
 - It doesn't read `omarchy_default_bindings = false` from your `hyprland.lua`.
 - It won't catch a failure during the update itself.
 

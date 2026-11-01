@@ -147,7 +147,8 @@ Each check returns findings and says whether it could run.
 - **Bindings:** your bindings against both versions of the defaults. Flags clashes
   and shortcuts you turned off that come back, and lists the rest as notes.
 - **Packages:** installed packages removed by migrations you haven't run yet. A
-  removal it can't read, such as `"${targets[@]}"`, is reported as unknown.
+  removal it can't read, such as `"${targets[@]}"`, is reported as unknown. See
+  [Reading migrations](#reading-migrations).
 - **Commands:** deleted `omarchy-*` commands still called from your files. A file
   that Omarchy itself put there, unchanged, isn't your problem to fix.
 - **Plugins:** new `qmllint` warnings. If `qmllint` fails, that is unknown, not
@@ -182,6 +183,31 @@ the matching text turns a default off. Fixes quote the default's own spelling.
 
 An unbind or `o.rebind` in the defaults removes the binds before it. The default
 files are read in path order, not in the order Omarchy loads them.
+
+### Reading migrations
+
+Migrations are split into shell tokens, not matched line by line. A small state
+machine follows them, so comments, strings, redirects, heredoc bodies and arrays
+are never commands, and what runs in a `$(...)` still counts.
+
+A removal is `omarchy-pkg-drop`, `omarchy-pkg-remove`, or `pacman`, `yay` or `paru`
+with `-R` or `--remove`. Any wrapper counts, such as `sudo` or a function called
+`as_root`, unless the command only prints or looks up, such as `echo` or
+`command -v`. `-p` and `--print` only list what would go, so they don't count.
+
+A removal is conditional inside `if`, `while`, `until`, `for`, `case` or a function,
+and after `&&` or `||`. Indentation means nothing. `omarchy-pkg-drop a || true`
+still removes `a`.
+
+`omarchy-pkg-add` and `omarchy-pkg-aur-add` cancel an earlier drop. A conditional
+add may not run, so the package stays listed as "may remove". An add whose argument
+can't be read cancels nothing and is not unknown: at worst it leaves a removal
+listed, and v4.5.0-rc2 has several, such as `omarchy-pkg-add "$kernel"`.
+
+A migration is `unknown`, once however many arguments it hides, when an argument
+to a removal can't be read, when a removal names nothing, as with `xargs`, or when
+the reader loses its place, as with a quote that never closes. What it can read
+from the same removal is still reported.
 
 ## Findings and exit codes
 

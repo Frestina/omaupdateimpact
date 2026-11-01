@@ -39,7 +39,7 @@ these wrong today:
 
 ## Done when
 
-- [ ] Every case above has a test.
-- [ ] v4.5.0-rc2's pending migrations give the same removals as before, with a
+- [x] Every case above has a test.
+- [x] v4.5.0-rc2's pending migrations give the same removals as before, with a
       fixture.
-- [ ] `tests/run` passes.
+- [x] `tests/run` passes.

@@ -84,5 +84,18 @@ Paths already ruled out are not here; they are under
   given. Waits for a real report.
 - **A rejected `GITHUB_TOKEN`.** A stale token shows as `HTTP Error 401`, with no
   mention of the token. 012 could name it.
+- **A removal inside a string.** `bash -c 'pacman -Rns a'`, `eval`, and a heredoc fed
+  to a shell aren't seen. Neither v4.0.6 nor v4.5.0-rc2 does this, and the README
+  lists it. Waits for a release that does.
+- **`omarchy pkg drop a`.** The `omarchy` command reaches the same helpers, and a
+  migration written that way isn't seen. Neither v4.0.6 nor v4.5.0-rc2 does this.
+- **An early exit is not read.** `omarchy-hw-aarch64-n1x || exit 0` at the top of a
+  migration makes everything after it conditional, but it still says "will remove".
+  Real migrations do this, and the README lists it. Reading it means following
+  `exit` and `return`, which waits for a report that it misleads.
+- **`pacman -S` doesn't cancel a drop.** Only the helpers do. Nothing does this
+  after a drop yet, and the error is a false removal, not a missed one.
+- **An `if` condition counts as conditional.** `if omarchy-pkg-drop a; then` always
+  runs the drop, but says "may remove". Rare, and "may" is still honest.
 - **Evidence in the text report.** Findings carry evidence, but only `--json` (016)
   will show it. 012 could print it, if it doesn't crowd the report.

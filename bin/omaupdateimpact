@@ -43,6 +43,14 @@ VERSION = re.compile(r"(?:\d+:)?v?(\d+)\.(\d+)\.(\d+)(?:-?rc(\d+))?(?:-\d+)?")
 TAG = re.compile(r"v\d+\.\d+\.\d+(?:-rc\d+)?", re.ASCII)
 TOKEN = re.compile(r"[\x21-\x7e]+")
 KEPT_RELEASES = 2
+PACKAGE = re.compile(r"[\w@.+-]+")
+PACKAGE_DROPS = {"omarchy-pkg-drop", "omarchy-pkg-remove"}
+PACKAGE_ADDS = {"omarchy-pkg-add", "omarchy-pkg-aur-add"}
+PACMANS = {"pacman", "yay", "paru"}
+# These name a package command without running it.
+NOT_RUN = {"echo", "printf", "command", "type", "which", "hash", "grep", "test", "[", "[["}
+SHELL_OPERATOR = re.compile(r"\(\s*\)|&>>|&>|<<<|<<-|<<|<&|<>|<|>>|>&|>\||>|&&|\|\||\|&|;;&|;;|;&|[;&|()\n]")
+TEST_END = re.compile(r"\s\]\]")
 
 
 @dataclass
@@ -95,6 +103,14 @@ class RateLimited(OSError):
 
 class NoRelease(Exception):
     """A channel with no tagged release to follow."""
+
+
+class ShellUnread(Exception):
+    """A script this reader lost its place in."""
+
+
+class Op(str):
+    """A shell operator, as opposed to a quoted word that spells the same."""
 
 
 def blank_comments(text):
@@ -481,23 +497,264 @@ def installed_packages():
     return set(output.split())
 
 
+def line_end(text, index):
+    end = text.find("\n", index)
+    return len(text) if end < 0 else end
+
+
+def closing(text, index, opener, closer):
+    """Where the bracket opened just before index ends."""
+    depth = 1
+    while depth:
+        if index >= len(text):
+            raise ShellUnread
+        char = text[index]
+        if char in "\"'":
+            index = string_end(text, index)
+        elif char == "#" and text[index - 1] in " \t\n":
+            index = line_end(text, index)
+        else:
+            depth += (char == opener) - (char == closer)
+            index += 2 if char == "\\" else 1
+    return index
+
+
+def heredoc_end(text, index, heredocs):
+    """Where the bodies of the heredocs starting at index end."""
+    for delimiter, tabs in heredocs:
+        while True:
+            if index >= len(text):
+                raise ShellUnread
+            end = line_end(text, index)
+            line = text[index:end]
+            index = end + 1
+            if (line.lstrip("\t") if tabs else line) == delimiter:
+                break
+    return index
+
+
+def shell_word(text, index):
+    """Read the word at index: its text, the substitutions in it, and where it ends.
+
+    Quotes come off. Whatever is only known at run time keeps a $, so it can never
+    pass for a package name.
+    """
+    word, inner, quoted = "", [], False
+    while index < len(text):
+        char = text[index]
+        if char == "\\":
+            word += text[index + 1 : index + 2].strip("\n")
+            index += 2
+        elif char == "'" and not quoted:
+            end = text.find("'", index + 1)
+            if end < 0:
+                raise ShellUnread
+            word += text[index + 1 : end]
+            index = end + 1
+        elif char == '"':
+            quoted = not quoted
+            index += 1
+        elif text.startswith("$((", index):
+            index = closing(text, index + 2, "(", ")")
+            word += "$"
+        elif text.startswith("$(", index):
+            tokens, index = shell_tokens(text, index + 2, True)
+            inner.append(tokens)
+            word += "$"
+        elif text.startswith("${", index):
+            index = closing(text, index + 2, "{", "}")
+            word += "$"
+        elif char == "`":
+            end = string_end(text, index)
+            inner.append(shell_tokens(text[index + 1 : end - 1])[0])
+            index = end
+            word += "$"
+        elif char == "(" and not quoted and word.endswith("="):
+            index = closing(text, index + 1, "(", ")")
+            word += "$"
+        elif char in " \t\r\n;&|()<>" and not quoted:
+            break
+        else:
+            word += char
+            index += 1
+    if quoted:
+        raise ShellUnread
+    return word, inner, index
+
+
+def shell_tokens(text, index=0, nested=False):
+    """Split shell text into words and Ops, and say where it stopped.
+
+    Comments, redirects and heredoc bodies are dropped. A substitution comes before
+    the command holding it, because it runs first. Nested text stops at its own ).
+    """
+    tokens, heredocs, start, depth, redirect = [], [], 0, 0, None
+    while index < len(text):
+        found = SHELL_OPERATOR.match(text, index)
+        if text[index] in " \t\r" or text.startswith("\\\n", index):
+            index += 2 if text[index] == "\\" else 1
+        elif text[index] == "#":
+            index = line_end(text, index)
+        elif text.startswith(("<(", ">("), index):
+            inner, index = shell_tokens(text, index + 2, True)
+            tokens[start:start] = [Op("$("), *inner, Op(")")]
+            start += len(inner) + 2
+            redirect = None
+        elif text.startswith("((", index):
+            index = closing(text, index + 1, "(", ")")
+            tokens.append("((")
+        elif found and (found.group()[0] in "<>" or found.group().startswith("&>")):
+            redirect = found.group()
+            index = found.end()
+        elif found:
+            operator, index = found.group(), found.end()
+            if nested and operator == ")" and not depth:
+                return tokens, index
+            depth += (operator == "(") - (operator == ")")
+            if operator == "\n":
+                index = heredoc_end(text, index, heredocs)
+                heredocs = []
+                if tokens and isinstance(tokens[-1], Op) and tokens[-1] in ("&&", "||", "|", "|&"):
+                    continue
+            tokens.append(Op(operator))
+            start = len(tokens)
+        else:
+            word, inner, index = shell_word(text, index)
+            for part in inner:
+                tokens[start:start] = [Op("$("), *part, Op(")")]
+                start += len(part) + 2
+            if redirect:
+                if redirect.startswith("<<") and redirect != "<<<":
+                    heredocs.append((word, redirect == "<<-"))
+                redirect = None
+            elif not (word.isdigit() and text[index : index + 1] in ("<", ">")):
+                tokens.append(word)
+            if word == "[[":
+                ended = TEST_END.search(text, index)
+                if not ended:
+                    raise ShellUnread
+                index = ended.end()
+    if nested:
+        raise ShellUnread
+    return tokens, index
+
+
+def pacman_removes(arguments):
+    """Whether these pacman arguments remove something. --print only lists it."""
+    options = [word for word in arguments if word.startswith("-")]
+    short = "".join(word[1:] for word in options if not word.startswith("--"))
+    prints = "p" in short or any(word.startswith("--print") for word in options)
+    return ("R" in short or "--remove" in options) and not prints
+
+
+def package_action(words):
+    """What a command does to packages, as an action and its arguments, or None."""
+    for index, word in enumerate(words):
+        rest = words[index + 1 :]
+        if word in PACKAGE_DROPS or (word in PACMANS and pacman_removes(rest)):
+            return "drop", rest
+        if word in PACKAGE_ADDS:
+            return "add", rest
+    return None
+
+
+def package_commands(text):
+    """Each package command in a script, in order: action, arguments, whether it can be skipped."""
+    commands, blocks, words = [], [], []
+    chained = function = patterns = False
+
+    def enter(conditional):
+        nonlocal chained, function
+        blocks.append(conditional or chained or function)
+        chained = function = False
+
+    def leave():
+        nonlocal chained
+        if not blocks:
+            raise ShellUnread
+        chained = blocks.pop()
+
+    for token in [*shell_tokens(text)[0], Op("\n")]:
+        if not isinstance(token, Op):
+            words.append(token)
+            continue
+        if patterns and words[:1] != ["esac"]:
+            patterns = token != ")"
+            words = []
+            continue
+        patterns = False
+        if token == "()":
+            function = True
+            words = []
+            continue
+        while words:
+            head = words[0]
+            if head in ("if", "while", "until"):
+                enter(True)
+            elif head in ("for", "select", "case"):
+                enter(True)
+                patterns = head == "case"
+                words = []
+                break
+            elif head == "{":
+                enter(False)
+            elif head in ("fi", "done", "esac", "}"):
+                leave()
+            elif head == "function":
+                function = True
+                words = words[1:]
+            elif head not in ("then", "do", "else", "elif", "!", "time"):
+                break
+            words = words[1:]
+        if patterns:
+            patterns = token != ")"
+            continue
+        if words and words[0] not in NOT_RUN:
+            action = package_action(words)
+            if action:
+                commands.append((*action, chained or any(blocks)))
+        words = []
+        if token in ("(", "$("):
+            enter(False)
+        elif token == ")":
+            leave()
+        elif token in ("&&", "||"):
+            chained = True
+        elif token not in ("|", "|&"):
+            chained = False
+            patterns = patterns or token in (";;", ";&", ";;&")
+    if blocks or patterns:
+        raise ShellUnread
+    return commands
+
+
 def package_changes(migrations, already_run):
-    """Packages the pending migrations remove: whether that is conditional, and which migration."""
-    dropped = {}
+    """What the pending migrations remove: each package, and the migrations it can't read.
+
+    Each package maps to whether its removal is conditional, and which migration.
+    """
+    dropped, unread = {}, set()
     for path in sorted(migrations.glob("*.sh")):
         if path.name in already_run:
             continue
-        for line in path.read_text(errors="replace").splitlines():
-            found = re.match(r"(\s*)omarchy-pkg-(drop|remove|add)\s+([^|;&>#]*)", line)
-            if not found:
-                continue
-            packages = [p for p in found.group(3).split() if re.fullmatch(r"[\w@.+-]+", p)]
-            for package in packages:
-                if found.group(2) == "add":
-                    dropped.pop(package, None)
+        try:
+            commands = package_commands(path.read_text(errors="replace"))
+        except ShellUnread:
+            unread.add(path.name)
+            continue
+        for action, arguments, conditional in commands:
+            packages = [word for word in arguments if not word.startswith("-")]
+            readable = [package for package in packages if PACKAGE.fullmatch(package)]
+            if action == "drop" and (not packages or len(readable) < len(packages)):
+                unread.add(path.name)
+            for package in readable:
+                if action == "drop":
+                    dropped[package] = (conditional, path.name)
+                elif conditional and package in dropped:
+                    dropped[package] = (True, dropped[package][1])
                 else:
-                    dropped[package] = (bool(found.group(1)), path.name)
-    return dropped
+                    dropped.pop(package, None)
+    return dropped, unread
 
 
 def compare_packages(target, home, installed):
@@ -506,7 +763,7 @@ def compare_packages(target, home, installed):
         return [Finding("packages", UNKNOWN, title, ["pacman -Qq"])]
     state = home / ".local/state/omarchy/migrations"
     already_run = {p.name for p in state.iterdir()} if state.is_dir() else set()
-    dropped = package_changes(target / "migrations", already_run)
+    dropped, unread = package_changes(target / "migrations", already_run)
     findings = []
     for package in sorted(set(dropped) & installed):
         conditional, migration = dropped[package]
@@ -517,6 +774,9 @@ def compare_packages(target, home, installed):
             f"The update {when} {package}, which is installed here.",
             [f"migrations/{migration}"],
         ))
+    for migration in sorted(unread):
+        title = f"Couldn't read what migrations/{migration} removes, so check it by hand."
+        findings.append(Finding("packages", UNKNOWN, title, [f"migrations/{migration}"]))
     return findings
 
 
