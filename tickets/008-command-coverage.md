@@ -37,10 +37,10 @@ alarms about files that aren't theirs. The README says extensions are scanned, b
 
 ## Done when
 
-- [ ] A deleted command in `omarchy-menu.jsonc` is found, with a test.
-- [ ] Each new location has a test.
-- [ ] An unchanged shipped file gives a note, and an edited copy gives attention,
+- [x] A deleted command in `omarchy-menu.jsonc` is found, with a test.
+- [x] Each new location has a test.
+- [x] An unchanged shipped file gives a note, and an edited copy gives attention,
       with tests.
-- [ ] A symlink loop finishes, with a test.
-- [ ] A broken symlink and a denied file each give `unknown` and exit 3, with tests.
-- [ ] `tests/run` passes.
+- [x] A symlink loop finishes, with a test.
+- [x] A broken symlink and a denied file each give `unknown` and exit 3, with tests.
+- [x] `tests/run` passes.

@@ -35,7 +35,12 @@ BIND_CALLS = ["o.bind_toggle", "o.bind_hold", "o.rebind", "o.bind", "hl.bind", "
 HELPERS_READ = {"o.bind_toggle", "o.bind_hold", "o.rebind", "o.bind", "o.preinstalled_bindings_enabled"}
 HELPER = re.compile(r"(?<![\w.])(?:function\s+(o[.:][\w.:]*[Bb]ind\w*)|(o\.[\w.]*[Bb]ind\w*)\s*=\s*[A-Za-z_])")
 LONG_STRING = re.compile(r"\[(=*)\[")
-TEXT_SUFFIXES = {"", ".lua", ".sh", ".hook", ".conf", ".toml", ".json", ".qml", ".js", ".py"}
+TEXT_SUFFIXES = {"", ".lua", ".sh", ".hook", ".conf", ".toml", ".json", ".jsonc", ".qml", ".js", ".py"}
+STARTUP_FILES = [
+    ".bashrc", ".bashrc.local", ".bash_profile", ".bash_login", ".bash_aliases", ".bash_logout",
+    ".profile", ".zshrc", ".zshenv", ".zprofile", ".zlogin", ".zlogout", ".config/fish/config.fish",
+]
+LARGEST_SCANNED = 10 * 1024 * 1024
 QMLLINT = "/usr/lib/qt6/bin/qmllint"
 ATTENTION, NOTE, UNKNOWN = "attention", "note", "unknown"
 DOWNLOAD_ERRORS = (OSError, EOFError, ValueError, zlib.error, tarfile.TarError, http.client.HTTPException)
@@ -309,23 +314,32 @@ def parse_defaults(root, name):
     return parsed
 
 
-def read_user_bindings(path, shown):
-    """The user's bindings, and a finding if the file is there but can't be read."""
-    parsed = Parsed()
+def blocked(path, usable=Path.is_file, wanted="a file"):
+    """Why a path can't be read, or None if it can or there's simply nothing there."""
     try:
         path.lstat()
     except FileNotFoundError:
-        # A dotfiles folder on an unmounted drive looks just like having no bindings.
+        # A dotfiles folder on an unmounted drive looks just like having no file.
         broken = any(parent.is_symlink() and not parent.exists() for parent in path.parents)
-        return parsed, [unreadable_bindings(shown, "It's a broken link")] if broken else []
+        return "It's a broken link" if broken else None
     except NotADirectoryError:
-        return parsed, []
+        return None
     except OSError as error:
-        return parsed, [unreadable_bindings(shown, error.strerror)]
-    # Reading a FIFO would hang, so anything but a file stops here.
-    if not path.is_file():
-        reason = "It's a broken link" if path.is_symlink() and not path.exists() else "It isn't a file"
+        return error.strerror
+    # Reading a FIFO would hang, so anything but what's wanted stops here.
+    if usable(path):
+        return None
+    return "It's a broken link" if path.is_symlink() and not path.exists() else f"It isn't {wanted}"
+
+
+def read_user_bindings(path, shown):
+    """The user's bindings, and a finding if the file is there but can't be read."""
+    parsed = Parsed()
+    reason = blocked(path)
+    if reason:
         return parsed, [unreadable_bindings(shown, reason)]
+    if not path.exists():
+        return parsed, []
     try:
         parse_lua(path.read_text(errors="replace"), parsed, shown)
     except OSError as error:
@@ -869,23 +883,81 @@ def compare_packages(target, home, installed):
     return findings
 
 
+def walked_files(root, seen):
+    """A folder's files, and why for any folder in it that can't be read.
+
+    Links are followed, but each real folder is read once, so a link loop ends.
+    """
+    denied = []
+    for directory, subdirs, names in os.walk(root, followlinks=True, onerror=denied.append):
+        status = os.stat(directory)
+        if (status.st_dev, status.st_ino) in seen:
+            subdirs.clear()
+            continue
+        seen.add((status.st_dev, status.st_ino))
+        # systemd's .wants folders only hold links, mostly to units a package owns.
+        subdirs[:] = [d for d in subdirs if d != ".git" and not d.endswith((".wants", ".requires"))]
+        yield from ((Path(directory) / name, None) for name in names)
+    yield from ((Path(error.filename), error.strerror) for error in denied)
+
+
 def user_files(home):
-    roots = [
-        home / ".config/hypr",
-        home / ".config/omarchy/hooks",
-        home / ".config/omarchy/extensions",
-        home / ".config/omarchy/plugins",
-    ]
-    singles = [home / ".bashrc", home / ".bashrc.local", home / ".config/omarchy/shell.toml"]
-    for root in roots:
-        if root.is_dir():
-            for directory, subdirs, names in os.walk(root, followlinks=True):
-                subdirs[:] = [d for d in subdirs if d != ".git"]
-                for name in names:
-                    path = Path(directory) / name
-                    if path.suffix in TEXT_SUFFIXES and ".bak" not in name:
-                        yield path
-    yield from (path for path in singles if path.is_file())
+    """Each file that can call a command, with why it can't be read, if it can't."""
+    config = home / ".config"
+    by_suffix = [config / "hypr", *(config / "omarchy" / name for name in ("hooks", "extensions", "plugins"))]
+    # A script needs no suffix here, and a binary is told by its bytes.
+    every_file = [home / ".local/bin", config / "systemd/user", home / ".local/share/applications"]
+    seen = set()
+    # These come first, so a folder linked from both is read in full.
+    for root in [*every_file, *by_suffix]:
+        reason = blocked(root, Path.is_dir, "a folder")
+        if reason:
+            yield root, reason
+        elif root.exists():
+            for path, reason in walked_files(root, seen):
+                if reason:
+                    yield path, reason
+                elif ".bak" not in path.name and (root in every_file or path.suffix in TEXT_SUFFIXES):
+                    yield path, blocked(path)
+    settings = [config / "omarchy/shell.json", config / "omarchy/shell.toml"]
+    for path in [*settings, *(home / name for name in STARTUP_FILES)]:
+        reason = blocked(path)
+        if reason or path.exists():
+            yield path, reason
+
+
+def scanned_bytes(path):
+    """A file's bytes and why it couldn't be read. A binary file holds nothing to read."""
+    try:
+        with path.open("rb") as file:
+            data = file.read(LARGEST_SCANNED + 1)
+    except OSError as error:
+        return b"", error.strerror
+    if b"\0" in data:
+        return b"", None
+    if len(data) > LARGEST_SCANNED:
+        return b"", f"It's over {LARGEST_SCANNED // (1024 * 1024)} MiB"
+    return data, None
+
+
+def shipped_files(root):
+    """A tree's files by size, so a copy is only compared with a few of them."""
+    sizes = {}
+    for path in root.rglob("*"):
+        if path.is_file():
+            sizes.setdefault(path.stat().st_size, []).append(path)
+    return sizes
+
+
+def shipped_copy(data, root, shipped):
+    """Which file in the tree has exactly these bytes, if any."""
+    for path in shipped.get(len(data), []):
+        try:
+            if path.read_bytes() == data:
+                return str(path.relative_to(root))
+        except OSError:
+            continue
+    return None
 
 
 def compare_commands(current, target, home):
@@ -894,24 +966,37 @@ def compare_commands(current, target, home):
     if not removed:
         return []
     pattern = re.compile(r"(?<![\w-])(" + "|".join(map(re.escape, sorted(removed))) + r")(?![\w-])")
-    found = set()
-    for path in user_files(home):
-        try:
-            lines = path.read_text(errors="strict").splitlines()
-        except (OSError, UnicodeDecodeError):
+    shipped = shipped_files(current)
+    calls, unread = [], {}
+    for path, reason in user_files(home):
+        data, reason = scanned_bytes(path) if reason is None else (b"", reason)
+        if reason:
+            unread[path] = reason
             continue
         comments = ("--",) if path.suffix == ".lua" else ("#", "//")
-        for line in lines:
+        found = {}
+        # Not splitlines: it also splits on characters an editor doesn't count as lines.
+        for number, line in enumerate(data.decode(errors="replace").split("\n"), 1):
             if line.lstrip().startswith(comments):
                 continue
-            for command in pattern.findall(line):
-                found.add((command, path))
+            for command in dict.fromkeys(pattern.findall(line)):
+                found.setdefault(command, []).append(number)
+        original = shipped_copy(data, current, shipped) if found else None
+        calls.extend((str(path), command, numbers, original) for command, numbers in found.items())
     findings = []
-    for command, path in sorted(found, key=lambda item: (str(item[1]), item[0])):
+    for path, command, numbers, original in sorted(calls, key=lambda call: call[:2]):
+        shown = path.replace(str(home), "~", 1)
+        lines = [f"{shown}:{number}" for number in numbers]
+        title = f"{shown} calls {command}, which the release deletes."
+        if original:
+            detail = "It's Omarchy's own file, unchanged, so there's nothing for you to fix."
+            findings.append(Finding("commands", NOTE, title, [*lines, original], detail=detail))
+        else:
+            findings.append(Finding("commands", ATTENTION, title, lines))
+    for path, reason in sorted(unread.items()):
         shown = str(path).replace(str(home), "~", 1)
-        findings.append(Finding(
-            "commands", ATTENTION, f"{shown} calls {command}, which the release deletes.", [shown]
-        ))
+        title = f"{shown} couldn't be read, so it wasn't checked for deleted commands."
+        findings.append(Finding("commands", UNKNOWN, title, [shown], detail=f"{reason}."))
     return findings
 
 

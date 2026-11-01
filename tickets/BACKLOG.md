@@ -101,5 +101,13 @@ Paths already ruled out are not here; they are under
   after a drop yet, and the error is a false removal, not a missed one.
 - **An `if` condition counts as conditional.** `if omarchy-pkg-drop a; then` always
   runs the drop, but says "may remove". Rare, and "may" is still honest.
+- **A shipped file from an older release.** Omarchy's own check goes by the installed
+  tree, so a hook an older release copied and this one no longer ships needs
+  attention. Waits for a real report, and the error is a false alarm, not a miss.
+- **Block comments in your files.** Only whole-line comments are skipped, so a call
+  inside `/* */` or `--[[ ]]` counts, and so does one after `;` in a systemd unit. The
+  error is a false alarm, not a miss.
+- **Other places a call can live.** `~/.config/uwsm`, `~/.config/autostart`, fish's
+  `conf.d`, a zsh `ZDOTDIR` and cron aren't read. Waits for a real report.
 - **Evidence in the text report.** Findings carry evidence, but only `--json` (016)
   will show it. 012 could print it, if it doesn't crowd the report.

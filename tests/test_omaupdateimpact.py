@@ -894,9 +894,22 @@ class Commands(unittest.TestCase):
         (self.base / "current/bin/omarchy-gone-too").touch()
         (self.base / "target/bin/omarchy-gone-too").touch()
 
+    def findings(self):
+        return impact.compare_commands(self.base / "current", self.base / "target", self.home)
+
     def attention(self):
-        findings = impact.compare_commands(self.base / "current", self.base / "target", self.home)
-        return titles(findings, "attention")
+        return titles(self.findings(), "attention")
+
+    def write(self, name, text="omarchy-gone\n"):
+        path = self.home / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text)
+        return path
+
+    def ship(self, name, text):
+        path = self.base / "current" / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text)
 
     def test_finds_a_call_to_a_deleted_command(self):
         (self.hooks / "my.hook").write_text("omarchy-gone\nomarchy-gone again\n")
@@ -904,8 +917,17 @@ class Commands(unittest.TestCase):
 
     def test_a_call_names_the_file_behind_it(self):
         (self.hooks / "my.hook").write_text("omarchy-gone\n")
-        findings = impact.compare_commands(self.base / "current", self.base / "target", self.home)
-        self.assertEqual(findings[0].evidence, ["~/.config/omarchy/hooks/my.hook"])
+        findings = self.findings()
+        self.assertEqual(findings[0].evidence, ["~/.config/omarchy/hooks/my.hook:1"])
+
+    def test_a_call_names_every_line_behind_it(self):
+        (self.hooks / "my.hook").write_text("start\nomarchy-gone\n# omarchy-gone\nomarchy-gone; omarchy-gone\n")
+        findings = self.findings()
+        self.assertEqual(findings[0].evidence, ["~/.config/omarchy/hooks/my.hook:2", "~/.config/omarchy/hooks/my.hook:4"])
+
+    def test_line_numbers_count_what_an_editor_counts(self):
+        (self.hooks / "my.hook").write_text("a\x0cb\u2028c\r\nomarchy-gone\n")
+        self.assertEqual(self.findings()[0].evidence, ["~/.config/omarchy/hooks/my.hook:2"])
 
     def test_a_line_starting_with_a_flag_is_not_a_comment(self):
         (self.hooks / "my.hook").write_text("    --exec omarchy-gone\n")
@@ -922,7 +944,152 @@ class Commands(unittest.TestCase):
 
     def test_ignores_backups(self):
         (self.hooks / "my.lua.bak.123").write_text("omarchy-gone\n")
+        self.write(".local/bin/tool.bak")
         self.assertEqual(self.attention(), [])
+
+    def test_ignores_git_folders(self):
+        self.write(".local/bin/.git/hooks/pre-commit")
+        self.assertEqual(self.findings(), [])
+
+    def test_finds_a_call_in_the_menu_extension(self):
+        self.write(".config/omarchy/extensions/omarchy-menu.jsonc", '{\n  "tools": {"action": "omarchy-gone"}\n}\n')
+        self.assertEqual(self.findings()[0].evidence, ["~/.config/omarchy/extensions/omarchy-menu.jsonc:2"])
+
+    def test_ignores_comments_in_the_menu_extension(self):
+        self.write(".config/omarchy/extensions/omarchy-menu.jsonc", '{\n  // "a": {"action": "omarchy-gone"}\n}\n')
+        self.assertEqual(self.attention(), [])
+
+    def test_finds_a_call_in_each_place(self):
+        places = [
+            ".config/omarchy/shell.json",
+            ".config/omarchy/shell.toml",
+            ".config/hypr/autostart.lua",
+            ".config/omarchy/plugins/demo/Widget.qml",
+            ".local/bin/tool",
+            ".local/bin/tool.rb",
+            ".local/bin/nested/tool",
+            ".config/systemd/user/tool.service",
+            ".config/systemd/user/tool.timer",
+            ".config/systemd/user/tool.service.d/override.conf",
+            ".local/share/applications/tool.desktop",
+            ".local/share/applications/nested/tool.desktop",
+            *impact.STARTUP_FILES,
+        ]
+        for name in places:
+            with self.subTest(name):
+                path = self.write(name)
+                self.assertEqual(self.findings()[0].evidence, [f"~/{name}:1"])
+                path.unlink()
+
+    def test_the_old_folders_still_go_by_suffix(self):
+        self.write(".config/omarchy/plugins/demo/README.md")
+        self.write(".config/omarchy/hooks/post-update.d/tool.sample")
+        self.assertEqual(self.attention(), [])
+
+    def test_units_turned_on_by_a_link_are_not_read_through_it(self):
+        package = self.write("../packaged/omarchy-thing.service")
+        wants = self.home / ".config/systemd/user/default.target.wants"
+        wants.mkdir(parents=True)
+        (wants / "omarchy-thing.service").symlink_to(package)
+        (wants / "gone.service").symlink_to(self.base / "missing.service")
+        self.assertEqual(self.findings(), [])
+
+    def test_an_unchanged_shipped_file_is_a_note(self):
+        text = "#!/bin/bash\nomarchy-gone\n"
+        self.ship("install/user/first-run/tool.hook", text)
+        (self.hooks / "post-update.d").mkdir()
+        (self.hooks / "post-update.d/tool.hook").write_text(text)
+        findings = self.findings()
+        self.assertEqual(titles(findings, "attention"), [])
+        self.assertEqual(len(titles(findings, "note")), 1)
+        self.assertIn("Omarchy's own", findings[0].text())
+        self.assertEqual(
+            findings[0].evidence,
+            ["~/.config/omarchy/hooks/post-update.d/tool.hook:2", "install/user/first-run/tool.hook"],
+        )
+
+    def test_an_edited_copy_needs_attention(self):
+        self.ship("install/user/first-run/tool.hook", "#!/bin/bash\nomarchy-gone\n")
+        (self.hooks / "tool.hook").write_text("#!/bin/bash\nomarchy-gone\n# mine\n")
+        self.assertEqual(len(self.attention()), 1)
+
+    def test_an_edit_of_the_same_size_needs_attention(self):
+        self.ship("install/user/first-run/tool.hook", "#!/bin/bash\nomarchy-gone a\n")
+        (self.hooks / "tool.hook").write_text("#!/bin/bash\nomarchy-gone b\n")
+        self.assertEqual(len(self.attention()), 1)
+
+    def test_a_shipped_copy_only_counts_from_the_installed_tree(self):
+        (self.base / "target/install").mkdir()
+        (self.base / "target/install/tool.hook").write_text("omarchy-gone\n")
+        (self.hooks / "tool.hook").write_text("omarchy-gone\n")
+        self.assertEqual(len(self.attention()), 1)
+
+    def test_a_folder_linked_to_itself_finishes(self):
+        (self.hooks / "my.hook").write_text("omarchy-gone\n")
+        (self.hooks / "again").symlink_to(self.hooks)
+        (self.hooks / "more").symlink_to(".")
+        self.assertEqual(len(self.attention()), 1)
+
+    def test_folders_linked_to_each_other_finish(self):
+        one, two = self.hooks / "one", self.hooks / "two"
+        one.mkdir()
+        two.mkdir()
+        (two / "my.hook").write_text("omarchy-gone\n")
+        for link in "abcdef":
+            (one / link).symlink_to(two)
+            (two / link).symlink_to(one)
+        self.assertEqual(len(self.attention()), 1)
+
+    def test_a_link_to_a_folder_above_finishes(self):
+        (self.hooks / "my.hook").write_text("omarchy-gone\n")
+        (self.hooks / "up").symlink_to(self.home)
+        self.assertEqual(len(self.attention()), 1)
+
+    def test_a_link_to_itself_is_unknown(self):
+        (self.hooks / "loop").symlink_to(self.hooks / "loop")
+        self.assertEqual(self.findings()[0].level, "unknown")
+
+    def test_a_folder_reached_twice_is_read_once(self):
+        (self.home / ".config/hypr").mkdir()
+        (self.home / ".config/hypr/hooks").symlink_to(self.hooks)
+        (self.hooks / "my.hook").write_text("omarchy-gone\n")
+        self.assertEqual(len(self.attention()), 1)
+
+    def test_a_folder_linked_from_a_suffix_folder_is_still_read_in_full(self):
+        self.write(".local/bin/tool.rb")
+        (self.home / ".config/hypr").mkdir()
+        (self.home / ".config/hypr/scripts").symlink_to(self.home / ".local/bin")
+        self.assertEqual(self.findings()[0].evidence, ["~/.local/bin/tool.rb:1"])
+
+    def test_a_binary_file_is_skipped(self):
+        (self.hooks / "tool").write_bytes(b"\x7fELF\0\xff omarchy-gone\n")
+        self.write(".local/bin/tool").write_bytes(b"\0\xff omarchy-gone\n")
+        self.assertEqual(self.findings(), [])
+
+    def test_text_that_is_not_utf8_is_read(self):
+        (self.hooks / "tool").write_bytes("# caf\xe9\nomarchy-gone\n".encode("latin-1"))
+        self.assertEqual(len(self.attention()), 1)
+
+    def test_a_very_large_file_is_unknown_and_named(self):
+        (self.hooks / "big").write_text("omarchy-gone\n" * 2)
+        with mock.patch.object(impact, "LARGEST_SCANNED", 10):
+            finding = self.findings()[0]
+        self.assertEqual((finding.level, finding.evidence), ("unknown", ["~/.config/omarchy/hooks/big"]))
+
+    def test_a_very_large_binary_is_skipped(self):
+        (self.hooks / "big").write_bytes(b"\0" + b"omarchy-gone\n" * 2)
+        with mock.patch.object(impact, "LARGEST_SCANNED", 10):
+            self.assertEqual(self.findings(), [])
+
+    def test_a_pipe_is_unknown_and_not_read(self):
+        os.mkfifo(self.hooks / "tool.hook")
+        self.assertEqual(self.findings()[0].level, "unknown")
+
+    def test_nothing_deleted_means_nothing_to_read(self):
+        (self.base / "current/bin/omarchy-gone").unlink()
+        (self.base / "current/bin/omarchy-gone-too").unlink()
+        (self.hooks / "tool.hook").symlink_to(self.base / "missing")
+        self.assertEqual(self.findings(), [])
 
 
 class Plugins(unittest.TestCase):
@@ -1230,6 +1397,101 @@ class Bindings(ProgramCase):
         self.assertEqual(code, 1)
         self.assertNotIn("removed", out)
         self.assertIn("ALT + ALT_R: your", out)
+
+
+class UnreadableFiles(ProgramCase):
+    def setUp(self):
+        super().setUp()
+        (self.base / "current/bin/omarchy-gone").touch()
+        self.hooks = self.home / ".config/omarchy/hooks"
+        self.hooks.mkdir(parents=True)
+
+    def assert_unknown(self, shown, reason):
+        code, out, _ = self.check()
+        self.assertEqual(code, 3)
+        self.assertIn(f"{shown} couldn't be read", " ".join(out.split()))
+        self.assertIn(reason, " ".join(out.split()))
+        self.assertIn("These checks didn't run: commands.", out)
+
+    def test_a_broken_link_in_a_folder_is_unknown(self):
+        (self.hooks / "tool.hook").symlink_to(self.base / "missing")
+        self.assert_unknown("~/.config/omarchy/hooks/tool.hook", "It's a broken link")
+
+    def test_a_broken_bashrc_is_unknown(self):
+        (self.home / ".bashrc").symlink_to(self.base / "unmounted/.bashrc")
+        self.assert_unknown("~/.bashrc", "It's a broken link")
+
+    def test_a_broken_scanned_folder_is_unknown(self):
+        self.hooks.rmdir()
+        self.hooks.symlink_to(self.base / "unmounted")
+        self.assert_unknown("~/.config/omarchy/hooks", "It's a broken link")
+
+    def test_a_broken_new_folder_is_unknown(self):
+        (self.home / ".local").mkdir()
+        (self.home / ".local/bin").symlink_to(self.base / "unmounted")
+        self.assert_unknown("~/.local/bin", "It's a broken link")
+
+    def test_a_broken_link_above_a_single_file_is_unknown(self):
+        (self.home / ".config/fish").symlink_to(self.base / "unmounted")
+        self.assert_unknown("~/.config/fish/config.fish", "It's a broken link")
+
+    def test_a_file_in_place_of_a_folder_is_unknown(self):
+        self.hooks.rmdir()
+        self.hooks.write_text("omarchy-gone\n")
+        self.assert_unknown("~/.config/omarchy/hooks", "It isn't a folder")
+
+    def test_a_folder_in_place_of_a_file_is_unknown(self):
+        (self.home / ".bashrc").mkdir()
+        self.assert_unknown("~/.bashrc", "It isn't a file")
+
+    @unittest.skipIf(os.geteuid() == 0, "root reads everything")
+    def test_a_denied_file_is_unknown(self):
+        (self.hooks / "tool.hook").touch(mode=0)
+        self.assert_unknown("~/.config/omarchy/hooks/tool.hook", "Permission denied")
+
+    @unittest.skipIf(os.geteuid() == 0, "root reads everything")
+    def test_a_denied_single_file_is_unknown(self):
+        (self.home / ".zshrc").touch(mode=0)
+        self.assert_unknown("~/.zshrc", "Permission denied")
+
+    @unittest.skipIf(os.geteuid() == 0, "root reads everything")
+    def test_a_denied_folder_inside_a_scanned_one_is_unknown(self):
+        (self.hooks / "private").mkdir()
+        (self.hooks / "private").chmod(0)
+        self.addCleanup((self.hooks / "private").chmod, 0o755)
+        self.assert_unknown("~/.config/omarchy/hooks/private", "Permission denied")
+
+    @unittest.skipIf(os.geteuid() == 0, "root reads everything")
+    def test_a_denied_scanned_folder_is_unknown(self):
+        self.hooks.chmod(0)
+        self.addCleanup(self.hooks.chmod, 0o755)
+        self.assert_unknown("~/.config/omarchy/hooks", "Permission denied")
+
+    def test_a_missing_file_or_folder_is_fine(self):
+        self.hooks.rmdir()
+        self.assertEqual(self.check()[0], 0)
+
+    def test_a_call_outranks_an_unreadable_file(self):
+        (self.hooks / "tool.hook").symlink_to(self.base / "missing")
+        (self.hooks / "my.hook").write_text("omarchy-gone\n")
+        code, out, _ = self.check()
+        self.assertEqual(code, 1)
+        self.assertIn("These checks didn't run: commands.", out)
+
+    def test_an_unchanged_shipped_file_exits_0(self):
+        (self.base / "current/install").mkdir()
+        (self.base / "current/install/tool.hook").write_text("omarchy-gone\n")
+        (self.hooks / "tool.hook").write_text("omarchy-gone\n")
+        code, out, _ = self.check()
+        self.assertEqual(code, 0)
+        self.assertIn("Omarchy's own", " ".join(out.split()))
+        self.assertIn("Nothing found", out)
+
+    def test_an_edited_shipped_file_exits_1(self):
+        (self.base / "current/install").mkdir()
+        (self.base / "current/install/tool.hook").write_text("omarchy-gone\n")
+        (self.hooks / "tool.hook").write_text("omarchy-gone --mine\n")
+        self.assertEqual(self.check()[0], 1)
 
 
 class Trees(ProgramCase):

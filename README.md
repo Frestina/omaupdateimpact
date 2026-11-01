@@ -27,8 +27,10 @@ way, set `GITHUB_TOKEN`.
 - **Packages:** the migrations you haven't run yet, and which installed packages
   they remove. Those are the ones an update takes away; a package that only left
   the default install list stays on your machine.
-- **Commands:** `omarchy-*` commands the release deletes that your Hyprland
-  config, hooks, extensions, plugins or `.bashrc` still call.
+- **Commands:** `omarchy-*` commands the release deletes that your own files still
+  call: Hyprland config, hooks, extensions, plugins, `shell.json`, `shell.toml`,
+  `~/.local/bin`, systemd user units, `~/.local/share/applications` and your bash,
+  zsh or fish startup files. A file Omarchy put there, unchanged, is a note.
 - **Plugins:** `qmllint` warnings that are new with the release's shell.
 
 ## Exit codes
@@ -64,6 +66,9 @@ adds the traceback.
 - A removal is "will remove" unless it sits inside an `if`, a loop, a `case`, a
   function, or after `&&` or `||`. A migration that exits early, as with
   `x || exit 0`, still says "will remove".
+- Your files are read as text. A command called from a binary isn't seen. A file
+  that can't be read, or a text file over 10 MiB, is reported as a limit. A broken
+  link counts, so remove the ones you don't need.
 - It doesn't read `omarchy_default_bindings = false` from your `hyprland.lua`.
 - It won't catch a failure during the update itself.
 

@@ -150,7 +150,8 @@ Each check returns findings and says whether it could run.
   removal it can't read, such as `"${targets[@]}"`, is reported as unknown. See
   [Reading migrations](#reading-migrations).
 - **Commands:** deleted `omarchy-*` commands still called from your files. A file
-  that Omarchy itself put there, unchanged, isn't your problem to fix.
+  that Omarchy itself put there, unchanged, isn't your problem to fix. See
+  [Reading your files](#reading-your-files).
 - **Plugins:** new `qmllint` warnings. If `qmllint` fails, that is unknown, not
   clean. These never count as "needs attention": see the Limits in the README.
   With no plugins there is nothing to lint, so a missing `qmllint` doesn't matter.
@@ -223,6 +224,40 @@ string given to `bash -c`, `sh -c` or `eval` names a removal, or when the reader
 loses its place, as with a quote that never closes. The same goes for a file it
 reaches, and the finding names that file too. What it can read from the same
 removal is still reported.
+
+### Reading your files
+
+Commands are looked for in these places:
+
+- Hyprland config and Omarchy's hooks, extensions and plugins, in files with a text
+  suffix such as `.lua`, `.sh`, `.hook` or `.jsonc`. A plugin's `README.md` and a
+  hook's `.sample` aren't calls.
+- `~/.local/bin`, `~/.config/systemd/user` and `~/.local/share/applications`, in
+  every file. A script needs no suffix there.
+- `shell.json`, `shell.toml` and the startup files of bash, zsh and fish.
+
+Links are followed, and each real folder is read once, so a link loop ends. A folder
+both ways of reading can reach is read in full. `.git` is skipped, and so are backups
+and systemd's `.wants` and `.requires` folders: those only hold links, and mostly to
+units a package owns, such as Omarchy's own.
+
+A file byte-identical to any file in the installed tree is Omarchy's own, wherever
+it sits. Hooks are copied from `install/user/first-run` to another path, so the path
+can't count. A call in one is a note, and the evidence names the file it matches.
+An edited copy needs attention.
+
+The evidence names each line a command is called on. Lines are counted as an editor
+counts them, by newlines. Comment lines are skipped.
+
+A file with a NUL byte is binary and is skipped, because there is nothing to read.
+Other text counts even if it isn't UTF-8. A text file over 10 MiB is skipped too,
+but that is `unknown`: it could hold a call. NUL is looked for in the first 10 MiB,
+so a large binary isn't reported.
+
+A file or folder that exists but can't be read is `unknown` and is named: a broken
+link, a broken link in a folder above it, a denied one, or the wrong kind, such as a
+pipe. With nothing there, there is nothing to check. With no deleted commands
+nothing is read, so nothing is unknown.
 
 ## Findings and exit codes
 
