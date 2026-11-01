@@ -24,7 +24,9 @@ loader.exec_module(impact)
 
 
 QMLLINT_OUTPUT = Path(__file__).parent / "fixtures/qmllint-6.12.0"
-REAL_QMLLINT = shutil.which("qmllint") or (impact.QMLLINT if Path(impact.QMLLINT).exists() else None)
+REAL_QMLLINT = impact.find_qmllint()[0]
+# Answers --version as Qt 6 does, for a script in place of qmllint.
+QT6_VERSION = '[ "$1" != --version ] || { echo "qmllint 6.12.0"; exit 0; }'
 
 
 def parse(text):
@@ -1177,9 +1179,9 @@ class Plugins(unittest.TestCase):
                 ("a.qml", w) for w in warnings["/".join(shell.parts[-2:])]
             )
             self.addCleanup(setattr, impact, "lint", original)
-            original_which = impact.shutil.which
-            impact.shutil.which = lambda name: "/bin/true"
-            self.addCleanup(setattr, impact.shutil, "which", original_which)
+            original_find = impact.find_qmllint
+            impact.find_qmllint = lambda: ("/bin/true", [])
+            self.addCleanup(setattr, impact, "find_qmllint", original_find)
             findings = impact.compare_plugins(Path("current"), Path("target"), home, [])
             notes = titles(findings, "note")
             self.assertEqual(len(notes), 2)
@@ -1214,7 +1216,7 @@ class Plugins(unittest.TestCase):
             (home / ".config/omarchy/plugins/demo").mkdir(parents=True)
             found = [impact.Counter(), impact.Counter({("a.qml", "new"): 2})]
             with mock.patch.object(impact, "lint", side_effect=found), \
-                    mock.patch.object(impact.shutil, "which", return_value="/bin/true"):
+                    mock.patch.object(impact, "find_qmllint", return_value=("/bin/true", [])):
                 findings = impact.compare_plugins(Path("current"), Path("target"), home, [])
         self.assertIn("2 new qmllint warnings, such as", findings[0].title)
 
@@ -1235,7 +1237,7 @@ class Lint(unittest.TestCase):
 
     def qmllint(self, script):
         path = self.base / "qmllint"
-        path.write_text(f"#!/bin/sh\n{script}\n")
+        path.write_text(f"#!/bin/sh\n{QT6_VERSION}\n{script}\n")
         path.chmod(0o755)
         return path
 
@@ -1247,12 +1249,12 @@ class Lint(unittest.TestCase):
         return impact.lint(self.plugin, self.base / tree / "shell", str(qmllint))
 
     def findings(self, qmllint):
-        with mock.patch.object(impact.shutil, "which", return_value=str(qmllint)):
-            return impact.compare_plugins(self.base / "current", self.base / "target", self.home, [])
+        return self.checked(str(qmllint))[1]
 
     def checked(self, qmllint):
         checked = []
-        with mock.patch.object(impact.shutil, "which", return_value=qmllint):
+        with mock.patch.object(impact.shutil, "which", return_value=qmllint), \
+                mock.patch.object(impact, "QMLLINT", str(self.base / "missing")):
             findings = impact.compare_plugins(self.base / "current", self.base / "target", self.home, checked)
         return checked, findings
 
@@ -1268,8 +1270,7 @@ class Lint(unittest.TestCase):
         self.assertFalse(findings[0].partial)
 
     def test_no_qmllint_isnt_counted_and_didnt_run(self):
-        with mock.patch.object(impact, "QMLLINT", str(self.base / "missing")):
-            checked, findings = self.checked(None)
+        checked, findings = self.checked(None)
         self.assertEqual(checked, [])
         self.assertFalse(findings[0].partial)
 
@@ -1312,7 +1313,7 @@ class Lint(unittest.TestCase):
         self.assertEqual(findings[0].evidence, ["~/.config/omarchy/plugins/demo"])
 
     def test_a_failing_qmllint_is_unknown(self):
-        self.assert_unknown("/bin/false", "exited 1")
+        self.assert_unknown(self.qmllint("exit 1"), "exited 1")
 
     def test_a_signal_is_unknown(self):
         self.assert_unknown(self.qmllint("kill -TERM $$"), "signal 15")
@@ -1331,7 +1332,8 @@ class Lint(unittest.TestCase):
     def test_a_qmllint_that_cant_start_is_unknown(self):
         qmllint = self.qmllint("")
         qmllint.chmod(0o644)
-        self.assert_unknown(qmllint, "couldn't start")
+        with self.assertRaisesRegex(impact.LintFailed, "couldn't start"):
+            self.lint(qmllint)
 
     def test_output_that_isnt_text_is_still_read(self):
         qmllint = self.qmllint(r"printf 'caf\351\n' >&2; cat '%s' >&2" % (QMLLINT_OUTPUT / "current.txt"))
@@ -1353,7 +1355,7 @@ class Lint(unittest.TestCase):
 
     def test_a_plugin_that_is_a_broken_link_is_unknown(self):
         (self.plugin.parent / "gone").symlink_to("nowhere")
-        findings = self.findings("/bin/true")
+        findings = self.findings(self.qmllint("exit 0"))
         self.assertEqual([finding.level for finding in findings], ["unknown", "note"])
         self.assertIn("gone is a broken link", findings[0].title)
         self.assertEqual(findings[0].evidence, ["~/.config/omarchy/plugins/gone"])
@@ -1361,7 +1363,7 @@ class Lint(unittest.TestCase):
     def test_a_broken_plugin_alone_is_unknown_with_no_closing_note(self):
         shutil.rmtree(self.plugin)
         (self.plugin.parent / "gone").symlink_to("nowhere")
-        self.assertEqual([finding.level for finding in self.findings("/bin/true")], ["unknown"])
+        self.assertEqual([finding.level for finding in self.findings(self.qmllint("exit 0"))], ["unknown"])
 
     def test_a_broken_plugin_does_not_hide_a_missing_qmllint(self):
         (self.plugin.parent / "gone").symlink_to("nowhere")
@@ -1374,10 +1376,10 @@ class Lint(unittest.TestCase):
 
     def test_a_plain_file_is_not_a_plugin(self):
         (self.plugin.parent / "notes.txt").write_text("not a plugin")
-        self.assertEqual([finding.level for finding in self.findings("/bin/true")], ["note"])
+        self.assertEqual([finding.level for finding in self.findings(self.qmllint("exit 0"))], ["note"])
 
     def assert_plugins_folder_unknown(self, reason):
-        findings = self.findings("/bin/true")
+        findings = self.findings(self.qmllint("exit 0"))
         self.assertEqual([finding.level for finding in findings], ["unknown"])
         self.assertEqual(findings[0].evidence, ["~/.config/omarchy/plugins"])
         self.assertIn(reason, findings[0].detail)
@@ -1403,7 +1405,7 @@ class Lint(unittest.TestCase):
 
     def test_no_plugins_folder_is_nothing_to_check(self):
         shutil.rmtree(self.plugin.parent)
-        self.assertEqual(self.findings("/bin/true"), [])
+        self.assertEqual(self.findings(self.qmllint("exit 0")), [])
 
     @unittest.skipIf(os.geteuid() == 0, "root reads a denied folder")
     def test_a_denied_folder_in_a_plugin_is_unknown(self):
@@ -1411,13 +1413,13 @@ class Lint(unittest.TestCase):
         closed.mkdir(parents=True)
         closed.chmod(0)
         self.addCleanup(closed.chmod, 0o755)
-        self.assert_unknown("/bin/true", "demo/panel/closed couldn't be read: Permission denied")
+        self.assert_unknown(self.qmllint("exit 0"), "demo/panel/closed couldn't be read: Permission denied")
 
     @unittest.skipIf(os.geteuid() == 0, "root reads a denied folder")
     def test_a_denied_plugin_is_unknown(self):
         self.plugin.chmod(0)
         self.addCleanup(self.plugin.chmod, 0o755)
-        self.assert_unknown("/bin/true", "demo couldn't be read: Permission denied")
+        self.assert_unknown(self.qmllint("exit 0"), "demo couldn't be read: Permission denied")
 
     def test_a_linked_folder_is_linted(self):
         outside = self.base / "outside"
@@ -1473,7 +1475,137 @@ class Lint(unittest.TestCase):
         self.assertEqual(relative, absolute)
 
 
-@unittest.skipUnless(REAL_QMLLINT, "qmllint isn't installed")
+class PickingQmllint(unittest.TestCase):
+    """find_qmllint() on scripts that stand for qmllint on PATH and at impact.QMLLINT."""
+
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.base = Path(directory.name)
+        self.home = self.base / "home"
+        plugin = self.home / ".config/omarchy/plugins/demo"
+        plugin.mkdir(parents=True)
+        (plugin / "Demo.qml").write_text("import QtQuick\nItem {}\n")
+        (self.base / "shell").mkdir()
+
+    def script(self, name, version, lint="exit 1"):
+        """A qmllint that does this for --version, and fails to lint unless told otherwise."""
+        path = self.base / name
+        path.write_text(f'#!/bin/sh\n[ "$1" != --version ] || {{ {version}; }}\n{lint}\n')
+        path.chmod(0o755)
+        return str(path)
+
+    def says(self, name, version, lint="exit 1"):
+        return self.script(name, f"echo '{version}'; exit 0", lint)
+
+    def found(self, on_path, installed=None):
+        with mock.patch.object(impact.shutil, "which", return_value=on_path), \
+                mock.patch.object(impact, "QMLLINT", installed or str(self.base / "missing")):
+            return impact.find_qmllint()
+
+    def checked(self, on_path, installed=None):
+        checked = []
+        with mock.patch.object(impact.shutil, "which", return_value=on_path), \
+                mock.patch.object(impact, "QMLLINT", installed or str(self.base / "missing")):
+            findings = impact.compare_plugins(self.base, self.base, self.home, checked)
+        return checked, findings
+
+    def test_qt6_and_newer_count(self):
+        # 6.4.2 is what Ubuntu 24.04 prints in CI, and 6.12.0 is what Arch prints.
+        for version in ["qmllint 6.4.2", "qmllint 6.12.0", "qmllint 7.0.0"]:
+            with self.subTest(version):
+                qmllint = self.says("qmllint", version)
+                self.assertEqual(self.found(qmllint), (qmllint, []))
+
+    def test_qt5_first_on_path_isnt_used_when_qt6_exists(self):
+        older, newer = self.says("qt5", "qmllint 1.0"), self.says("qt6", "qmllint 6.12.0", lint="exit 0")
+        self.assertEqual(self.found(older, newer)[0], newer)
+        # Linting with the Qt 5 script would fail.
+        self.assertEqual(self.checked(older, newer)[0], ["1 plugin linted"])
+
+    def test_qt6_on_path_comes_first(self):
+        first, second = self.says("first", "qmllint 6.12.0"), self.says("second", "qmllint 6.4.2")
+        self.assertEqual(self.found(first, second), (first, []))
+
+    def test_only_qt5_is_unknown_and_names_what_was_found(self):
+        older = self.says("qmllint", "qmllint 1.0")
+        checked, findings = self.checked(older)
+        self.assertEqual(checked, [])
+        self.assertEqual([finding.level for finding in findings], ["unknown"])
+        self.assertFalse(findings[0].partial)
+        self.assertEqual(findings[0].evidence, ["~/.config/omarchy/plugins"])
+        self.assertIn("isn't from Qt 6", findings[0].title)
+        self.assertEqual(findings[0].detail, f"Found {older} (qmllint 1.0).")
+
+    def test_only_qt5_does_not_hide_a_broken_plugin(self):
+        (self.home / ".config/omarchy/plugins/gone").symlink_to("nowhere")
+        _, findings = self.checked(self.says("qmllint", "qmllint 1.0"))
+        self.assertEqual(len(titles(findings, "unknown")), 2)
+
+    def test_only_qt5_does_not_matter_without_plugins(self):
+        shutil.rmtree(self.home / ".config/omarchy/plugins")
+        self.assertEqual(self.checked(self.says("qmllint", "qmllint 1.0")), (["no plugins"], []))
+
+    def test_one_path_is_named_once(self):
+        older = self.says("qmllint", "qmllint 1.0")
+        self.assertEqual(self.found(older, older), (None, [(older, "qmllint 1.0")]))
+
+    def test_both_are_named_when_neither_counts(self):
+        first, second = self.says("first", "qmllint 1.0"), self.script("second", "exit 1")
+        _, findings = self.checked(first, second)
+        self.assertEqual(findings[0].detail, f"Found {first} (qmllint 1.0), {second} (no version it could read).")
+
+    def test_a_path_in_home_is_shown_short(self):
+        (self.home / "bin").mkdir()
+        older = self.says("home/bin/qmllint", "qmllint 1.0")
+        self.assertEqual(self.checked(older)[1][0].detail, "Found ~/bin/qmllint (qmllint 1.0).")
+
+    def test_nothing_found_stays_not_found(self):
+        self.assertEqual(self.found(None), (None, []))
+        self.assertIn("qmllint wasn't found", self.checked(None)[1][0].title)
+
+    def assert_doesnt_count(self, script):
+        qmllint = self.script("qmllint", script)
+        self.assertEqual(self.found(qmllint), (None, [(qmllint, "no version it could read")]))
+
+    def test_a_version_that_fails_doesnt_count(self):
+        self.assert_doesnt_count("echo 'qmllint 6.12.0'; exit 1")
+
+    def test_a_version_killed_by_a_signal_doesnt_count(self):
+        self.assert_doesnt_count("echo 'qmllint 6.12.0'; kill -TERM $$")
+
+    def test_a_version_that_hangs_doesnt_count(self):
+        with mock.patch.object(impact, "LINT_TIMEOUT", 0.2):
+            self.assert_doesnt_count("exec sleep 30")
+
+    def test_a_qmllint_that_cant_start_doesnt_count(self):
+        qmllint = self.says("qmllint", "qmllint 6.12.0")
+        Path(qmllint).chmod(0o644)
+        self.assertEqual(self.found(qmllint), (None, [(qmllint, "no version it could read")]))
+
+    def test_a_version_it_cant_read_doesnt_count(self):
+        for output in [
+            "",
+            "qmllint",
+            "qmllint 6",
+            "qmllint six.twelve",
+            "true (GNU coreutils) 9.4",
+            "qmllint 6.12.0 and more",
+            "not qmllint 6.12.0",
+            "qmllint 6.12.0-\033[31m",
+            f"qmllint {'9' * 5000}.0",
+        ]:
+            with self.subTest(output[:30]):
+                self.assert_doesnt_count(f"printf '%b\\n' '{output}'; exit 0")
+
+    def test_a_version_that_isnt_text_doesnt_count(self):
+        self.assert_doesnt_count(r"printf 'qmllint 6\351\n'; exit 0")
+
+    def test_a_version_on_stderr_doesnt_count(self):
+        self.assert_doesnt_count("echo 'qmllint 6.12.0' >&2; exit 0")
+
+
+@unittest.skipUnless(REAL_QMLLINT, "no qmllint from Qt 6 or newer is installed")
 class RealQmllint(unittest.TestCase):
     """The fictional plugin through the real qmllint, when there is one."""
 
@@ -1641,10 +1773,27 @@ class Program(ProgramCase):
         plugin = self.home / ".config/omarchy/plugins/demo"
         plugin.mkdir(parents=True)
         (plugin / "Demo.qml").write_text("import QtQuick\nItem {}\n")
-        with mock.patch.object(impact.shutil, "which", return_value="/bin/false"):
+        qmllint = self.base / "qmllint"
+        qmllint.write_text(f"#!/bin/sh\n{QT6_VERSION}\nexit 1\n")
+        qmllint.chmod(0o755)
+        with mock.patch.object(impact.shutil, "which", return_value=str(qmllint)):
             code, out, _ = self.check()
         self.assertEqual(code, 3)
         self.assertIn("demo couldn't be linted", out)
+        self.assertEqual(out.splitlines()[-1], "These checks didn't run: plugins.")
+        self.assertNotIn("nothing found", out.lower())
+
+    def test_only_a_qt5_qmllint_exits_3_and_never_says_nothing_found(self):
+        plugin = self.home / ".config/omarchy/plugins/demo"
+        plugin.mkdir(parents=True)
+        (plugin / "Demo.qml").write_text("import QtQuick\nItem {}\n")
+        qmllint = self.base / "qmllint"
+        qmllint.write_text("#!/bin/sh\necho 'qmllint 1.0'\n")
+        qmllint.chmod(0o755)
+        with mock.patch.object(impact.shutil, "which", return_value=str(qmllint)), \
+                mock.patch.object(impact, "QMLLINT", str(self.base / "missing")):
+            code, out, _ = self.check()
+        self.assertEqual(code, 3)
         self.assertEqual(out.splitlines()[-1], "These checks didn't run: plugins.")
         self.assertNotIn("nothing found", out.lower())
 

@@ -77,11 +77,6 @@ Paths already ruled out are not here; they are under
 - **CI's oldest Python is the newest 3.11.** The minimum is 3.11.4, and `3.11` in the
   matrix follows the patch releases. The suite passed on 3.11.4 by hand when 013
   set it. Pinning it is small; waits to see if a later change touches `tarfile`.
-- **`qmllint` exiting 255 with nothing to read.** On a real machine two plugins came
-  back `unknown` this way, while others linted. That is honest, but the reason is
-  lost. Empty, broken and unparseable files all give lines the tool can read, so
-  this is something else. Needs that plugin's raw `qmllint` output, and the message
-  should quote it. Settle it in 015's machine runs.
 - **A new `qmllint` waits for the next push.** Arch's `qmllint` only runs in CI on a
   push or a pull request, not daily like the drift watch. A quiet repo could miss a
   new Qt for a while. Adding the Arch job to a schedule is small; waits to see how

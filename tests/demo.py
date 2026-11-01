@@ -68,6 +68,7 @@ def recorded():
         stub(stubs, "omarchy-version-channel", "echo rc")
         stub(stubs, "pacman", f"printf '%s\\n' {PACKAGES}")
         stub(stubs, "qmllint", f"""
+            [ "$1" != --version ] || {{ echo "qmllint 6.12.0"; exit 0; }}
             cd -P "$2/qs" || exit 1
             case "$PWD" in
             *v4.5.0-rc2*) cat "{FIXTURES}/qmllint-6.12.0/release.txt" ;;

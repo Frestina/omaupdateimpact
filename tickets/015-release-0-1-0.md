@@ -2,7 +2,7 @@
 id: "015"
 title: Release 0.1.0
 milestone: M2 First release
-depends_on: ["011", "014"]
+depends_on: ["011", "014", "024"]
 ---
 
 # 015 Release 0.1.0

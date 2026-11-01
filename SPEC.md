@@ -167,6 +167,14 @@ can't open one of the plugin's files. It is also `unknown` when `qmllint` exits
 non-zero with no warnings to read. Warnings on a non-zero exit do count, because
 `qmllint` exits 255 on a syntax error, and a broken plugin is still an answer.
 
+Only a `qmllint` from Qt 6 or newer counts, because the shell is Qt 6. Qt 5's prints
+nothing and only checks syntax, so a plugin that passes it wasn't compared at all,
+and it can come first on `PATH`: `qt5-declarative` puts it at `/usr/bin/qmllint`. So
+the first of `qmllint` on `PATH` and `/usr/lib/qt6/bin/qmllint` whose `--version`
+reads 6 or newer is used. If neither does, plugins are `unknown` and not linted, and
+the line says what was found. Omarchy installs `qt6-declarative`, so this is rare
+there.
+
 A plugin is also `unknown` when a folder in it can't be read, because its files
 wouldn't reach `qmllint`. A plugin that is a broken link is `unknown`, and so is a
 plugins folder that can't be read. A plain file in that folder isn't a plugin.

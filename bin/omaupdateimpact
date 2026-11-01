@@ -51,6 +51,8 @@ STARTUP_FILES = [
 ]
 LARGEST_SCANNED = 10 * 1024 * 1024
 QMLLINT = "/usr/lib/qt6/bin/qmllint"
+# Qt 5 prints "qmllint 1.0", and Qt 6 its own version, such as "qmllint 6.4.2".
+QMLLINT_VERSION = re.compile(r"qmllint (\d{1,3})\.[\d.]+", re.ASCII)
 LINT_TIMEOUT = 60
 ATTENTION, NOTE, UNKNOWN = "attention", "note", "unknown"
 DOWNLOAD_ERRORS = (OSError, EOFError, ValueError, zlib.error, tarfile.TarError, http.client.HTTPException)
@@ -1055,6 +1057,29 @@ def in_plugin(path, plugin):
     return str(path.relative_to(plugin)) if path.is_relative_to(plugin) else path.name
 
 
+def qmllint_version(qmllint):
+    """What a qmllint says it is, or None if that can't be read."""
+    try:
+        result = subprocess.run(
+            [qmllint, "--version"], capture_output=True, text=True, errors="replace", timeout=LINT_TIMEOUT, check=False,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return None
+    return QMLLINT_VERSION.fullmatch(result.stdout.strip()) if result.returncode == 0 else None
+
+
+def find_qmllint():
+    """The first qmllint from Qt 6 or newer, and the ones found before it that aren't."""
+    others = []
+    for qmllint in dict.fromkeys([shutil.which("qmllint"), QMLLINT if Path(QMLLINT).exists() else None]):
+        if qmllint:
+            version = qmllint_version(qmllint)
+            if version and int(version[1]) >= 6:
+                return qmllint, others
+            others.append((qmllint, version[0] if version else "no version it could read"))
+    return None, others
+
+
 def lint(plugin, shell, qmllint):
     """Count qmllint warnings for a plugin, ignoring line numbers.
 
@@ -1120,7 +1145,11 @@ def compare_plugins(current, target, home, checked):
         Finding("plugins", UNKNOWN, f"{p.name} is a broken link, so it wasn't linted.", [f"{shown}/{p.name}"])
         for p in installed if not p.exists()
     ]
-    qmllint = shutil.which("qmllint") or (QMLLINT if Path(QMLLINT).exists() else None)
+    qmllint, others = find_qmllint()
+    if others and not qmllint:
+        title = "qmllint isn't from Qt 6 or newer, so plugins weren't linted."
+        found = ", ".join(f"{str(path).replace(str(home), '~', 1)} ({version})" for path, version in others)
+        return [Finding("plugins", UNKNOWN, title, [shown], detail=f"Found {found}."), *findings]
     if not qmllint:
         return [Finding("plugins", UNKNOWN, "qmllint wasn't found, so plugins weren't linted.", [shown]), *findings]
     linted = 0

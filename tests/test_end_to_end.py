@@ -15,7 +15,7 @@ from pathlib import Path
 from unittest import mock
 
 from tests import demo, drift_watch
-from tests.test_omaupdateimpact import QMLLINT_OUTPUT, ProgramCase, impact
+from tests.test_omaupdateimpact import QMLLINT_OUTPUT, QT6_VERSION, ProgramCase, impact
 
 COMMAND = Path(__file__).parent.parent / "bin/omaupdateimpact"
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -55,6 +55,7 @@ class RealCommand(unittest.TestCase):
         self.stub("omarchy-version-channel", "echo stable")
         self.packages("fictional-editor")
         self.stub("qmllint", f"""
+            {QT6_VERSION}
             cd -P "$2/qs" || exit 1
             case "$PWD" in
             *v4.5.0-rc2*) cat "{QMLLINT_OUTPUT}/release.txt" ;;
@@ -138,7 +139,7 @@ class ExitCodes(RealCommand):
         self.assertNotIn("nothing found", result.stdout.lower())
 
     def test_a_qmllint_killed_by_a_signal_exits_3(self):
-        self.stub("qmllint", "kill -TERM $$")
+        self.stub("qmllint", f"{QT6_VERSION}\nkill -TERM $$")
         plugin = self.clean_home / ".config/omarchy/plugins/demo"
         shutil.copytree(HOME / ".config/omarchy/plugins/demo", plugin)
         result = self.compare(self.clean_home)
