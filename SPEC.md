@@ -208,8 +208,10 @@ listed, and v4.5.0-rc2 has several, such as `omarchy-pkg-add "$kernel"`.
 
 A migration can remove packages through other release files, so those are read
 too, as text, from the same tree: any `omarchy-*` command in `bin`, any
-`$OMARCHY_PATH` script it sources or runs with `bash`, and whatever those reach in
-turn. v4.5.0-rc2's T3 Code migration removes its package this way. What is found
+`$OMARCHY_PATH` script it sources or runs, directly or with `bash` or `sh`, and
+whatever those reach in turn. v4.5.0-rc2's T3 Code migration removes its package
+this way. A path with a variable in it isn't followed: the release's own commands
+do that too often for each to be `unknown`, and the README lists it. What is found
 there depends on arguments that aren't followed, so a removal is "may remove" and
 an add cancels nothing. A migration that sources one already run still counts. The
 evidence names the migration and the file. A file that isn't a shell script isn't
@@ -219,7 +221,8 @@ A migration is `unknown`, once however many arguments it hides, when an argument
 to a removal can't be read, when a removal names nothing, as with `xargs`, when a
 string given to `bash -c`, `sh -c` or `eval` names a removal, or when the reader
 loses its place, as with a quote that never closes. The same goes for a file it
-reaches. What it can read from the same removal is still reported.
+reaches, and the finding names that file too. What it can read from the same
+removal is still reported.
 
 ## Findings and exit codes
 

@@ -39,6 +39,9 @@ these wrong today:
   `unknown`. An apostrophe in `"${x:-it's}"` doesn't swallow what follows, and an
   unclosed backtick is `unknown`. A later conditional drop doesn't soften a certain
   one. The fixture folder carries Omarchy's full license.
+- Second review follow-ups: an unknown from a reached file names that file, a
+  release script run directly is followed, and `omarchy pkg present` doesn't read
+  the `omarchy` dispatcher.
 
 ## Not in this ticket
 
@@ -71,4 +74,10 @@ these wrong today:
 - [x] A certain drop stays certain after a later conditional one, with a test.
 - [x] The README's limits match all this.
 - [x] `tests/fixtures/v4.5.0-rc2-migrations/LICENSE` is Omarchy's own, unchanged.
+- [x] An unknown from a reached file names that file in its title and evidence, with
+      a test.
+- [x] `"$OMARCHY_PATH/install/x.sh"` and `sudo "$OMARCHY_PATH/install/x.sh"` are
+      followed, and the same path as an argument to `cp` isn't, with tests.
+- [x] `omarchy pkg present x` follows `omarchy-pkg-present`, not `bin/omarchy`, with
+      a test.
 - [x] `tests/run` passes.

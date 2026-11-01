@@ -86,6 +86,10 @@ Paths already ruled out are not here; they are under
   mention of the token. 012 could name it.
 - **A removal in a heredoc fed to a shell.** `bash <<EOF` isn't seen. Neither v4.0.6
   nor v4.5.0-rc2 does this, and the README lists it. Waits for a release that does.
+- **A release file named by a variable.** `source "$x"` isn't followed, and the
+  README lists it. No migration in either release does this, but release commands
+  do, so making each `unknown` would make exit 0 close to impossible. Waits for a
+  real miss.
 - **Other `omarchy` subcommands.** Only `omarchy pkg drop` is read, so
   `omarchy install ai t3-code` isn't followed the way `omarchy-install-ai-t3-code`
   is. Neither v4.0.6 nor v4.5.0-rc2 calls `omarchy` this way.
