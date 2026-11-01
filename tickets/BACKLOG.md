@@ -66,7 +66,7 @@ Paths already ruled out are not here; they are under
   bindings depend on the installed backend. Reading that would mean running Lua.
 - **The first line shows this machine's version, even with `--root`.** Pointing
   `--root` at another tree still prints what `omarchy-version` says. Only people
-  testing the tool use it that way, so it waits for 012.
+  testing the tool use it that way, so it waits for a real report.
 - **Installed newer than the target.** Someone who moves from rc to stable has a
   version past the latest stable. The report treats that as an update, though
   nothing would be delivered until stable catches up. Waits for a real report.
@@ -140,4 +140,9 @@ Paths already ruled out are not here; they are under
   a link to a large folder makes the run slow, and paths show through the link.
   Waits for a real report.
 - **Evidence in the text report.** Findings carry evidence, but only `--json` (016)
-  will show it. 012 could print it, if it doesn't crowd the report.
+  will show it. Printing it could crowd the report, so it waits for someone to miss
+  it.
+- **What was checked, in `--json`.** The report's "Checked" line is plain text. 016
+  should carry it as data, or the plugin can't show its work either.
+- **`TERM=dumb`.** Colour goes to any terminal, so a dumb one gets the codes.
+  `NO_COLOR` covers it. Waits for a real report.

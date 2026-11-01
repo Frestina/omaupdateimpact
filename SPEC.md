@@ -300,7 +300,7 @@ whether the rest of its check still stood.
 | 0 | Every check ran and nothing needs attention, or there is no update |
 | 1 | Something needs attention |
 | 2 | No verdict: bad usage, a failed download, an unusable tree or a crash |
-| 3 | Nothing needs attention, but at least one check couldn't run |
+| 3 | Nothing needs attention, but at least one check couldn't run in full |
 
 An unexpected exception is exit 2 with one line of explanation. It never falls
 through to Python's exit 1, which would read as a finding.
@@ -313,6 +313,21 @@ part when it still compared something: bindings around a computed key or a helpe
 can't read, the other migrations, files or plugins around one it couldn't read. A
 `~/.config/hypr/bindings.lua` it can't read means your bindings weren't compared, so
 that check didn't run. Both count the same for the exit code.
+
+Bindings with computed keys can't be compared, since working out the key would
+mean running Lua. Every release has them, so making them all `unknown` would make
+exit 0 impossible. A computed key in the defaults is a note while its key
+expression is the same in both versions, spacing aside. Each expression is counted
+as many times as both versions share it, so a call in both counts once. It is
+`unknown` when the expressions differ, and so is a computed key in your own
+bindings. An expression in only one version counts as a difference, and a computed
+`hl.unbind` is apart from a bind on the same expression. A loop whose range changes
+while its key expression stays the same is still a note. They stay listed in the
+README's limits.
+
+A `~/.config/hypr/bindings.lua` that exists but can't be read is `unknown`: a broken
+link, a broken link in a folder above it, a denied file, or anything that isn't a
+file. With no such file there is nothing to compare, which is not a limit.
 
 ### The report
 
@@ -341,21 +356,6 @@ those keys, that move's line tells it, so two keys that swap are just two moves.
 
 A command or a line to copy is never split across lines. Colour goes to a terminal
 only, and `NO_COLOR` turns it off unless it's empty.
-
-Bindings with computed keys can't be compared, since working out the key would
-mean running Lua. Every release has them, so making them all `unknown` would make
-exit 0 impossible. A computed key in the defaults is a note while its key
-expression is the same in both versions, spacing aside. Each expression is counted
-as many times as both versions share it, so a call in both counts once. It is
-`unknown` when the expressions differ, and so is a computed key in your own
-bindings. An expression in only one version counts as a difference, and a computed
-`hl.unbind` is apart from a bind on the same expression. A loop whose range changes
-while its key expression stays the same is still a note. They stay listed in the
-README's limits.
-
-A `~/.config/hypr/bindings.lua` that exists but can't be read is `unknown`: a broken
-link, a broken link in a folder above it, a denied file, or anything that isn't a
-file. With no such file there is nothing to compare, which is not a limit.
 
 ## JSON
 
