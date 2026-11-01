@@ -32,5 +32,5 @@ trust a tool that reads their config.
 - [x] Every command in the README has been run as written.
 - [x] The recording contains no real paths or names.
 - [x] With no animation, the recording still shows the command, with a test.
-- [ ] Installed from the README alone, on a machine that has never had it. The owner
+- [x] Installed from the README alone, on a machine that has never had it. The owner
       does this and ticks it.
