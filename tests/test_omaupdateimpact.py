@@ -722,18 +722,28 @@ class Packages(unittest.TestCase):
         self.assertEqual(self.read({"1.sh": 'omarchy-pkg-drop "$a"\n'}, ["1.sh"]), ({}, set()))
 
     def test_the_removals_of_a_real_release_stay_the_same(self):
-        migrations = Path(__file__).parent / "fixtures/v4.5.0-rc2-migrations"
+        migrations = Path(__file__).parent / "fixtures/releases/v4.5.0-rc2/migrations"
         expected = {
+            "brave-origin-beta-bin": (True, "1784510887.sh"),
+            "cups-browsed": (False, "1788009111.sh"),
+            "cups-pdf": (False, "1787815267.sh"),
             "dua-cli": (False, "1791345484.sh"),
+            "dust": (False, "1780739888.sh"),
             "elsewhen": (False, "1790528634.sh"),
+            "gnome-calculator": (False, "1785637426.sh"),
             "linux-n1x": (True, "1791077437.sh"),
             "linux-n1x-headers": (True, "1791077437.sh"),
+            "omarchy-herdr": (False, "1786273938.sh"),
+            "python-terminaltexteffects": (False, "1786355450.sh"),
             "satty": (False, "1788129995.sh"),
+            "t3code-bin": (True, "1792345511.sh", "bin/omarchy-install-ai-t3-code"),
+            "t3code-nightly-bin": (True, "1792345511.sh", "bin/omarchy-install-ai-t3-code"),
             "tensaku": (False, "1788129995.sh"),
+            "tiny-dfr": (True, "1786137597.sh", "migrations/1785944594.sh"),
             "usbguard": (True, "1791769486.sh"),
             "yt6801-dkms": (True, "1788279117.sh"),
         }
-        self.assertEqual(impact.package_changes(migrations, set()), (expected, set()))
+        self.assertEqual(impact.package_changes(migrations, set()), (expected, {("1785351479.sh",)}))
 
     def test_a_missing_pacman_is_unknown(self):
         finding = impact.compare_packages(Path("target"), Path("home"), None)[0]
@@ -1222,7 +1232,7 @@ class Lint(unittest.TestCase):
         self.assert_unknown("/bin/false", "exited 1")
 
     def test_a_signal_is_unknown(self):
-        self.assert_unknown(self.qmllint("kill -SEGV $$"), "signal 11")
+        self.assert_unknown(self.qmllint("kill -TERM $$"), "signal 15")
 
     def test_a_signal_is_unknown_even_with_warnings(self):
         qmllint = self.qmllint(f"cat '{QMLLINT_OUTPUT / 'current.txt'}' >&2\nkill -KILL $$")

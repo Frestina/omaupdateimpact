@@ -1,0 +1,4 @@
+#!/bin/bash
+# After an update, say whether dictation still works.
+fictional-notify "Update done"
+omarchy-voxtype-status

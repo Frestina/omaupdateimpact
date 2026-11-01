@@ -1,0 +1,7 @@
+[Unit]
+Description=A fictional nightly backup
+
+[Service]
+Type=oneshot
+ExecStart=fictional-backup
+ExecStartPost=omarchy-system-shutdown

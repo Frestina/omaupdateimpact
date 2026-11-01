@@ -1,7 +1,19 @@
 #!/usr/bin/env bash
-# Runs the unit tests. Exits non-zero if anything fails.
+# Runs the tests, then shellcheck and ruff when installed. Exits non-zero if anything fails.
 set -uo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 cd "$root" || exit 1
-python3 -m unittest discover -s tests -t .
+status=0
+python3 -m unittest discover -s tests -t . || status=1
+if command -v shellcheck >/dev/null; then
+  shellcheck tests/run || status=1
+else
+  echo "shellcheck isn't installed, so it didn't run."
+fi
+if command -v ruff >/dev/null; then
+  ruff check bin/omaupdateimpact tests || status=1
+else
+  echo "ruff isn't installed, so it didn't run."
+fi
+exit "$status"

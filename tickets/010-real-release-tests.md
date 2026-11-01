@@ -27,11 +27,14 @@ at all.
   for each exit code.
 - A download test against a local HTTP server, including a truncated archive.
 - `tests/run` also runs `shellcheck` when installed, and `ruff` when installed.
+- `test_a_signal_is_unknown` kills its stub with SIGSEGV, so every test run leaves a
+  core dump and a desktop crash notification. Use SIGTERM.
 
 ## Done when
 
-- [ ] Every exit code is reached by an end-to-end test.
-- [ ] Reverting the fix from 006 makes a fixture test fail.
-- [ ] The download path is tested without the internet.
-- [ ] Nothing in the fixtures is real personal config.
-- [ ] `tests/run` passes.
+- [x] Every exit code is reached by an end-to-end test.
+- [x] Reverting the fix from 006 makes a fixture test fail.
+- [x] The download path is tested without the internet.
+- [x] Nothing in the fixtures is real personal config.
+- [x] `tests/run` leaves no core dump.
+- [x] `tests/run` passes.

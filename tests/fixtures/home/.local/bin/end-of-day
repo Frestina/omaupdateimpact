@@ -1,0 +1,4 @@
+#!/bin/bash
+# omarchy-system-logout used to be enough.
+fictional-backup
+omarchy-system-reboot

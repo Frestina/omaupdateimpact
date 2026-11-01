@@ -126,5 +126,8 @@ Paths already ruled out are not here; they are under
 - **A folder link in `~/.local/bin`.** Links are followed and every file is read, so
   a link to a large folder makes the run slow, and paths show through the link.
   Waits for a real report.
+- **A wrapped line can split a name at a hyphen.** `textwrap` breaks on hyphens, so a
+  long finding prints `omarchy-voxtype-` on one line and `install` on the next. 012
+  could set `break_on_hyphens=False`.
 - **Evidence in the text report.** Findings carry evidence, but only `--json` (016)
   will show it. 012 could print it, if it doesn't crowd the report.
