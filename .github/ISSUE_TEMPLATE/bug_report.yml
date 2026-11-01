@@ -1,0 +1,36 @@
+name: Bug report
+description: A finding that was wrong or missed, or a failure
+labels: [bug]
+body:
+  - type: input
+    id: tag
+    attributes:
+      label: Release tag
+      description: The release you checked against, such as v4.5.0-rc2. It is on the report's first line.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The output of `omaupdateimpact --version`.
+    validations:
+      required: true
+  - type: textarea
+    id: report
+    attributes:
+      label: Redacted report
+      description: >-
+        Paste the report, with `--all` if it helps. It names your files, bindings and
+        packages, so replace anything you don't want public. For a failure, add
+        `--debug` and paste the traceback.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: wrong
+    attributes:
+      label: What was wrong
+      description: What it said, and what really happened or should have been said.
+    validations:
+      required: true

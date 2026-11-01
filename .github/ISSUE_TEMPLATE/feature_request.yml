@@ -1,0 +1,21 @@
+name: Feature request
+description: Something it should check or say
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        The [Rejected](https://github.com/Frestina/omaupdateimpact/blob/main/SPEC.md#rejected)
+        section of the spec lists what it won't do, and why.
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What an update did to you, or could do, that this didn't tell you. Use a made-up example.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What it could say
+      description: The line you would want in the report.

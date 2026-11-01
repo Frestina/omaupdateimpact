@@ -28,6 +28,7 @@ trust a tool that reads their config.
 
 ## Done when
 
-- [ ] Every command in the README has been run as written.
-- [ ] The recording contains no real paths or names.
-- [ ] A person who hasn't seen the project installs it from the README alone.
+- [x] Every command in the README has been run as written.
+- [x] The recording contains no real paths or names.
+- [ ] Installed from the README alone, on a machine that has never had it. The owner
+      does this and ticks it.

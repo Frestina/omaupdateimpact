@@ -14,7 +14,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from unittest import mock
 
-from tests import drift_watch
+from tests import demo, drift_watch
 from tests.test_omaupdateimpact import QMLLINT_OUTPUT, ProgramCase, impact
 
 COMMAND = Path(__file__).parent.parent / "bin/omaupdateimpact"
@@ -404,6 +404,33 @@ class Promises(RealCommand):
     def test_the_fictional_home_names_nobody(self):
         for path, data in files(HOME, QMLLINT_OUTPUT).items():
             self.assertNotIn(b"/home/", data, path)
+
+
+class Demo(unittest.TestCase):
+    """The README's report and the recording are what the command prints."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.printed = demo.recorded()
+
+    def test_the_readme_opens_with_the_real_report(self):
+        readme = (COMMAND.parent.parent / "README.md").read_text()
+        report = f"```\n$ {demo.COMMAND}\n{demo.plain(self.printed)}```\n"
+        self.assertIn(report, readme, "Copy the new report into the README.")
+        self.assertLess(readme.index(report), readme.index("\n## "))
+
+    def test_the_recording_is_up_to_date(self):
+        self.assertEqual(demo.OUTPUT.read_text(), demo.svg(self.printed), "Run python3 -m tests.demo.")
+
+    def test_the_recording_shows_the_whole_report(self):
+        recording = demo.OUTPUT.read_text()
+        for line in ("Needs attention", "Fix:", "These checks ran in part: packages."):
+            self.assertIn(line, recording)
+
+    def test_the_recording_names_nobody(self):
+        recording = demo.OUTPUT.read_text()
+        for path in ("/home/", tempfile.gettempdir(), str(COMMAND.parent.parent)):
+            self.assertNotIn(path, recording)
 
 
 class DriftWatch(unittest.TestCase):

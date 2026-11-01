@@ -395,6 +395,19 @@ if the install created it, because other tools share it.
 The AUR package is in `packaging/aur`. It installs to `/usr/bin` and doesn't use
 `install.sh`.
 
+## Docs
+
+The report at the top of the README and the recording in `docs/demo.svg` are the
+command's real output on the fictional home and the trimmed releases, on a
+pseudo-terminal. `python3 -m tests.demo` records them, and a test fails when either
+stops matching what the command prints.
+
+The recording is an animated SVG rather than a GIF. GitHub plays it, it needs nothing
+but Python to make, and being text it can be searched for anything real.
+
+Security reports go through GitHub's private reporting, so no personal address is
+published. It can only be turned on once the repository is public.
+
 ## Neighbours
 
 Checked 2026-10-31. These are the closest tools; none compares your bindings,

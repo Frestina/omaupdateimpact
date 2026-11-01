@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 789 716" width="789" height="716" role="img" aria-label="A terminal running omaupdateimpact v4.5.0-rc2 on a made-up machine. The same report is at the top of the README.">
+<style>
+text { font: 14px ui-monospace, Menlo, Consolas, "DejaVu Sans Mono", monospace; fill: #c0caf5; white-space: pre; }
+@media (prefers-reduced-motion: no-preference) {
+  #command { animation: type 20s infinite; }
+  #report { animation: show 20s infinite; }
+}
+@keyframes type {
+  0%, 3% { transform: translateX(0); animation-timing-function: steps(26, end); }
+  12%, 100% { transform: translateX(223.6px); }
+}
+@keyframes show { 0%, 14% { opacity: 0; } 15%, 100% { opacity: 1; } }
+</style>
+<rect width="789" height="716" rx="8" fill="#1a1b26"/>
+<text x="16" y="30" xml:space="preserve"><tspan fill="#9ece6a">$ </tspan>omaupdateimpact v4.5.0-rc2</text>
+<rect id="command" x="33.2" y="16" width="225.6" height="18" fill="#1a1b26"/>
+<g id="report">
+<text x="16" y="48" xml:space="preserve">Omarchy 4.0.6-1 -&gt; v4.5.0-rc2 (rc channel, prerelease). Nothing was changed.</text>
+<text x="16" y="66" xml:space="preserve">Checked 207 default bindings, 3 of yours, 27 pending migrations, 7 of your files for 6</text>
+<text x="16" y="84" xml:space="preserve">deleted commands, 1 plugin linted.</text>
+<text x="16" y="120" xml:space="preserve"><tspan font-weight="bold" fill="#f7768e">Needs attention</tspan></text>
+<text x="16" y="138" xml:space="preserve">  - ALT + ALT_R: your "Scratchpad" will clash with the new default "Start dictation</text>
+<text x="16" y="156" xml:space="preserve">    (push-to-talk) / Stop dictation (push-to-talk)". Both will fire.</text>
+<text x="16" y="174" xml:space="preserve">    <tspan font-weight="bold" fill="#9ece6a">Fix:</tspan> Add hl.unbind("ALT + Alt_R") above your binding, or choose another key.</text>
+<text x="16" y="192" xml:space="preserve">  - SUPER + M: your "Music" will clash with the new default "Minimize window to the</text>
+<text x="16" y="210" xml:space="preserve">    dock". Both will fire.</text>
+<text x="16" y="228" xml:space="preserve">    <tspan font-weight="bold" fill="#9ece6a">Fix:</tspan> Add hl.unbind("SUPER + M") above your binding, or choose another key.</text>
+<text x="16" y="246" xml:space="preserve">  - SUPER + CTRL + T: you turned off "Activity" here, but it moves to SUPER + SHIFT + T,</text>
+<text x="16" y="264" xml:space="preserve">    so it comes back.</text>
+<text x="16" y="282" xml:space="preserve">    <tspan font-weight="bold" fill="#9ece6a">Fix:</tspan> Add hl.unbind("SUPER + SHIFT + T") too.</text>
+<text x="16" y="300" xml:space="preserve">  - The update will remove dua-cli, which is installed here.</text>
+<text x="16" y="318" xml:space="preserve">    <tspan font-weight="bold" fill="#9ece6a">Fix:</tspan> After the update, run omarchy pkg add dua-cli (aur-add for an AUR package).</text>
+<text x="16" y="336" xml:space="preserve">  - The update may remove t3code-bin, which is installed here.</text>
+<text x="16" y="354" xml:space="preserve">    <tspan font-weight="bold" fill="#9ece6a">Fix:</tspan> If it goes, run omarchy pkg add t3code-bin (aur-add for an AUR package).</text>
+<text x="16" y="372" xml:space="preserve">  - The update will remove tensaku, which is installed here.</text>
+<text x="16" y="390" xml:space="preserve">    <tspan font-weight="bold" fill="#9ece6a">Fix:</tspan> After the update, run omarchy pkg add tensaku (aur-add for an AUR package).</text>
+<text x="16" y="408" xml:space="preserve">  - ~/.bashrc calls omarchy-voxtype-remove, which the release deletes.</text>
+<text x="16" y="426" xml:space="preserve">    <tspan font-weight="bold" fill="#9ece6a">Fix:</tspan> Change or remove line 1. This tool can't tell what replaces the command.</text>
+<text x="16" y="444" xml:space="preserve">  - ~/.config/omarchy/hooks/post-update calls omarchy-voxtype-status, which the release</text>
+<text x="16" y="462" xml:space="preserve">    deletes.</text>
+<text x="16" y="480" xml:space="preserve">    <tspan font-weight="bold" fill="#9ece6a">Fix:</tspan> Change or remove line 4. This tool can't tell what replaces the command.</text>
+<text x="16" y="498" xml:space="preserve">  - ~/.config/systemd/user/nightly-backup.service calls omarchy-system-shutdown, which</text>
+<text x="16" y="516" xml:space="preserve">    the release deletes.</text>
+<text x="16" y="534" xml:space="preserve">    <tspan font-weight="bold" fill="#9ece6a">Fix:</tspan> Change or remove line 7. This tool can't tell what replaces the command.</text>
+<text x="16" y="552" xml:space="preserve">  - ~/.local/bin/end-of-day calls omarchy-system-reboot, which the release deletes.</text>
+<text x="16" y="570" xml:space="preserve">    <tspan font-weight="bold" fill="#9ece6a">Fix:</tspan> Change or remove line 4. This tool can't tell what replaces the command.</text>
+<text x="16" y="606" xml:space="preserve"><tspan font-weight="bold" fill="#ffffff">Worth knowing</tspan>: 11 notes. Add --all to see them.</text>
+<text x="16" y="642" xml:space="preserve"><tspan font-weight="bold" fill="#e0af68">Limits of this check</tspan></text>
+<text x="16" y="660" xml:space="preserve">  - Couldn't read what migrations/1785351479.sh removes, so check it by hand.</text>
+<text x="16" y="696" xml:space="preserve"><tspan font-weight="bold" fill="#e0af68">These checks ran in part: packages.</tspan></text>
+</g>
+</svg>

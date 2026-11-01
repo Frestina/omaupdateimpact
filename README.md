@@ -1,7 +1,84 @@
 # omaupdateimpact
 
-Check your Omarchy setup against a release before you update. It tells you what
-the update would do to *your* machine, not what changed in general.
+An Omarchy update can change your shortcuts, remove packages you use and delete
+commands your scripts call. Release notes say what changed for everyone. They can't
+say what it means for your machine, so you find out afterwards.
+
+omaupdateimpact tells you before you update. This is its report for a made-up machine
+on v4.0.6, looking at v4.5.0-rc2:
+
+```
+$ omaupdateimpact v4.5.0-rc2
+Omarchy 4.0.6-1 -> v4.5.0-rc2 (rc channel, prerelease). Nothing was changed.
+Checked 207 default bindings, 3 of yours, 27 pending migrations, 7 of your files for 6
+deleted commands, 1 plugin linted.
+
+Needs attention
+  - ALT + ALT_R: your "Scratchpad" will clash with the new default "Start dictation
+    (push-to-talk) / Stop dictation (push-to-talk)". Both will fire.
+    Fix: Add hl.unbind("ALT + Alt_R") above your binding, or choose another key.
+  - SUPER + M: your "Music" will clash with the new default "Minimize window to the
+    dock". Both will fire.
+    Fix: Add hl.unbind("SUPER + M") above your binding, or choose another key.
+  - SUPER + CTRL + T: you turned off "Activity" here, but it moves to SUPER + SHIFT + T,
+    so it comes back.
+    Fix: Add hl.unbind("SUPER + SHIFT + T") too.
+  - The update will remove dua-cli, which is installed here.
+    Fix: After the update, run omarchy pkg add dua-cli (aur-add for an AUR package).
+  - The update may remove t3code-bin, which is installed here.
+    Fix: If it goes, run omarchy pkg add t3code-bin (aur-add for an AUR package).
+  - The update will remove tensaku, which is installed here.
+    Fix: After the update, run omarchy pkg add tensaku (aur-add for an AUR package).
+  - ~/.bashrc calls omarchy-voxtype-remove, which the release deletes.
+    Fix: Change or remove line 1. This tool can't tell what replaces the command.
+  - ~/.config/omarchy/hooks/post-update calls omarchy-voxtype-status, which the release
+    deletes.
+    Fix: Change or remove line 4. This tool can't tell what replaces the command.
+  - ~/.config/systemd/user/nightly-backup.service calls omarchy-system-shutdown, which
+    the release deletes.
+    Fix: Change or remove line 7. This tool can't tell what replaces the command.
+  - ~/.local/bin/end-of-day calls omarchy-system-reboot, which the release deletes.
+    Fix: Change or remove line 4. This tool can't tell what replaces the command.
+
+Worth knowing: 11 notes. Add --all to see them.
+
+Limits of this check
+  - Couldn't read what migrations/1785351479.sh removes, so check it by hand.
+
+These checks ran in part: packages.
+```
+
+It changes nothing, and nothing from the release is ever run. Each finding says what
+to do, and you do it.
+
+omaupdateimpact is unofficial. It isn't affiliated with Omarchy or 37signals.
+
+## Install
+
+Needs Python 3.11.4 or newer. `qmllint` is optional, and comes with `qt6-declarative`.
+
+```
+git clone https://github.com/Frestina/omaupdateimpact.git
+cd omaupdateimpact
+./install.sh
+```
+
+That links the command into `~/.local/bin`, so keep the clone where it is. Running
+it twice is harmless, and it won't replace a file that isn't its own link.
+
+To update, run `git pull` in the clone. To remove it, run this there:
+
+```
+./install.sh --uninstall
+```
+
+That removes the link and tells you where the cache is, which it leaves for you to
+delete.
+
+## Usage
+
+Run it before `omarchy update`. Omarchy has no pre-update hook, so it can't run by
+itself.
 
 ```
 omaupdateimpact               # the release your update channel would deliver
@@ -10,14 +87,15 @@ omaupdateimpact v4.5.0-rc2    # a specific release
 omaupdateimpact --all         # every note, not only how many there are
 ```
 
+![A terminal running omaupdateimpact on a made-up machine](docs/demo.svg)
+
 If you already have that release, it says so, names any newer release on another
 channel, and exits 0. The `edge` and `dev` channels have no tagged releases, so
 those need a tag.
 
-It changes nothing on your system, and nothing from the release is ever run:
-the release is downloaded to `~/.cache/omaupdateimpact` and read as text. Two
-releases stay there and older ones are removed. If GitHub's rate limit gets in the
-way, set `GITHUB_TOKEN`. Colour shows on a terminal only, and `NO_COLOR` turns it off.
+The release is downloaded to `~/.cache/omaupdateimpact`. Two releases stay there and
+older ones are removed. If GitHub's rate limit gets in the way, set `GITHUB_TOKEN`.
+Colour shows on a terminal only, and `NO_COLOR` turns it off.
 
 ## What it checks
 
@@ -73,30 +151,40 @@ prints one line, and `--debug` adds the traceback.
 - It doesn't read `omarchy_default_bindings = false` from your `hyprland.lua`.
 - It won't catch a failure during the update itself.
 
-## Install
+## Safety
 
-Needs Python 3.11.4 or newer. `qmllint` is optional and comes with Qt.
+It reads your config, so here is what it does with it.
 
-From a clone of this repository:
+- **It changes nothing.** The only thing it writes is its cache. `./install.sh` adds
+  one link, and only when you run it.
+- **Nothing from a release runs.** Release files are read as text. A migration is
+  split into shell tokens, never run. Key bindings are read without running Lua.
+- **Nothing about you leaves the machine.** It makes GET requests to GitHub for the
+  list of releases and the archive of a release. There is no telemetry, and the
+  report stays in your terminal.
+- **`GITHUB_TOKEN` goes to `api.github.com` only.** It isn't sent to the archive or
+  on a redirect, and it is never printed.
+- **The commands it runs are your own.** It runs `omarchy-version`,
+  `omarchy-version-channel`, `pacman -Qq` and, if you have it, `qmllint`. They come
+  from your system, never from a release. `qmllint` reads QML and doesn't run it.
+- **A check that didn't run is never shown as clear.** It is named in the report, and
+  the exit code isn't 0.
 
-```
-./install.sh
-```
+It is one Python file, [bin/omaupdateimpact](bin/omaupdateimpact), with no
+dependencies, so you can read what it does. To report a problem, see
+[SECURITY.md](SECURITY.md).
 
-That links the command into `~/.local/bin`, so keep the clone where it is. Running
-it twice is harmless, and it won't replace a file that isn't its own link.
+## Next to omaforecast
 
-To remove it:
+[omaforecast](https://github.com/w-mir1/omaforecast) dry-runs migrations in a sandbox
+and shows the config diffs. omaupdateimpact reads the release and needs no sandbox,
+but can't see what a migration does to a file. omaforecast runs the release and sees
+those edits, but its forecast doesn't cover your bindings or packages. They answer
+different questions, so use both if you want both answers.
 
-```
-./install.sh --uninstall
-```
+## Project
 
-That removes the link and tells you where the cache is, which it leaves for you to
-delete.
-
-## Tests
-
-```
-tests/run
-```
+- [CHANGELOG.md](CHANGELOG.md) lists what changed.
+- [CONTRIBUTING.md](CONTRIBUTING.md) says how to help.
+- [SPEC.md](SPEC.md) says how it behaves, and why.
+- [LICENSE](LICENSE): MIT.
