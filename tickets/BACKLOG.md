@@ -109,5 +109,12 @@ Paths already ruled out are not here; they are under
   error is a false alarm, not a miss.
 - **Other places a call can live.** `~/.config/uwsm`, `~/.config/autostart`, fish's
   `conf.d`, a zsh `ZDOTDIR` and cron aren't read. Waits for a real report.
+- **A link in a `.wants` folder to a unit outside it.** Those folders are skipped, so
+  a unit linked only from there isn't read. `systemctl --user enable` also links it
+  at the top of the folder, so this takes a link made by hand. Waits for a real
+  report.
+- **A folder link in `~/.local/bin`.** Links are followed and every file is read, so
+  a link to a large folder makes the run slow, and paths show through the link.
+  Waits for a real report.
 - **Evidence in the text report.** Findings carry evidence, but only `--json` (016)
   will show it. 012 could print it, if it doesn't crowd the report.
