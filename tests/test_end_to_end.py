@@ -427,6 +427,10 @@ class Demo(unittest.TestCase):
         for line in ("Needs attention", "Fix:", "These checks ran in part: packages."):
             self.assertIn(line, recording)
 
+    def test_the_command_shows_when_nothing_animates(self):
+        still = demo.OUTPUT.read_text().partition("@media")[0]
+        self.assertIn(f"#command {{ transform: {demo.COVER_MOVED}; }}", still)
+
     def test_the_recording_names_nobody(self):
         recording = demo.OUTPUT.read_text()
         for path in ("/home/", tempfile.gettempdir(), str(COMMAND.parent.parent)):

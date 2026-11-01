@@ -40,12 +40,6 @@ Paths already ruled out are not here; they are under
 - **Several machines.** Run the check on every machine you own. Waits for 0.1.0
   and `--json`.
 
-- **The AUR package in the README.** The README only gives the clone, because the
-  package isn't published until 015. Add it there once it installs.
-- **Private security reports.** `SECURITY.md` links GitHub's private reporting, which
-  a private repo doesn't have. Turn it on when the repo goes public in 015, or that
-  link leads nowhere.
-
 ## Limits to keep watching
 
 - **User bindings outside `bindings.lua`.** Only that file is parsed. Any Lua file

@@ -25,10 +25,12 @@ trust a tool that reads their config.
 - Note that it's unofficial and not affiliated with Omarchy or 37signals.
 - `CHANGELOG.md`, `SECURITY.md` and `CONTRIBUTING.md`, with issue templates. A bug
   report asks for the release tag and a redacted report.
+- Review follow-ups: the recording shows the command when it can't animate.
 
 ## Done when
 
 - [x] Every command in the README has been run as written.
 - [x] The recording contains no real paths or names.
+- [x] With no animation, the recording still shows the command, with a test.
 - [ ] Installed from the README alone, on a machine that has never had it. The owner
       does this and ticks it.

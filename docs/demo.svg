@@ -1,6 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 789 716" width="789" height="716" role="img" aria-label="A terminal running omaupdateimpact v4.5.0-rc2 on a made-up machine. The same report is at the top of the README.">
 <style>
 text { font: 14px ui-monospace, Menlo, Consolas, "DejaVu Sans Mono", monospace; fill: #c0caf5; white-space: pre; }
+#command { transform: translateX(223.6px); }
 @media (prefers-reduced-motion: no-preference) {
   #command { animation: type 20s infinite; }
   #report { animation: show 20s infinite; }

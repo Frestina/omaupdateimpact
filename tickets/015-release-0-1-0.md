@@ -20,9 +20,13 @@ machine first.
 - Run a history scan for secrets and personal data before publishing.
 - Once the repo is public, make CI's jobs required checks on `main`, with admins
   exempt, so ticket commits still go directly to `main`.
-- Tag `v0.1.0` with release notes taken from the changelog.
+- Turn on private vulnerability reporting once the repo is public, or the link in
+  `SECURITY.md` leads nowhere.
+- Tag `v0.1.0` with release notes taken from the changelog, and give the changelog
+  its date.
 - Publish the AUR package from 013. Its checksum is `SKIP` until the tag exists, so
   set it from the tagged tarball and generate `.SRCINFO` first.
+- Add the AUR package to the README's Install section once it installs.
 - Share it where Omarchy users are, after the owner has reviewed the text.
 
 ## Done when

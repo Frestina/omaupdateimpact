@@ -31,16 +31,19 @@ BACKGROUND = "#1a1b26"
 TEXT = "#c0caf5"
 GREEN = "#9ece6a"
 COLOURS = {"1": "#ffffff", "1;31": "#f7768e", "1;32": GREEN, "1;33": "#e0af68"}
+# Where the cover over the command ends up. It stays there when nothing animates.
+COVER_MOVED = f"translateX({len(COMMAND) * CHAR_WIDTH}px)"
 
 STYLE = f"""
 text {{ font: 14px ui-monospace, Menlo, Consolas, "DejaVu Sans Mono", monospace; fill: {TEXT}; white-space: pre; }}
+#command {{ transform: {COVER_MOVED}; }}
 @media (prefers-reduced-motion: no-preference) {{
   #command {{ animation: type 20s infinite; }}
   #report {{ animation: show 20s infinite; }}
 }}
 @keyframes type {{
   0%, 3% {{ transform: translateX(0); animation-timing-function: steps({len(COMMAND)}, end); }}
-  12%, 100% {{ transform: translateX({len(COMMAND) * CHAR_WIDTH}px); }}
+  12%, 100% {{ transform: {COVER_MOVED}; }}
 }}
 @keyframes show {{ 0%, 14% {{ opacity: 0; }} 15%, 100% {{ opacity: 1; }} }}
 """
