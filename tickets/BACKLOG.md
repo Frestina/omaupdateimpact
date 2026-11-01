@@ -73,14 +73,10 @@ Paths already ruled out are not here; they are under
 - **The message when the mirror and packages disagree.** It says "the channel is
   stable / rc, and only stable and rc have tagged releases", which reads as a
   contradiction. The exit 2 is right. 012 could reword it.
-- **A plugin file in a subfolder.** Lint warnings keep only the file's name, so
-  the evidence for `panel/Demo.qml` points at `Demo.qml` in the plugin's top
-  folder, where there's no such file. The finding still names the plugin. Should
-  be fixed before plugin authors rely on it, with the `--plugin` idea at the latest.
 - **`qmllint` output that stops parsing with exit 0.** A format change would read
   as no warnings, the same as a clean plugin. A non-zero exit is caught, and exit 0
-  can't be told from Info lines alone without knowing the new format. 6.12.0 is
-  captured in the fixtures, so 011's drift watch is the natural place for this.
+  can't be told from Info lines alone without knowing the new format. The real
+  `qmllint` test catches it where `qmllint` is installed, and 011 runs that in CI.
 - **A plugin's own `.qmllint.ini`.** `qmllint` runs in the plugin's folder and reads
   it, so a plugin can turn warnings off. That's the same in both runs, so it only
   hides warnings. `--ignore-settings` would stop it. Waits for a real report.

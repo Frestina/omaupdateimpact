@@ -166,6 +166,11 @@ can't open one of the plugin's files. It is also `unknown` when `qmllint` exits
 non-zero with no warnings to read. Warnings on a non-zero exit do count, because
 `qmllint` exits 255 on a syntax error, and a broken plugin is still an answer.
 
+A plugin is also `unknown` when a folder in it can't be read, because its files
+wouldn't reach `qmllint`. A plugin that is a broken link is `unknown`, and so is a
+plugins folder that can't be read. A plain file in that folder isn't a plugin.
+Warnings go by the file's path inside the plugin, so the evidence names a real file.
+
 One plugin failing doesn't stop the others. Warnings with no file, such as
 `Warning: 2:1: Failed to import`, aren't counted: the line with the file comes
 just before them. The tests read output captured from `qmllint` 6.12.0.

@@ -26,6 +26,9 @@ warnings, the same result as a perfect plugin.
 - Fix "1 new qmllint warnings".
 - Lint with an absolute path to each tree. With a relative `--root`, `--target` or
   `$OMARCHY_PATH`, the `qs` symlink points nowhere, so new warnings never show.
+- Review follow-ups: a plugin that is a broken link, a plugins folder that can't be
+  read and a denied folder inside a plugin are `unknown`. Evidence for a file in a
+  subfolder names that file.
 
 ## Done when
 
@@ -33,4 +36,9 @@ warnings, the same result as a perfect plugin.
 - [x] A hanging `qmllint` is stopped, with a test.
 - [x] Warning parsing is tested against captured real output, not a stub.
 - [x] Relative tree paths find the same new warnings as absolute ones, with a test.
+- [x] A plugin that is a broken link gives `unknown` naming it, with a test.
+- [x] A plugins folder that is a broken link or denied gives `unknown`, with tests.
+- [x] A denied folder inside a plugin gives `unknown` naming the plugin, with a test.
+- [x] A new warning in `panel/Demo.qml` has evidence ending `demo/panel/Demo.qml`,
+      and warnings in two files with one name stay apart, with tests.
 - [x] `tests/run` passes.

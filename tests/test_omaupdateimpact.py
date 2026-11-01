@@ -1258,6 +1258,109 @@ class Lint(unittest.TestCase):
         findings = self.findings(self.qmllint('case "$PWD" in\n  */demo) exit 1 ;;\nesac'))
         self.assertEqual([finding.level for finding in findings], ["unknown", "note"])
 
+    def test_a_plugin_that_is_a_broken_link_is_unknown(self):
+        (self.plugin.parent / "gone").symlink_to("nowhere")
+        findings = self.findings("/bin/true")
+        self.assertEqual([finding.level for finding in findings], ["unknown", "note"])
+        self.assertIn("gone is a broken link", findings[0].title)
+        self.assertEqual(findings[0].evidence, ["~/.config/omarchy/plugins/gone"])
+
+    def test_a_broken_plugin_alone_is_unknown_with_no_closing_note(self):
+        shutil.rmtree(self.plugin)
+        (self.plugin.parent / "gone").symlink_to("nowhere")
+        self.assertEqual([finding.level for finding in self.findings("/bin/true")], ["unknown"])
+
+    def test_a_broken_plugin_does_not_hide_a_missing_qmllint(self):
+        (self.plugin.parent / "gone").symlink_to("nowhere")
+        with mock.patch.object(impact.shutil, "which", return_value=None), \
+                mock.patch.object(impact, "QMLLINT", "/nonexistent/qmllint"):
+            findings = impact.compare_plugins(self.base / "current", self.base / "target", self.home)
+        self.assertEqual(len(titles(findings, "unknown")), 2)
+        self.assertIn("qmllint wasn't found", findings[0].title)
+        self.assertIn("gone is a broken link", findings[1].title)
+
+    def test_a_plain_file_is_not_a_plugin(self):
+        (self.plugin.parent / "notes.txt").write_text("not a plugin")
+        self.assertEqual([finding.level for finding in self.findings("/bin/true")], ["note"])
+
+    def assert_plugins_folder_unknown(self, reason):
+        findings = self.findings("/bin/true")
+        self.assertEqual([finding.level for finding in findings], ["unknown"])
+        self.assertEqual(findings[0].evidence, ["~/.config/omarchy/plugins"])
+        self.assertIn(reason, findings[0].detail)
+
+    def test_a_plugins_folder_that_is_a_broken_link_is_unknown(self):
+        plugins = self.plugin.parent
+        shutil.rmtree(plugins)
+        plugins.symlink_to("nowhere")
+        self.assert_plugins_folder_unknown("broken link")
+
+    def test_a_plugins_folder_that_is_a_file_is_unknown(self):
+        plugins = self.plugin.parent
+        shutil.rmtree(plugins)
+        plugins.write_text("not a folder")
+        self.assert_plugins_folder_unknown("isn't a folder")
+
+    @unittest.skipIf(os.geteuid() == 0, "root reads a denied folder")
+    def test_a_denied_plugins_folder_is_unknown(self):
+        plugins = self.plugin.parent
+        plugins.chmod(0)
+        self.addCleanup(plugins.chmod, 0o755)
+        self.assert_plugins_folder_unknown("Permission denied")
+
+    def test_no_plugins_folder_is_nothing_to_check(self):
+        shutil.rmtree(self.plugin.parent)
+        self.assertEqual(self.findings("/bin/true"), [])
+
+    @unittest.skipIf(os.geteuid() == 0, "root reads a denied folder")
+    def test_a_denied_folder_in_a_plugin_is_unknown(self):
+        closed = self.plugin / "panel/closed"
+        closed.mkdir(parents=True)
+        closed.chmod(0)
+        self.addCleanup(closed.chmod, 0o755)
+        self.assert_unknown("/bin/true", "demo/panel/closed couldn't be read: Permission denied")
+
+    @unittest.skipIf(os.geteuid() == 0, "root reads a denied folder")
+    def test_a_denied_plugin_is_unknown(self):
+        self.plugin.chmod(0)
+        self.addCleanup(self.plugin.chmod, 0o755)
+        self.assert_unknown("/bin/true", "demo couldn't be read: Permission denied")
+
+    def test_a_linked_folder_is_linted(self):
+        outside = self.base / "outside"
+        outside.mkdir()
+        (outside / "Linked.qml").touch()
+        (self.plugin / "linked").symlink_to(outside)
+        qmllint = self.qmllint('printf "%s\\n" "$@" > "$0.args"')
+        self.lint(qmllint)
+        self.assertIn(str(self.plugin / "linked/Linked.qml"), Path(f"{qmllint}.args").read_text())
+
+    def test_git_is_not_linted(self):
+        (self.plugin / ".git").mkdir()
+        (self.plugin / ".git/Hook.qml").touch()
+        qmllint = self.qmllint('printf "%s\\n" "$@" > "$0.args"')
+        self.lint(qmllint)
+        self.assertNotIn("Hook.qml", Path(f"{qmllint}.args").read_text())
+
+    def new_warning_in(self, *names):
+        """A qmllint that warns about these files in the plugin, on the release's shell only."""
+        lines = "".join(f"  echo \"Warning: $PWD/{name}:1:1: gone [import]\" >&2\n" for name in names)
+        return self.qmllint(f'if [ ! -d "$2/qs/Palette" ]; then\n{lines}fi')
+
+    def test_evidence_names_a_file_in_a_subfolder(self):
+        (self.base / "current/shell/Palette").mkdir()
+        findings = self.findings(self.new_warning_in("panel/Demo.qml"))
+        self.assertIn("such as panel/Demo.qml: gone", findings[0].title)
+        self.assertEqual(findings[0].evidence, ["~/.config/omarchy/plugins/demo/panel/Demo.qml"])
+
+    def test_two_files_with_one_name_stay_apart(self):
+        warnings = self.lint(self.new_warning_in("a/Demo.qml", "b/Demo.qml"))
+        self.assertEqual(warnings, {("a/Demo.qml", "gone [import]"): 1, ("b/Demo.qml", "gone [import]"): 1})
+
+    def test_a_file_it_could_not_open_is_named_by_its_path_in_the_plugin(self):
+        qmllint = self.qmllint('echo "Warning: $PWD/panel/Gone.qml:: Failed to open file" >&2\nexit 255')
+        self.assert_unknown(qmllint, "couldn't open panel/Gone.qml")
+
     def test_no_qml_needs_no_lint(self):
         (self.plugin / "Demo.qml").unlink()
         self.assertEqual(self.lint("/bin/false"), {})
@@ -1299,6 +1402,22 @@ class RealQmllint(unittest.TestCase):
     def test_a_module_the_release_removes_is_a_new_warning(self):
         findings = self.findings(self.base / "current", self.base / "target")
         self.assertIn("2 new qmllint warnings", findings[0].title)
+
+    def test_evidence_names_a_file_in_a_subfolder(self):
+        plugin = self.home / ".config/omarchy/plugins/demo"
+        (plugin / "panel").mkdir()
+        (plugin / "Demo.qml").rename(plugin / "panel/Demo.qml")
+        findings = self.findings(self.base / "current", self.base / "target")
+        self.assertEqual(findings[0].evidence, ["~/.config/omarchy/plugins/demo/panel/Demo.qml"])
+
+    def test_two_files_with_one_name_stay_apart(self):
+        plugin = self.home / ".config/omarchy/plugins/demo"
+        for folder in ["a", "b"]:
+            (plugin / folder).mkdir()
+            shutil.copy(plugin / "Demo.qml", plugin / folder)
+        (plugin / "Demo.qml").unlink()
+        warnings = impact.lint(plugin, self.base / "target/shell", REAL_QMLLINT)
+        self.assertEqual({file for file, _ in warnings}, {"a/Demo.qml", "b/Demo.qml"})
 
     def test_relative_trees_find_the_same_warnings_as_absolute_ones(self):
         absolute = self.findings(self.base / "current", self.base / "target")
@@ -1454,11 +1573,11 @@ class Bindings(ProgramCase):
         (self.home / ".config/hypr").mkdir(parents=True)
         self.bindings = self.home / ".config/hypr/bindings.lua"
 
-    def assert_unreadable(self):
+    def assert_unreadable(self, checks="bindings"):
         code, out, _ = self.check()
         self.assertEqual(code, 3)
         self.assertIn("bindings.lua couldn't be read", " ".join(out.split()))
-        self.assertIn("These checks didn't run: bindings.", out)
+        self.assertIn(f"These checks didn't run: {checks}.", out)
 
     def test_no_bindings_file_is_fine(self):
         self.assertEqual(self.check()[0], 0)
@@ -1477,7 +1596,7 @@ class Bindings(ProgramCase):
         self.bindings.parent.rmdir()
         config.rmdir()
         config.symlink_to(self.base / "unmounted")
-        self.assert_unreadable()
+        self.assert_unreadable("bindings, plugins")
 
     def test_a_link_to_a_folder_with_no_bindings_is_fine(self):
         config = self.home / ".config"

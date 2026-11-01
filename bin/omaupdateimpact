@@ -1005,19 +1005,30 @@ def compare_commands(current, target, home):
     return findings
 
 
+def in_plugin(path, plugin):
+    """Where a file sits in a plugin. One linked in from outside goes by its name."""
+    path = Path(path)
+    return str(path.relative_to(plugin)) if path.is_relative_to(plugin) else path.name
+
+
 def lint(plugin, shell, qmllint):
     """Count qmllint warnings for a plugin, ignoring line numbers.
 
     qmllint exits 255 on a syntax error, so warnings can come with a failure.
     """
-    files = sorted(str(p) for p in plugin.rglob("*.qml") if ".git" not in p.parts)
+    files = []
+    for path, reason in walked_files(plugin, set()):
+        if reason:
+            raise LintFailed(f"{path.relative_to(plugin.parent)} couldn't be read: {reason}")
+        if path.suffix == ".qml":
+            files.append(str(path))
     if not files:
         return Counter()
     with tempfile.TemporaryDirectory() as imports:
         (Path(imports) / "qs").symlink_to(shell.resolve())
         try:
             result = subprocess.run(
-                [qmllint, "-I", imports, *files],
+                [qmllint, "-I", imports, *sorted(files)],
                 capture_output=True, text=True, errors="replace", cwd=plugin, timeout=LINT_TIMEOUT,
             )
         except subprocess.TimeoutExpired:
@@ -1030,27 +1041,45 @@ def lint(plugin, shell, qmllint):
     for line in (result.stdout + result.stderr).splitlines():
         unread = re.match(r"(?:Warning|Error): (.+?):: Failed to open file", line)
         if unread:
-            raise LintFailed(f"qmllint couldn't open {Path(unread.group(1)).name}")
+            raise LintFailed(f"qmllint couldn't open {in_plugin(unread.group(1), plugin)}")
         found = re.match(r"(Warning|Error): (.+?):\d+:\d+: (.*)", line)
         if found:
-            warnings[(Path(found.group(2)).name, found.group(3))] += 1
+            warnings[(in_plugin(found.group(2), plugin), found.group(3))] += 1
     if result.returncode and not warnings:
         raise LintFailed(f"qmllint exited {result.returncode} with no warnings to read")
     return warnings
 
 
+def plugin_folders(plugins):
+    """What's in the plugins folder, and why it can't be read, if it can't."""
+    reason = blocked(plugins, Path.is_dir, "a folder")
+    if reason or not plugins.exists():
+        return [], reason
+    try:
+        # A plain file isn't a plugin, but a broken link could be one.
+        return sorted(p for p in plugins.iterdir() if p.is_dir() or not p.exists()), None
+    except OSError as error:
+        return [], error.strerror
+
+
 def compare_plugins(current, target, home):
     plugins = home / ".config/omarchy/plugins"
-    installed = sorted(p for p in plugins.iterdir() if p.is_dir()) if plugins.is_dir() else []
+    shown = "~/.config/omarchy/plugins"
+    installed, reason = plugin_folders(plugins)
+    if reason:
+        title = f"{shown} couldn't be read, so plugins weren't linted."
+        return [Finding("plugins", UNKNOWN, title, [shown], detail=f"{reason}.")]
     if not installed:
         return []
-    shown = "~/.config/omarchy/plugins"
+    findings = [
+        Finding("plugins", UNKNOWN, f"{p.name} is a broken link, so it wasn't linted.", [f"{shown}/{p.name}"])
+        for p in installed if not p.exists()
+    ]
     qmllint = shutil.which("qmllint") or (QMLLINT if Path(QMLLINT).exists() else None)
     if not qmllint:
-        return [Finding("plugins", UNKNOWN, "qmllint wasn't found, so plugins weren't linted.", [shown])]
-    findings = []
+        return [Finding("plugins", UNKNOWN, "qmllint wasn't found, so plugins weren't linted.", [shown]), *findings]
     linted = False
-    for plugin in installed:
+    for plugin in (p for p in installed if p.exists()):
         try:
             before = lint(plugin.resolve(), current / "shell", qmllint)
             after = lint(plugin.resolve(), target / "shell", qmllint)
