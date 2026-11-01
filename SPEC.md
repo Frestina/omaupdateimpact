@@ -193,7 +193,9 @@ are never commands, and what runs in a `$(...)` still counts.
 A removal is `omarchy-pkg-drop`, `omarchy-pkg-remove`, or `pacman`, `yay` or `paru`
 with `-R` or `--remove`. Any wrapper counts, such as `sudo` or a function called
 `as_root`, unless the command only prints or looks up, such as `echo` or
-`command -v`. `-p` and `--print` only list what would go, so they don't count.
+`command -v`. `-p` and `--print` only list what would go, so they don't count. A
+command given by path counts by its last part, and `omarchy pkg drop` is
+`omarchy-pkg-drop`.
 
 A removal is conditional inside `if`, `while`, `until`, `for`, `case` or a function,
 and after `&&` or `||`. Indentation means nothing. `omarchy-pkg-drop a || true`
@@ -204,10 +206,20 @@ add may not run, so the package stays listed as "may remove". An add whose argum
 can't be read cancels nothing and is not unknown: at worst it leaves a removal
 listed, and v4.5.0-rc2 has several, such as `omarchy-pkg-add "$kernel"`.
 
+A migration can remove packages through other release files, so those are read
+too, as text, from the same tree: any `omarchy-*` command in `bin`, any
+`$OMARCHY_PATH` script it sources or runs with `bash`, and whatever those reach in
+turn. v4.5.0-rc2's T3 Code migration removes its package this way. What is found
+there depends on arguments that aren't followed, so a removal is "may remove" and
+an add cancels nothing. A migration that sources one already run still counts. The
+evidence names the migration and the file. A file that isn't a shell script isn't
+parsed: it only matters if its text names a removal, and then it is `unknown`.
+
 A migration is `unknown`, once however many arguments it hides, when an argument
-to a removal can't be read, when a removal names nothing, as with `xargs`, or when
-the reader loses its place, as with a quote that never closes. What it can read
-from the same removal is still reported.
+to a removal can't be read, when a removal names nothing, as with `xargs`, when a
+string given to `bash -c`, `sh -c` or `eval` names a removal, or when the reader
+loses its place, as with a quote that never closes. The same goes for a file it
+reaches. What it can read from the same removal is still reported.
 
 ## Findings and exit codes
 

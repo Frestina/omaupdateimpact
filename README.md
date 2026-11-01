@@ -53,8 +53,13 @@ adds the traceback.
   bindings, it is reported as a limit. A binding or an unbind inside an `if` counts
   as always on.
 - Migrations are read as text. A removal it can't name, such as
-  `"${targets[@]}"`, is reported as a limit, and you check that migration by hand.
-  A removal inside a string, as with `bash -c` or `eval`, isn't seen.
+  `"${targets[@]}"`, or one in a string for `bash -c` or `eval`, is reported as a
+  limit, and you check that migration by hand. A removal in a heredoc fed to a
+  shell isn't seen.
+- A migration can remove packages through other release files. Commands in `bin` and
+  sourced `$OMARCHY_PATH` scripts are read too, and what they remove is "may remove",
+  because it depends on arguments that aren't followed. A file named by a variable
+  isn't followed, and of the `omarchy` command only `omarchy pkg` is read.
 - A removal is "will remove" unless it sits inside an `if`, a loop, a `case`, a
   function, or after `&&` or `||`. A migration that exits early, as with
   `x || exit 0`, still says "will remove".

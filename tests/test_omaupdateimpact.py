@@ -613,6 +613,7 @@ class Packages(unittest.TestCase):
             "grep omarchy-pkg-drop file\n"
             "command -v omarchy-pkg-drop\n"
             '[[ -x omarchy-pkg-drop ]] && [ -x omarchy-pkg-drop ]\n'
+            "command -V omarchy-pkg-drop\n"
             "printf '%s\\n' omarchy-pkg-drop e\n"
             "pacman -Q omarchy-pkg-drop-f\n"
         )
@@ -634,6 +635,34 @@ class Packages(unittest.TestCase):
         for command in ("pacman -R a", "pacman -Rns a", "sudo pacman -Rns --noconfirm a", "pacman --noconfirm -Rdd a", "pacman --remove a", "sudo -n pacman -Rs a", "yay -Rns a", "paru -R a", "as_root pacman -Rns a", "pacman -Rns -- a"):
             self.assertEqual(self.read({"1.sh": f"{command}\n"}), ({"a": (False, "1.sh")}, set()), command)
 
+    def test_a_command_given_by_path_counts(self):
+        for command in ("sudo /usr/bin/pacman -Rns a", "$OMARCHY_PATH/bin/omarchy-pkg-drop a", '"$OMARCHY_PATH/bin/omarchy-pkg-drop" a', '"${OMARCHY_PATH}/bin/omarchy-pkg-drop" a'):
+            self.assertEqual(self.read({"1.sh": f"{command}\n"}), ({"a": (False, "1.sh")}, set()), command)
+
+    def test_the_omarchy_command_reaches_the_helpers(self):
+        self.assertEqual(self.script("omarchy pkg drop a\n"), {"a": (False, "1.sh")})
+        self.assertEqual(self.changes({"1.sh": "omarchy-pkg-drop a\n", "2.sh": "omarchy pkg add a\n"}), {})
+        self.assertEqual(self.read({"1.sh": "omarchy theme set a\n"}), ({}, set()))
+
+    def test_plain_command_runs_what_it_names(self):
+        for command in ("command omarchy-pkg-drop a", "command sudo pacman -Rns a"):
+            self.assertEqual(self.read({"1.sh": f"{command}\n"}), ({"a": (False, "1.sh")}, set()), command)
+
+    def test_a_removal_in_a_string_is_unknown(self):
+        for command in ("bash -c 'omarchy-pkg-drop a'", "sudo sh -c 'pacman -Rns a'", 'eval "omarchy-pkg-drop a"', "bash -lc 'yay -R a'", "bash -c 'omarchy pkg drop a'"):
+            self.assertEqual(self.read({"1.sh": f"{command}\n"}), ({}, {"1.sh"}), command)
+
+    def test_a_string_with_no_removal_is_no_limit(self):
+        for command in ("bash -c 'pacman -Q a'", "eval \"$x\"", "echo bash -c 'omarchy-pkg-drop a'", 'echo "it holds: omarchy-pkg-drop a"'):
+            self.assertEqual(self.read({"1.sh": f"{command}\n"}), ({}, set()), command)
+
+    def test_an_apostrophe_in_quoted_expansions_is_a_letter(self):
+        text = 'echo "${x:-it\'s}"\nomarchy-pkg-drop a\necho "${y:-that\'s}"\n'
+        self.assertEqual(self.read({"1.sh": text}), ({"a": (False, "1.sh")}, set()))
+
+    def test_an_unquoted_expansion_keeps_its_quotes(self):
+        self.assertEqual(self.read({"1.sh": "value=${value#'boot():'}\nomarchy-pkg-drop a\n"}), ({"a": (False, "1.sh")}, set()))
+
     def test_other_pacman_commands_are_not_removals(self):
         for command in ("pacman -Qq a", "sudo pacman -S a", "pacman -Syu", "sudo pacman -D --asexplicit a", "pacman -Rs --print a", "pacman -Rsp a", "pacman -R --print-format %n a", "sudo pacman-key --list-keys a"):
             self.assertEqual(self.read({"1.sh": f"{command}\n"}), ({}, set()), command)
@@ -653,6 +682,12 @@ class Packages(unittest.TestCase):
     def test_a_conditional_add_leaves_a_possible_removal(self):
         self.assertEqual(self.changes({"1.sh": "omarchy-pkg-drop a\n", "2.sh": "x && omarchy-pkg-add a\n"}), {"a": (True, "1.sh")})
 
+    def test_a_certain_drop_stays_certain_after_a_conditional_one(self):
+        self.assertEqual(self.changes({"1.sh": "omarchy-pkg-drop a\n", "2.sh": "x && omarchy-pkg-drop a\n"}), {"a": (False, "1.sh")})
+
+    def test_a_certain_add_still_cancels_after_both(self):
+        self.assertEqual(self.changes({"1.sh": "omarchy-pkg-drop a\n", "2.sh": "x && omarchy-pkg-drop a\n", "3.sh": "omarchy-pkg-add a\n"}), {})
+
     def test_an_add_with_a_variable_is_no_limit(self):
         self.assertEqual(self.read({"1.sh": 'omarchy-pkg-add "$kernel"\n'}), ({}, set()))
 
@@ -668,7 +703,7 @@ class Packages(unittest.TestCase):
         self.assertEqual(self.read({"1.sh": 'omarchy-pkg-drop a "$b"\n'}), ({"a": (False, "1.sh")}, {"1.sh"}))
 
     def test_a_script_it_loses_its_place_in_is_unknown(self):
-        for text in ("x='open\n", 'x="open\n', "cat <<EOF\nno end\n", "x=$(open\n", "if x; then\n", "fi\n", "y)\n", "x=${open\n", "[[ open\n", "case x in\n"):
+        for text in ("x='open\n", 'x="open\n', "cat <<EOF\nno end\n", "x=$(open\n", "if x; then\n", "fi\n", "y)\n", "x=${open\n", "[[ open\n", "case x in\n", "x=`open\nomarchy-pkg-drop a\n"):
             self.assertEqual(self.unread(text), {"1.sh"}, text)
 
     def test_every_unreadable_argument_is_one_finding(self):
@@ -712,6 +747,110 @@ class Packages(unittest.TestCase):
             (target / "migrations/1.sh").write_text("omarchy-pkg-drop a\n")
             finding = impact.compare_packages(target, target, {"a"})[0]
         self.assertEqual((finding.level, finding.evidence), ("attention", ["migrations/1.sh"]))
+
+
+class ReachedFiles(unittest.TestCase):
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.tree = Path(directory.name) / "tree"
+        (self.tree / "bin").mkdir(parents=True)
+        (self.tree / "migrations").mkdir()
+        (self.tree / "install").mkdir()
+
+    def command(self, name, text):
+        (self.tree / "bin" / name).write_text(f"#!/bin/bash\n{text}")
+
+    def read(self, text, already_run=()):
+        (self.tree / "migrations/1.sh").write_text(text)
+        return impact.package_changes(self.tree / "migrations", set(already_run))
+
+    def test_a_removal_in_a_command_may_happen_and_names_both_files(self):
+        self.command("omarchy-tool", "omarchy-pkg-drop a\n")
+        self.assertEqual(self.read("omarchy-tool\n"), ({"a": (True, "1.sh", "bin/omarchy-tool")}, set()))
+
+    def test_the_finding_names_both_files(self):
+        self.command("omarchy-tool", "omarchy-pkg-drop a\n")
+        (self.tree / "migrations/1.sh").write_text("omarchy-tool\n")
+        finding = impact.compare_packages(self.tree, self.tree, {"a"})[0]
+        self.assertEqual(finding.evidence, ["migrations/1.sh", "bin/omarchy-tool"])
+        self.assertIn("may remove a", finding.title)
+
+    def test_a_command_given_by_path_is_followed(self):
+        self.command("omarchy-tool", "omarchy-pkg-drop a\n")
+        self.assertEqual(self.read('"$OMARCHY_PATH/bin/omarchy-tool" go\n')[0], {"a": (True, "1.sh", "bin/omarchy-tool")})
+
+    def test_a_command_reached_through_a_command_is_followed(self):
+        self.command("omarchy-first", "omarchy-second\n")
+        self.command("omarchy-second", "omarchy-pkg-drop a\n")
+        self.assertEqual(self.read("omarchy-first\n"), ({"a": (True, "1.sh", "bin/omarchy-second")}, set()))
+
+    def test_a_loop_of_commands_finishes(self):
+        self.command("omarchy-first", "omarchy-second\nomarchy-first\n")
+        self.command("omarchy-second", "omarchy-first\nomarchy-pkg-drop a\n")
+        self.assertEqual(self.read("omarchy-first\n")[0], {"a": (True, "1.sh", "bin/omarchy-second")})
+
+    def test_a_migration_that_sources_itself_finishes(self):
+        self.assertEqual(self.read('source "$OMARCHY_PATH/migrations/1.sh"\nomarchy-pkg-drop a\n'), ({"a": (False, "1.sh")}, set()))
+
+    def test_the_helpers_are_not_read(self):
+        self.command("omarchy-pkg-drop", 'pacman -Rns "${installed[@]}"\n')
+        self.assertEqual(self.read("omarchy-pkg-drop a\n"), ({"a": (False, "1.sh")}, set()))
+
+    def test_a_command_only_looked_up_is_not_followed(self):
+        self.command("omarchy-tool", "omarchy-pkg-drop a\n")
+        self.assertEqual(self.read("command -v omarchy-tool\necho omarchy-tool\n"), ({}, set()))
+
+    def test_a_sourced_script_is_read(self):
+        (self.tree / "install/x.sh").write_text("omarchy-pkg-drop a\n")
+        for command in ('source "$OMARCHY_PATH/install/x.sh"', '. "$OMARCHY_PATH/install/x.sh"', 'sudo bash "$OMARCHY_PATH/install/x.sh"', 'source "${OMARCHY_PATH}/install/x.sh"'):
+            self.assertEqual(self.read(f"{command}\n"), ({"a": (True, "1.sh", "install/x.sh")}, set()), command)
+
+    def test_a_copied_script_is_not_read(self):
+        (self.tree / "install/x.sh").write_text("omarchy-pkg-drop a\n")
+        self.assertEqual(self.read('cp "$OMARCHY_PATH/install/x.sh" /tmp\n'), ({}, set()))
+
+    def test_a_sourced_migration_already_run_counts(self):
+        (self.tree / "migrations/0.sh").write_text("omarchy-pkg-drop a\n")
+        found = self.read('source "$OMARCHY_PATH/migrations/0.sh"\n', ["0.sh"])
+        self.assertEqual(found, ({"a": (True, "1.sh", "migrations/0.sh")}, set()))
+
+    def test_a_file_outside_the_tree_is_not_read(self):
+        (self.tree.parent / "outside.sh").write_text("omarchy-pkg-drop a\n")
+        self.assertEqual(self.read('source "$OMARCHY_PATH/../outside.sh"\n'), ({}, set()))
+
+    def test_an_add_in_a_reached_file_cancels_nothing(self):
+        self.command("omarchy-tool", "omarchy-pkg-add a\n")
+        self.assertEqual(self.read("omarchy-pkg-drop a\nomarchy-tool\n")[0], {"a": (False, "1.sh")})
+
+    def test_a_reached_drop_keeps_a_certain_drop_certain(self):
+        self.command("omarchy-tool", "omarchy-pkg-drop a\n")
+        self.assertEqual(self.read("omarchy-pkg-drop a\nomarchy-tool\n")[0], {"a": (False, "1.sh")})
+
+    def test_a_certain_add_cancels_a_reached_drop(self):
+        self.command("omarchy-tool", "omarchy-pkg-drop a\n")
+        self.assertEqual(self.read("omarchy-tool\nomarchy-pkg-add a\n")[0], {})
+
+    def test_a_hidden_argument_in_a_reached_file_is_unknown(self):
+        self.command("omarchy-tool", 'omarchy-pkg-drop "$1"\n')
+        self.assertEqual(self.read("omarchy-tool\n"), ({}, {"1.sh"}))
+
+    def test_a_reached_file_that_loses_the_reader_is_unknown(self):
+        self.command("omarchy-tool", "x='open\n")
+        self.assertEqual(self.read("omarchy-tool\n"), ({}, {"1.sh"}))
+
+    def test_a_python_file_that_names_a_removal_is_unknown(self):
+        for line in ('run(["pacman", "-Rns", name])', 'run("omarchy-pkg-drop " + name)'):
+            (self.tree / "bin/omarchy-tool").write_text(f"#!/usr/bin/python3\n{line}\n")
+            self.assertEqual(self.read("omarchy-tool\n"), ({}, {"1.sh"}), line)
+
+    def test_a_python_file_with_no_removal_gives_nothing(self):
+        (self.tree / "bin/omarchy-tool").write_text("#!/usr/bin/python3\nprint('it isn\\'t $(shell')\n")
+        self.assertEqual(self.read("omarchy-tool\n"), ({}, set()))
+
+    def test_a_shebang_with_a_flag_is_shell(self):
+        (self.tree / "bin/omarchy-tool").write_text("#!/bin/bash -p\nomarchy-pkg-drop a\n")
+        self.assertEqual(self.read("omarchy-tool\n")[0], {"a": (True, "1.sh", "bin/omarchy-tool")})
 
 
 class Commands(unittest.TestCase):

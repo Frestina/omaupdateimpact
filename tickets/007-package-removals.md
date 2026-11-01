@@ -32,6 +32,13 @@ these wrong today:
   indentation.
 - An argument it can't read, such as `"$pkg"` or `"${targets[@]}"`, gives one
   `unknown` finding naming the migration, not silence.
+- Review follow-ups: follow removals through the release files a migration reaches,
+  as [Reading migrations](../SPEC.md#reading-migrations) says. `command` only hides
+  a command with `-v` or `-V`. A command given by path counts, and so does
+  `omarchy pkg drop`. A removal in a string for `bash -c`, `sh -c` or `eval` is
+  `unknown`. An apostrophe in `"${x:-it's}"` doesn't swallow what follows, and an
+  unclosed backtick is `unknown`. A later conditional drop doesn't soften a certain
+  one. The fixture folder carries Omarchy's full license.
 
 ## Not in this ticket
 
@@ -42,4 +49,26 @@ these wrong today:
 - [x] Every case above has a test.
 - [x] v4.5.0-rc2's pending migrations give the same removals as before, with a
       fixture.
+- [x] A removal in a release command a migration calls is "may remove" and names
+      both files, with a test.
+- [x] A command reached through another command is followed, and a loop of commands
+      finishes, with tests.
+- [x] A removal in a sourced `$OMARCHY_PATH` script is found, and so is one in a
+      sourced migration already run, with tests.
+- [x] A reached file that loses the reader, or hides a removal argument, gives
+      `unknown` naming the migration, with a test.
+- [x] A reached Python file that names a removal gives `unknown`, and one that
+      doesn't gives nothing, with tests.
+- [x] A real run with `--target` set to v4.5.0-rc2 lists `t3code-bin` as "may
+      remove" when it's installed.
+- [x] `command omarchy-pkg-drop a` is a removal and `command -v` isn't, with a test.
+- [x] `/usr/bin/pacman -Rns a`, `$OMARCHY_PATH/bin/omarchy-pkg-drop a` and
+      `omarchy pkg drop a` are removals, with a test.
+- [x] `bash -c 'omarchy-pkg-drop a'`, `sudo sh -c 'pacman -Rns a'` and
+      `eval "omarchy-pkg-drop a"` give `unknown`, with a test.
+- [x] Text between two apostrophes in quoted `${...}` is still read, with a test.
+- [x] An unclosed backtick gives `unknown`, with a test.
+- [x] A certain drop stays certain after a later conditional one, with a test.
+- [x] The README's limits match all this.
+- [x] `tests/fixtures/v4.5.0-rc2-migrations/LICENSE` is Omarchy's own, unchanged.
 - [x] `tests/run` passes.

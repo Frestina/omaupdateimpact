@@ -65,6 +65,7 @@ These come from [What must never happen](SPEC.md#what-must-never-happen):
 - Omarchy's formats change, so check real release files, not memory. A release can
   be read from `~/.cache/omaupdateimpact/<tag>`.
 - Fixtures, docs and demos are fictional: no real paths, hostnames, personal config
-  or private project names. This repo goes public at 0.1.0.
+  or private project names. This repo goes public at 0.1.0. Unchanged Omarchy
+  release files are the exception, kept with Omarchy's license and their source tag.
 - Docs use plain, short sentences.
 - The command keeps the project's name, `omaupdateimpact`.

@@ -16,7 +16,8 @@ later are in [BACKLOG.md](BACKLOG.md).
 - New work found along the way goes to the backlog or a new ticket, never into
   the current one.
 - **Fixtures are fictional.** No real paths, hostnames or personal config in the
-  tests, the docs or the demo.
+  tests, the docs or the demo. The exception is unchanged Omarchy release files,
+  kept with Omarchy's license and their source tag.
 
 Every ticket has the same parts: front matter (`id`, `title`, `milestone`,
 `depends_on`), then Goal, Spec, Scope, sometimes Not in this ticket, and Done

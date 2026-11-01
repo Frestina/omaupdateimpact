@@ -84,11 +84,11 @@ Paths already ruled out are not here; they are under
   given. Waits for a real report.
 - **A rejected `GITHUB_TOKEN`.** A stale token shows as `HTTP Error 401`, with no
   mention of the token. 012 could name it.
-- **A removal inside a string.** `bash -c 'pacman -Rns a'`, `eval`, and a heredoc fed
-  to a shell aren't seen. Neither v4.0.6 nor v4.5.0-rc2 does this, and the README
-  lists it. Waits for a release that does.
-- **`omarchy pkg drop a`.** The `omarchy` command reaches the same helpers, and a
-  migration written that way isn't seen. Neither v4.0.6 nor v4.5.0-rc2 does this.
+- **A removal in a heredoc fed to a shell.** `bash <<EOF` isn't seen. Neither v4.0.6
+  nor v4.5.0-rc2 does this, and the README lists it. Waits for a release that does.
+- **Other `omarchy` subcommands.** Only `omarchy pkg drop` is read, so
+  `omarchy install ai t3-code` isn't followed the way `omarchy-install-ai-t3-code`
+  is. Neither v4.0.6 nor v4.5.0-rc2 calls `omarchy` this way.
 - **An early exit is not read.** `omarchy-hw-aarch64-n1x || exit 0` at the top of a
   migration makes everything after it conditional, but it still says "will remove".
   Real migrations do this, and the README lists it. Reading it means following

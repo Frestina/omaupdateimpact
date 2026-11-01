@@ -48,7 +48,15 @@ PACKAGE_DROPS = {"omarchy-pkg-drop", "omarchy-pkg-remove"}
 PACKAGE_ADDS = {"omarchy-pkg-add", "omarchy-pkg-aur-add"}
 PACMANS = {"pacman", "yay", "paru"}
 # These name a package command without running it.
-NOT_RUN = {"echo", "printf", "command", "type", "which", "hash", "grep", "test", "[", "[["}
+NOT_RUN = {"echo", "printf", "type", "which", "hash", "grep", "test", "[", "[["}
+SHELLS = {"source", ".", "bash", "sh"}
+SHELL_STRING_FLAG = re.compile(r"-[a-zA-Z]*c")
+SHELL_SCRIPT = re.compile(r"#!.*\b(?:ba)?sh\b")
+RELEASE_FILE = re.compile(r"\$(?:OMARCHY_PATH|\{OMARCHY_PATH\})/(.+)")
+NAMES_REMOVAL = re.compile(
+    r"\bomarchy-pkg-(?:drop|remove)\b|\bomarchy pkg (?:drop|remove)\b"
+    r"|\b(?:pacman|yay|paru)\b.*[\s\"'](?:-[a-zA-Z]*R|--remove)"
+)
 SHELL_OPERATOR = re.compile(r"\(\s*\)|&>>|&>|<<<|<<-|<<|<&|<>|<|>>|>&|>\||>|&&|\|\||\|&|;;&|;;|;&|[;&|()\n]")
 TEST_END = re.compile(r"\s\]\]")
 
@@ -502,16 +510,16 @@ def line_end(text, index):
     return len(text) if end < 0 else end
 
 
-def closing(text, index, opener, closer):
-    """Where the bracket opened just before index ends."""
+def closing(text, index, opener, closer, quoted=False):
+    """Where the bracket opened just before index ends. Inside double quotes ' is a letter."""
     depth = 1
     while depth:
         if index >= len(text):
             raise ShellUnread
         char = text[index]
-        if char in "\"'":
+        if char == '"' or (char == "'" and not quoted):
             index = string_end(text, index)
-        elif char == "#" and text[index - 1] in " \t\n":
+        elif char == "#" and not quoted and text[index - 1] in " \t\n":
             index = line_end(text, index)
         else:
             depth += (char == opener) - (char == closer)
@@ -537,7 +545,7 @@ def shell_word(text, index):
     """Read the word at index: its text, the substitutions in it, and where it ends.
 
     Quotes come off. Whatever is only known at run time keeps a $, so it can never
-    pass for a package name.
+    pass for a package name. A ${...} stays as written, so $OMARCHY_PATH can be told.
     """
     word, inner, quoted = "", [], False
     while index < len(text):
@@ -555,17 +563,20 @@ def shell_word(text, index):
             quoted = not quoted
             index += 1
         elif text.startswith("$((", index):
-            index = closing(text, index + 2, "(", ")")
+            index = closing(text, index + 2, "(", ")", quoted)
             word += "$"
         elif text.startswith("$(", index):
             tokens, index = shell_tokens(text, index + 2, True)
             inner.append(tokens)
             word += "$"
         elif text.startswith("${", index):
-            index = closing(text, index + 2, "{", "}")
-            word += "$"
+            end = closing(text, index + 2, "{", "}", quoted)
+            word += text[index:end]
+            index = end
         elif char == "`":
             end = string_end(text, index)
+            if end - 1 == index or text[end - 1] != "`":
+                raise ShellUnread
             inner.append(shell_tokens(text[index + 1 : end - 1])[0])
             index = end
             word += "$"
@@ -647,15 +658,35 @@ def pacman_removes(arguments):
     return ("R" in short or "--remove" in options) and not prints
 
 
+def not_run(words):
+    if words[0] == "command":
+        return words[1:2] in (["-v"], ["-V"])
+    return words[0].rsplit("/", 1)[-1] in NOT_RUN
+
+
 def package_action(words):
-    """What a command does to packages, as an action and its arguments, or None."""
+    """What a command does to packages, as an action and its arguments, or None.
+
+    The action is drop, add, unread for a removal in a string, or reach for the
+    words that may name other release files.
+    """
+    reached = []
     for index, word in enumerate(words):
-        rest = words[index + 1 :]
-        if word in PACKAGE_DROPS or (word in PACMANS and pacman_removes(rest)):
+        name, rest = word.rsplit("/", 1)[-1], words[index + 1 :]
+        if name == "omarchy" and rest[:1] == ["pkg"]:
+            name, rest = "-".join([name, *rest[:2]]), rest[2:]
+        if name in PACKAGE_DROPS or (name in PACMANS and pacman_removes(rest)):
             return "drop", rest
-        if word in PACKAGE_ADDS:
+        if name in PACKAGE_ADDS:
             return "add", rest
-    return None
+        if name == "eval" or (name in ("bash", "sh") and any(SHELL_STRING_FLAG.fullmatch(part) for part in rest)):
+            if any(NAMES_REMOVAL.search(part) for part in rest):
+                return "unread", []
+        if name in SHELLS:
+            reached += [part for part in rest if RELEASE_FILE.fullmatch(part)]
+        if name.startswith("omarchy-"):
+            reached.append(word)
+    return ("reach", reached) if reached else None
 
 
 def package_commands(text):
@@ -709,7 +740,7 @@ def package_commands(text):
         if patterns:
             patterns = token != ")"
             continue
-        if words and words[0] not in NOT_RUN:
+        if words and not not_run(words):
             action = package_action(words)
             if action:
                 commands.append((*action, chained or any(blocks)))
@@ -728,30 +759,82 @@ def package_commands(text):
     return commands
 
 
+def release_file(tree, word):
+    """The file in the release that a word names, or None. Nothing outside the tree counts."""
+    named = RELEASE_FILE.fullmatch(word)
+    path = tree / (named.group(1) if named else f"bin/{word.rsplit('/', 1)[-1]}")
+    return path if path.is_file() and path.resolve().is_relative_to(tree.resolve()) else None
+
+
+def reached_commands(tree, words, seen):
+    """The package commands in the release files these words name, and in what those reach.
+
+    Each is an action, its arguments, and the file. A file that isn't a shell script
+    isn't parsed: it is unread if its text names a removal.
+    """
+    for word in words:
+        path = release_file(tree, word)
+        if path is None or path in seen:
+            continue
+        seen.add(path)
+        file = str(path.relative_to(tree))
+        text = path.read_text(errors="replace")
+        if text.startswith("#!") and not SHELL_SCRIPT.match(text):
+            if NAMES_REMOVAL.search(text):
+                yield "unread", [], file
+            continue
+        try:
+            commands = package_commands(text)
+        except ShellUnread:
+            yield "unread", [], file
+            continue
+        for action, arguments, _ in commands:
+            if action == "reach":
+                yield from reached_commands(tree, arguments, seen)
+            else:
+                yield action, arguments, file
+
+
+def migration_commands(path):
+    """A migration's package commands, each with whether it can be skipped and any other file."""
+    seen = {path}
+    for action, arguments, conditional in package_commands(path.read_text(errors="replace")):
+        if action == "reach":
+            for reached, words, file in reached_commands(path.parent.parent, arguments, seen):
+                yield reached, words, True, file
+        else:
+            yield action, arguments, conditional
+
+
 def package_changes(migrations, already_run):
     """What the pending migrations remove: each package, and the migrations it can't read.
 
-    Each package maps to whether its removal is conditional, and which migration.
+    Each package maps to whether its removal is conditional, which migration, and
+    the file that holds the removal when that is another one.
     """
     dropped, unread = {}, set()
     for path in sorted(migrations.glob("*.sh")):
         if path.name in already_run:
             continue
         try:
-            commands = package_commands(path.read_text(errors="replace"))
+            commands = list(migration_commands(path))
         except ShellUnread:
             unread.add(path.name)
             continue
-        for action, arguments, conditional in commands:
+        for action, arguments, conditional, *other in commands:
             packages = [word for word in arguments if not word.startswith("-")]
             readable = [package for package in packages if PACKAGE.fullmatch(package)]
-            if action == "drop" and (not packages or len(readable) < len(packages)):
+            if action == "unread" or (action == "drop" and (not packages or len(readable) < len(packages))):
                 unread.add(path.name)
             for package in readable:
+                certain = package in dropped and not dropped[package][0]
                 if action == "drop":
-                    dropped[package] = (conditional, path.name)
+                    if not (conditional and certain):
+                        dropped[package] = (conditional, path.name, *other)
+                elif other:
+                    continue
                 elif conditional and package in dropped:
-                    dropped[package] = (True, dropped[package][1])
+                    dropped[package] = (True, *dropped[package][1:])
                 else:
                     dropped.pop(package, None)
     return dropped, unread
@@ -766,13 +849,13 @@ def compare_packages(target, home, installed):
     dropped, unread = package_changes(target / "migrations", already_run)
     findings = []
     for package in sorted(set(dropped) & installed):
-        conditional, migration = dropped[package]
+        conditional, migration, *other = dropped[package]
         when = "may remove" if conditional else "will remove"
         findings.append(Finding(
             "packages",
             ATTENTION,
             f"The update {when} {package}, which is installed here.",
-            [f"migrations/{migration}"],
+            [f"migrations/{migration}", *other],
         ))
     for migration in sorted(unread):
         title = f"Couldn't read what migrations/{migration} removes, so check it by hand."
