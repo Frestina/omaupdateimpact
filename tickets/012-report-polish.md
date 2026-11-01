@@ -19,7 +19,8 @@ notes after the findings, and one change can appear twice.
 ## Scope
 
 - Stop wrapping inside command names: `textwrap` split `omarchy-voxtype-install`
-  across two lines. Use `break_on_hyphens=False`.
+  across two lines. Use `break_on_hyphens=False`, and drop the hyphen rule from
+  `flat()` in `tests/test_end_to_end.py`.
 - Give each attention finding a line with the exact thing to do, such as the
   `hl.unbind` line, or `omarchy pkg add dua-cli` to bring a package back.
 - Merge the moved and "now does" lines when they describe one change.

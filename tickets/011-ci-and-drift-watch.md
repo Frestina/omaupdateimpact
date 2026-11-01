@@ -20,7 +20,8 @@ That is the project's biggest long-term risk.
 
 - GitHub Actions on push and pull request: `tests/run` on the oldest supported
   Python and the newest. Actions pinned to full commit SHAs. `qmllint` is installed
-  there, so `RealQmllint` runs and a change in its output fails the build.
+  there, so `RealQmllint` runs and a change in its output fails the build. So are
+  `shellcheck` and a pinned `ruff`, so a new ruff can't fail an unchanged commit.
 - A scheduled job that fetches the newest release, including RCs, runs the parser
   and fails if it finds an unknown helper, zero bindings or a missing tree
   directory. A failed run notifies the owner.
