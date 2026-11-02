@@ -1,9 +1,11 @@
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).parent.parent.resolve()
 INSTALL = ROOT / "install.sh"
@@ -22,7 +24,10 @@ class Install(unittest.TestCase):
         self.folder = self.home / ".local/bin"
         self.link = self.folder / "omaupdateimpact"
         self.cache = self.home / ".cache/omaupdateimpact"
-        self.path = f"{self.folder}:{os.environ['PATH']}"
+        # Nothing from the developer's PATH, where python3 can be a shim that fails
+        # under a made-up HOME. This Python first, so each Python CI lists is the one tested.
+        self.without_folder = f"{Path(sys.executable).parent}:/usr/bin:/bin"
+        self.path = f"{self.folder}:{self.without_folder}"
 
     def run_script(self, *args, script=INSTALL, **env):
         env = {"PATH": self.path, "HOME": str(self.home), **env}
@@ -44,7 +49,9 @@ class Install(unittest.TestCase):
         self.assertTrue(self.link.is_symlink())
         self.assertEqual(self.link.resolve(), COMMAND)
         self.assertIn(f"at {self.link}.", result.stdout)
-        ran = subprocess.run([self.link, "--version"], capture_output=True, text=True, timeout=60, check=False)
+        ran = subprocess.run(
+            [self.link, "--version"], env={"PATH": self.path}, capture_output=True, text=True, timeout=60, check=False
+        )
         self.assert_exit(ran, 0)
         self.assertTrue(ran.stdout.startswith("omaupdateimpact "))
 
@@ -107,7 +114,7 @@ class Install(unittest.TestCase):
         self.assertEqual(self.everything_in_home(), [])
 
     def test_it_says_when_the_folder_is_not_on_path(self):
-        result = self.run_script(PATH=os.environ["PATH"])
+        result = self.run_script(PATH=self.without_folder)
         self.assert_exit(result, 0)
         self.assertIn(f"{self.folder} isn't on your PATH", result.stdout)
         self.assertNotIn("PATH", self.run_script("--uninstall").stdout)
@@ -155,3 +162,19 @@ class Install(unittest.TestCase):
             self.assert_exit(result, 2)
             self.assertIn("Usage", result.stderr)
         self.assertEqual(self.everything_in_home(), [])
+
+
+class InstallUnderABrokenPython(Install):
+    """The same tests, with a python3 first on the inherited PATH that only prints an
+    error, as a mise shim does under a made-up HOME."""
+
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        python = Path(directory.name) / "python3"
+        python.write_text("#!/bin/sh\necho 'not this python' >&2\nexit 1\n")
+        python.chmod(0o755)
+        environ = mock.patch.dict(os.environ, {"PATH": f"{directory.name}:{os.environ['PATH']}"})
+        environ.start()
+        self.addCleanup(environ.stop)
+        super().setUp()
