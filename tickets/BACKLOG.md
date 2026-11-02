@@ -43,6 +43,11 @@ Paths already ruled out are not here; they are under
   new package for every release, and the clone install already works. Waits for
   someone to ask, or for 021 to need it. To publish: set the checksum from the tagged
   tarball, generate `.SRCINFO`, and add it to the README's Install section.
+- **The install tests fail with `mise` on `PATH`.** They run `install.sh` with a
+  made-up `HOME`, so `mise`'s shims complain on stderr about an untrusted config,
+  and 11 tests that compare stderr fail. They pass without `mise` on `PATH`, and CI
+  doesn't have it. A clean `PATH` in the tests would fix it. Waits because only a
+  developer's machine sees it.
 
 ## Limits to keep watching
 
