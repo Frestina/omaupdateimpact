@@ -39,6 +39,10 @@ Paths already ruled out are not here; they are under
   Waits for someone to need it.
 - **Several machines.** Run the check on every machine you own. Waits for 0.1.0
   and `--json`.
+- **The AUR package.** `packaging/aur` builds, but publishing means an account and a
+  new package for every release, and the clone install already works. Waits for
+  someone to ask, or for 021 to need it. To publish: set the checksum from the tagged
+  tarball, generate `.SRCINFO`, and add it to the README's Install section.
 
 ## Limits to keep watching
 
@@ -48,6 +52,22 @@ Paths already ruled out are not here; they are under
 - **`omarchy_default_bindings = false`.** Documented as unread. Reading it would
   remove every default from the comparison, and it's a small change if anyone
   uses it.
+- **`omarchy_preinstalled_bindings = false`.** Not read either, and the README's limits
+  don't name it. v4.5.0-rc2 turns off `bindings/applications.lua` with it, so a clash
+  with one of those defaults is a false alarm, not a miss. Name it in the README with
+  the line above, and read it with that one.
+- **`OMARCHY_MIGRATION_STATE`.** `omarchy-migrate` reads its state folder from it when
+  it's set, and this tool always reads `~/.local/state/omarchy/migrations`. Someone
+  who sets it gets every migration counted as pending, so removals can be false but
+  none are missed. Waits for a real report.
+- **The stable target goes by GitHub's prerelease flag.** `releases/latest` skips
+  releases flagged as prereleases, while the spec says the tag decides. All 71
+  releases agreed on 2026-11-02, and a mismatch still shows as "prerelease" in the
+  report. Say in the spec that stable goes by GitHub's latest release, or check the
+  tag.
+- **The README's exit 3 says "couldn't run".** The spec says "couldn't run in full",
+  and a check that ran in part also gives 3. A one-line fix with the next README
+  change.
 - **`hl.unbind("all")` in your bindings.** It removes every default, like
   `omarchy_default_bindings = false`. In the defaults it is applied, but in your
   file the defaults are still compared, so clashes can be false. Waits for a real

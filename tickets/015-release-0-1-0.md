@@ -16,23 +16,27 @@ machine first.
 
 - Run it on at least two real machines, on stable and rc, including one with no
   customization and one with several plugins.
-- Run `/audit` again and clear everything High or above.
+- The owner types `/audit`, since it can't be started for them. Clear everything High
+  or above.
 - Run a history scan for secrets and personal data before publishing.
+- Confirm the drift watch has run on its schedule before the repo goes public. The
+  audit on 2026-11-02 found no scheduled run yet. If none has happened by then, find
+  out why.
+- Stop and wait for the owner's go-ahead before making the repo public, and again
+  before the tag.
 - Once the repo is public, make CI's jobs required checks on `main`, with admins
   exempt, so ticket commits still go directly to `main`.
 - Turn on private vulnerability reporting once the repo is public, or the link in
   `SECURITY.md` leads nowhere.
 - Tag `v0.1.0` with release notes taken from the changelog, and give the changelog
   its date.
-- Publish the AUR package from 013. Its checksum is `SKIP` until the tag exists, so
-  set it from the tagged tarball and generate `.SRCINFO` first.
-- Add the AUR package to the README's Install section once it installs.
 - Share it where Omarchy users are, after the owner has reviewed the text.
 
 ## Done when
 
-- [ ] Both machine runs have been read by a person, and every finding was right or
+- [x] Both machine runs have been read by a person, and every finding was right or
       became a ticket.
 - [ ] The audit has nothing High or above.
+- [ ] The drift watch has passed at least once on its schedule.
 - [ ] A pull request with a red check can't be merged.
-- [ ] The tag and release exist, and the AUR package installs on a clean machine.
+- [ ] The tag and release exist.

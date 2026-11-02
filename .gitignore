@@ -1,2 +1,3 @@
 __pycache__/
 .claude/reviewer-session
+/audits/

@@ -400,8 +400,8 @@ is exit 1. Finding its own link already there is exit 0.
 when there is one, and leaves it for the user to delete. `~/.local/bin` stays, even
 if the install created it, because other tools share it.
 
-The AUR package is in `packaging/aur`. It installs to `/usr/bin` and doesn't use
-`install.sh`.
+The AUR package is in `packaging/aur`, and isn't published. It installs to `/usr/bin`
+and doesn't use `install.sh`.
 
 ## Docs
 
