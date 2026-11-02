@@ -49,7 +49,7 @@ when.
 | 013 | [Install, version and uninstall](013-install-and-version.md) | 001 | done |
 | 014 | [README and project docs](014-readme-and-docs.md) | 012, 013 | done |
 | 024 | [Only a Qt 6 `qmllint` counts](024-qt6-qmllint.md) | 009 | done |
-| 015 | [Release 0.1.0](015-release-0-1-0.md) | 011, 014, 024 | in progress |
+| 015 | [Release 0.1.0](015-release-0-1-0.md) | 011, 014, 024 | done |
 
 ### M3 Better answers
 

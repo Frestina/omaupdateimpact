@@ -42,4 +42,4 @@ machine first.
 - [x] The drift watch has passed at least once on its schedule, and its cron is back
       to `17 6 * * *`.
 - [x] A pull request with a red check can't be merged.
-- [ ] The tag and release exist.
+- [x] The tag and release exist.
