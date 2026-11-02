@@ -368,8 +368,16 @@ only, and `NO_COLOR` turns it off unless it's empty.
 ## JSON
 
 `--json` prints one document and nothing else: `schemaVersion`, the installed
-version, the target, the channel, and the findings. Exit codes don't change. A
-breaking change bumps `schemaVersion`.
+version, the target, the channel, what was checked, each check's state, and the
+findings. Exit codes don't change. A breaking change bumps `schemaVersion`.
+
+The plugin holds no rules, so the document carries what the report works out. What
+was checked is data, not the "Checked" line's text. Each check says whether it ran,
+ran in part or didn't run, as the closing line does. Each finding has every field,
+its evidence included.
+
+When there is no update, the document says so and names any newer release on
+another channel. A failure that ends in exit 2 is a document too, with the reason.
 
 ## Files
 

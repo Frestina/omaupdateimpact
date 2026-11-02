@@ -165,7 +165,5 @@ Paths already ruled out are not here; they are under
 - **Evidence in the text report.** Findings carry evidence, but only `--json` (016)
   will show it. Printing it could crowd the report, so it waits for someone to miss
   it.
-- **What was checked, in `--json`.** The report's "Checked" line is plain text. 016
-  should carry it as data, or the plugin can't show its work either.
 - **`TERM=dumb`.** Colour goes to any terminal, so a dumb one gets the codes.
   `NO_COLOR` covers it. Waits for a real report.
