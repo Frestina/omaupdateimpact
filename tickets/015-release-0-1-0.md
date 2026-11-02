@@ -36,7 +36,7 @@ machine first.
 
 - [x] Both machine runs have been read by a person, and every finding was right or
       became a ticket.
-- [ ] The audit has nothing High or above.
+- [x] The audit has nothing High or above.
 - [ ] The drift watch has passed at least once on its schedule.
 - [ ] A pull request with a red check can't be merged.
 - [ ] The tag and release exist.
