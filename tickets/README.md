@@ -60,6 +60,7 @@ when.
 | 018 | [Say why, from the release notes](018-reasons-from-release-notes.md) | 002 | todo |
 | 019 | [Reviewed findings stay quiet](019-reviewed-findings.md) | 002 | todo |
 | 020 | [An entry in the Omarchy menu](020-omarchy-menu-entry.md) | 015 | todo |
+| 025 | [The install tests don't use the developer's PATH](025-install-tests-own-path.md) | 013 | todo |
 
 ### M4 Plugin: on the desktop and in the marketplace
 
