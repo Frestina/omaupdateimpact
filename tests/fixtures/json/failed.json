@@ -1,0 +1,5 @@
+{
+  "schemaVersion": 1,
+  "result": "failed",
+  "reason": "Can't pick a release: the channel is edge, and only stable and rc have tagged releases. Pass a tag, such as omaupdateimpact v4.5.0."
+}

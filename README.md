@@ -85,6 +85,7 @@ omaupdateimpact               # the release your update channel would deliver
 omaupdateimpact --channel rc  # the release another channel would deliver
 omaupdateimpact v4.5.0-rc2    # a specific release
 omaupdateimpact --all         # every note, not only how many there are
+omaupdateimpact --json        # one JSON document, for scripts: see docs/json.md
 ```
 
 ![A terminal running omaupdateimpact on a made-up machine](docs/demo.svg)
@@ -123,6 +124,7 @@ Colour shows on a terminal only, and `NO_COLOR` turns it off.
 
 Exit 3 names the checks that didn't run, and those that ran in part. A failure
 prints one line, and `--debug` adds the traceback.
+With `--json`, every exit code comes with a document. See [docs/json.md](docs/json.md).
 
 ## Limits
 

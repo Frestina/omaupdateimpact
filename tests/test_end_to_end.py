@@ -1,5 +1,6 @@
 import ast
 import contextlib
+import dataclasses
 import io
 import json
 import os
@@ -10,11 +11,12 @@ import tempfile
 import threading
 import unittest
 import urllib.request
+from collections import Counter
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from unittest import mock
 
-from tests import demo, drift_watch
+from tests import demo, drift_watch, golden
 from tests.test_omaupdateimpact import QMLLINT_OUTPUT, QT6_VERSION, ProgramCase, impact
 
 COMMAND = Path(__file__).parent.parent / "bin/omaupdateimpact"
@@ -324,6 +326,134 @@ class Report(RealCommand):
         self.assertIn("qmllint can't prove a plugin works.", self.output)
 
 
+class JsonOutput(RealCommand):
+    """--json on the real command: one document on stdout, and the same exit code as the report."""
+
+    def assert_document(self, args, code, result, **env):
+        text = self.command(*args, **env)
+        found = self.command("--json", *args, **env)
+        self.assert_exit(found, code)
+        self.assertEqual(text.returncode, code)
+        # json.loads takes one document and nothing else, so stray text would fail here.
+        document = json.loads(found.stdout)
+        self.assertEqual((document["schemaVersion"], document["result"]), (1, result))
+        return document, found
+
+    def trees(self, home, *args):
+        return ["--root", OLD, "--target", NEW, "--home", home, *args]
+
+    def test_every_exit_code_gives_one_document(self):
+        crashing = self.base / "broken"
+        shutil.copytree(NEW, crashing)
+        (crashing / "default/hypr/bindings/broken.lua").mkdir()
+        cases = {
+            "clear": (self.trees(self.clean_home), 0, "clear", {}),
+            "attention": (self.trees(HOME), 1, "attention", {}),
+            "bad option": (["--no-such-option"], 2, "failed", {}),
+            "bad tag": (self.trees(self.clean_home, "main"), 2, "failed", {}),
+            "unusable tree": (["--root", OLD, "--target", self.clean_home, "--home", self.clean_home], 2, "failed", {}),
+            "crash": (["--root", OLD, "--target", crashing, "--home", self.clean_home], 2, "failed", {}),
+            "channel without tags": (["--root", OLD, "--home", self.clean_home, "--channel", "edge"], 2, "failed", {}),
+            "failed download": (["v4.5.0-rc2", "--root", OLD, "--home", self.clean_home], 2, "failed", {}),
+        }
+        for name, (args, code, result, env) in cases.items():
+            with self.subTest(name):
+                document, found = self.assert_document(args, code, result, **env)
+                if result == "failed":
+                    self.assertIn(document["reason"].removeprefix("Bad usage: "), found.stderr)
+                    self.assertNotIn("Traceback", found.stderr)
+                else:
+                    self.assertEqual(found.stderr, "")
+
+    def test_a_check_that_couldnt_run_in_full_exits_3_as_a_document(self):
+        (self.clean_home / ".local/state/omarchy/migrations" / UNREADABLE_MIGRATION).unlink()
+        document = self.assert_document(self.trees(self.clean_home), 3, "incomplete")[0]
+        self.assertEqual(document["checks"]["packages"]["state"], "ranInPart")
+
+    def test_no_update_is_a_document(self):
+        self.stub("omarchy-version", "echo 4.5.0rc2-1")
+        document = self.assert_document(["v4.5.0-rc2"], 0, "noUpdate", OMARCHY_PATH=NEW, HOME=HOME)[0]
+        self.assertEqual(document["target"], {"name": "v4.5.0-rc2", "prerelease": True})
+        self.assertIsNone(document["newer"])
+        self.assertEqual(document["newerProblem"], "Couldn't check for newer releases on other channels.")
+
+    def test_the_document_holds_what_the_report_shows(self):
+        self.packages("dua-cli", "dust", "t3code-bin", "tensaku", "fictional-editor")
+        report = self.command(*self.trees(HOME, "--all"))
+        document = json.loads(self.command("--json", *self.trees(HOME)).stdout)
+        self.assertEqual(document["result"], "attention")
+        self.assertEqual(report.stdout.splitlines()[0], "Omarchy 4.0.6-1 -> v4.5.0-rc2 (stable channel, prerelease). Nothing was changed.")
+        self.assertEqual(
+            (document["installed"], document["target"], document["channel"]),
+            ("4.0.6-1", {"name": "v4.5.0-rc2", "prerelease": True}, "stable"),
+        )
+        # The report says: Checked 207 default bindings, 3 of yours, 27 pending migrations,
+        # 7 of your files for 6 deleted commands, 1 plugin linted.
+        self.assertEqual({check: value["checked"] for check, value in document["checks"].items()}, {
+            "bindings": {"defaults": 207, "yours": 3},
+            "packages": {"pendingMigrations": 27},
+            "commands": {"deletedCommands": 6, "yourFiles": 7},
+            "plugins": {"linted": 1},
+        })
+        # And ends: These checks ran in part: packages.
+        self.assertEqual({check: value["state"] for check, value in document["checks"].items()}, {
+            "bindings": "ran", "packages": "ranInPart", "commands": "ran", "plugins": "ran",
+        })
+        shown = flat(report.stdout)
+        levels = Counter(finding["level"] for finding in document["findings"])
+        self.assertEqual(levels, {"attention": 10, "note": 11, "unknown": 1})
+        for finding in document["findings"]:
+            with self.subTest(finding["title"]):
+                self.assertIn(flat(" ".join(part for part in (finding["title"], finding["detail"]) if part)), shown)
+                if finding["fix"]:
+                    self.assertIn(f"Fix: {flat(finding['fix'])}", shown)
+                self.assertTrue(finding["evidence"])
+                self.assertEqual(finding["partial"], finding["level"] == "unknown")
+
+
+class JsonDocs(unittest.TestCase):
+    """docs/json.md shows the golden documents, and they are what the command prints."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.printed = golden.documents()
+        cls.doc = golden.DOC.read_text()
+
+    def test_the_golden_files_are_what_the_command_prints(self):
+        for name, text in self.printed.items():
+            with self.subTest(name):
+                self.assertEqual((golden.GOLDEN / f"{name}.json").read_text(), text, "Run python3 -m tests.golden.")
+
+    def test_the_schema_doc_shows_the_golden_files(self):
+        for name in self.printed:
+            with self.subTest(name):
+                text = (golden.GOLDEN / f"{name}.json").read_text()
+                self.assertIn(f"```json\n{text}```\n", self.doc, f"Copy tests/fixtures/json/{name}.json into the doc.")
+
+    def test_the_schema_doc_names_every_key_and_value(self):
+        def keys(value):
+            if isinstance(value, dict):
+                for key, inner in value.items():
+                    yield key
+                    yield from keys(inner)
+            elif isinstance(value, list):
+                for inner in value:
+                    yield from keys(inner)
+
+        names = {key for text in self.printed.values() for key in keys(json.loads(text))}
+        names |= {*impact.RESULTS, impact.RAN, impact.RAN_IN_PART, impact.DIDNT_RUN, *impact.CHECKS}
+        names |= {count for counts in impact.CHECKS.values() for count in counts}
+        names |= {field.name for field in dataclasses.fields(impact.Finding)}
+        names |= {impact.ATTENTION, impact.NOTE, impact.UNKNOWN}
+        for name in sorted(names):
+            self.assertIn(f"`{name}`", self.doc)
+
+    def test_the_examples_name_nobody(self):
+        for text in self.printed.values():
+            for path in ("/home/", tempfile.gettempdir(), str(COMMAND.parent.parent)):
+                self.assertNotIn(path, text)
+
+
 class BindHold(RealCommand):
     """v4.5.0-rc2 moved its dictation keys to o.bind_hold, which the first version couldn't read."""
 
@@ -348,9 +478,9 @@ class BindHold(RealCommand):
 
 
 class Version(RealCommand):
-    def old_python(self, *version):
+    def old_python(self, *version, args=("--version",)):
         """Runs the real file with sys.version_info set to version."""
-        script = f"import runpy, sys; sys.version_info = {version}; sys.argv = ['x', '--version']; runpy.run_path({str(COMMAND)!r}, run_name='__main__')"
+        script = f"import runpy, sys; sys.version_info = {version}; sys.argv = ['x', *{args!r}]; runpy.run_path({str(COMMAND)!r}, run_name='__main__')"
         return subprocess.run(
             [sys.executable, "-c", script], env=self.env(), capture_output=True, text=True, timeout=60, check=False
         )
@@ -373,6 +503,13 @@ class Version(RealCommand):
         result = self.old_python(3, 11, 3, "final", 0)
         self.assert_no_verdict(result, "omaupdateimpact needs Python 3.11.4 or newer, and this is 3.11.3.")
         self.assertEqual(len(result.stderr.splitlines()), 1)
+
+    def test_an_old_python_answers_json_too(self):
+        result = self.old_python(3, 11, 3, "final", 0, args=("--js",))
+        reason = "omaupdateimpact needs Python 3.11.4 or newer, and this is 3.11.3."
+        self.assert_exit(result, 2)
+        self.assertEqual(json.loads(result.stdout), {"schemaVersion": 1, "result": "failed", "reason": reason})
+        self.assertEqual(result.stderr, reason + "\n")
 
     def test_the_oldest_python_it_takes_runs(self):
         result = self.old_python(3, 11, 4, "final", 0)

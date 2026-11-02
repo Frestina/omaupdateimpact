@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "result": "noUpdate",
+  "installed": "1.3.0-1",
+  "channel": "stable",
+  "target": {
+    "name": "v1.3.0",
+    "prerelease": false
+  },
+  "newer": [
+    {
+      "tag": "v1.4.0-rc1",
+      "channel": "rc"
+    }
+  ],
+  "newerProblem": null
+}

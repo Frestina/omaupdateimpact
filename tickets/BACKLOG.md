@@ -162,8 +162,11 @@ Paths already ruled out are not here; they are under
 - **A folder link in `~/.local/bin`.** Links are followed and every file is read, so
   a link to a large folder makes the run slow, and paths show through the link.
   Waits for a real report.
-- **Evidence in the text report.** Findings carry evidence, but only `--json` (016)
-  will show it. Printing it could crowd the report, so it waits for someone to miss
-  it.
+- **Evidence in the text report.** Findings carry evidence, but only `--json` shows
+  it. Printing it could crowd the report, so it waits for someone to miss it.
+- **Which tree a default's evidence is in.** A binding's evidence names a file such
+  as `default/hypr/bindings.lua`, the same path in both trees. A move or a removed
+  default can name either. The plugin can't open the right one without knowing.
+  Waits for the plugin (021) to need it.
 - **`TERM=dumb`.** Colour goes to any terminal, so a dumb one gets the codes.
   `NO_COLOR` covers it. Waits for a real report.

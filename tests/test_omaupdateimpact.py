@@ -768,7 +768,7 @@ class Packages(unittest.TestCase):
             target = Path(directory)
             (target / "migrations").mkdir()
             (target / "migrations/1.sh").write_text("omarchy-pkg-drop a\nif x; then omarchy-pkg-drop b; fi\n")
-            certain, possible = impact.compare_packages(target, target, {"a", "b"}, [])
+            certain, possible = impact.compare_packages(target, target, {"a", "b"}, {})
         self.assertEqual(certain.fix, "After the update, run omarchy pkg add a (aur-add for an AUR package).")
         self.assertEqual(possible.fix, "If it goes, run omarchy pkg add b (aur-add for an AUR package).")
 
@@ -777,7 +777,7 @@ class Packages(unittest.TestCase):
             target = Path(directory)
             (target / "migrations").mkdir()
             (target / "migrations/1.sh").write_text('omarchy-pkg-drop "$a" "$b"\nsudo pacman -Rns "${c[@]}"\n')
-            findings = impact.compare_packages(target, target, set(), [])
+            findings = impact.compare_packages(target, target, set(), {})
         self.assertEqual([(finding.level, finding.evidence) for finding in findings], [("unknown", ["migrations/1.sh"])])
 
     def test_an_unreadable_migration_already_run_is_no_limit(self):
@@ -808,7 +808,7 @@ class Packages(unittest.TestCase):
         self.assertEqual(impact.package_changes(migrations, set()), (expected, {("1785351479.sh",)}))
 
     def test_a_missing_pacman_is_unknown(self):
-        finding = impact.compare_packages(Path("target"), Path("home"), None, [])[0]
+        finding = impact.compare_packages(Path("target"), Path("home"), None, {})[0]
         self.assertEqual((finding.check, finding.level), ("packages", "unknown"))
 
     def test_a_failing_pacman_counts_as_missing(self):
@@ -821,7 +821,7 @@ class Packages(unittest.TestCase):
             target = Path(directory)
             (target / "migrations").mkdir()
             (target / "migrations/1.sh").write_text("omarchy-pkg-drop a\n")
-            finding = impact.compare_packages(target, target, {"a"}, [])[0]
+            finding = impact.compare_packages(target, target, {"a"}, {})[0]
         self.assertEqual((finding.level, finding.evidence), ("attention", ["migrations/1.sh"]))
 
 
@@ -848,7 +848,7 @@ class ReachedFiles(unittest.TestCase):
     def test_the_finding_names_both_files(self):
         self.command("omarchy-tool", "omarchy-pkg-drop a\n")
         (self.tree / "migrations/1.sh").write_text("omarchy-tool\n")
-        finding = impact.compare_packages(self.tree, self.tree, {"a"}, [])[0]
+        finding = impact.compare_packages(self.tree, self.tree, {"a"}, {})[0]
         self.assertEqual(finding.evidence, ["migrations/1.sh", "bin/omarchy-tool"])
         self.assertIn("may remove a", finding.title)
 
@@ -930,7 +930,7 @@ class ReachedFiles(unittest.TestCase):
     def test_an_unknown_in_a_reached_file_names_both_files(self):
         self.command("omarchy-tool", 'omarchy-pkg-drop "$1"\n')
         (self.tree / "migrations/1.sh").write_text("omarchy-tool\n")
-        finding = impact.compare_packages(self.tree, self.tree, set(), [])[0]
+        finding = impact.compare_packages(self.tree, self.tree, set(), {})[0]
         self.assertEqual((finding.level, finding.evidence), ("unknown", ["migrations/1.sh", "bin/omarchy-tool"]))
         self.assertEqual(finding.title, "Couldn't read what bin/omarchy-tool removes, called from migrations/1.sh, so check by hand.")
 
@@ -938,7 +938,7 @@ class ReachedFiles(unittest.TestCase):
         self.command("omarchy-one", 'omarchy-pkg-drop "$1"\n')
         self.command("omarchy-two", 'omarchy-pkg-drop "$1"\n')
         (self.tree / "migrations/1.sh").write_text('omarchy-two\nomarchy-one\nomarchy-pkg-drop "$x"\n')
-        findings = impact.compare_packages(self.tree, self.tree, set(), [])
+        findings = impact.compare_packages(self.tree, self.tree, set(), {})
         self.assertEqual([finding.evidence for finding in findings], [["migrations/1.sh", "bin/omarchy-one", "bin/omarchy-two"]])
         self.assertIn("bin/omarchy-one and bin/omarchy-two remove,", findings[0].title)
 
@@ -971,7 +971,7 @@ class Commands(unittest.TestCase):
         (self.base / "target/bin/omarchy-gone-too").touch()
 
     def findings(self):
-        return impact.compare_commands(self.base / "current", self.base / "target", self.home, [])
+        return impact.compare_commands(self.base / "current", self.base / "target", self.home, {})
 
     def attention(self):
         return titles(self.findings(), "attention")
@@ -1182,7 +1182,7 @@ class Plugins(unittest.TestCase):
             original_find = impact.find_qmllint
             impact.find_qmllint = lambda: ("/bin/true", [])
             self.addCleanup(setattr, impact, "find_qmllint", original_find)
-            findings = impact.compare_plugins(Path("current"), Path("target"), home, [])
+            findings = impact.compare_plugins(Path("current"), Path("target"), home, {})
             notes = titles(findings, "note")
             self.assertEqual(len(notes), 2)
             self.assertIn("1 new qmllint warning, such as a.qml: new", notes[0])
@@ -1194,7 +1194,7 @@ class Plugins(unittest.TestCase):
     def findings_without_qmllint(self, home):
         with mock.patch.object(impact.shutil, "which", return_value=None), \
                 mock.patch.object(impact, "QMLLINT", "/nonexistent/qmllint"):
-            return impact.compare_plugins(Path("current"), Path("target"), home, [])
+            return impact.compare_plugins(Path("current"), Path("target"), home, {})
 
     def test_a_missing_qmllint_is_unknown_when_there_are_plugins(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -1217,7 +1217,7 @@ class Plugins(unittest.TestCase):
             found = [impact.Counter(), impact.Counter({("a.qml", "new"): 2})]
             with mock.patch.object(impact, "lint", side_effect=found), \
                     mock.patch.object(impact, "find_qmllint", return_value=("/bin/true", [])):
-                findings = impact.compare_plugins(Path("current"), Path("target"), home, [])
+                findings = impact.compare_plugins(Path("current"), Path("target"), home, {})
         self.assertIn("2 new qmllint warnings, such as", findings[0].title)
 
 
@@ -1252,7 +1252,7 @@ class Lint(unittest.TestCase):
         return self.checked(str(qmllint))[1]
 
     def checked(self, qmllint):
-        checked = []
+        checked = {}
         with mock.patch.object(impact.shutil, "which", return_value=qmllint), \
                 mock.patch.object(impact, "QMLLINT", str(self.base / "missing")):
             findings = impact.compare_plugins(self.base / "current", self.base / "target", self.home, checked)
@@ -1261,17 +1261,17 @@ class Lint(unittest.TestCase):
     def test_only_linted_plugins_are_counted(self):
         (self.plugin.parent / "gone").symlink_to(self.base / "missing")
         checked, findings = self.checked(str(self.qmllint("exit 0")))
-        self.assertEqual(checked, ["1 plugin linted"])
+        self.assertEqual(checked, {"plugins": {"linted": 1}})
         self.assertEqual([finding.partial for finding in findings if finding.level == "unknown"], [True])
 
     def test_nothing_linted_isnt_counted_and_didnt_run(self):
         checked, findings = self.checked(str(self.qmllint("kill -TERM $$")))
-        self.assertEqual(checked, [])
+        self.assertEqual(checked, {})
         self.assertFalse(findings[0].partial)
 
     def test_no_qmllint_isnt_counted_and_didnt_run(self):
         checked, findings = self.checked(None)
-        self.assertEqual(checked, [])
+        self.assertEqual(checked, {})
         self.assertFalse(findings[0].partial)
 
     def test_reads_real_warnings(self):
@@ -1369,7 +1369,7 @@ class Lint(unittest.TestCase):
         (self.plugin.parent / "gone").symlink_to("nowhere")
         with mock.patch.object(impact.shutil, "which", return_value=None), \
                 mock.patch.object(impact, "QMLLINT", "/nonexistent/qmllint"):
-            findings = impact.compare_plugins(self.base / "current", self.base / "target", self.home, [])
+            findings = impact.compare_plugins(self.base / "current", self.base / "target", self.home, {})
         self.assertEqual(len(titles(findings, "unknown")), 2)
         self.assertIn("qmllint wasn't found", findings[0].title)
         self.assertIn("gone is a broken link", findings[1].title)
@@ -1468,9 +1468,9 @@ class Lint(unittest.TestCase):
             "fi"
         )
         with mock.patch.object(impact.shutil, "which", return_value=str(qmllint)):
-            absolute = impact.compare_plugins(self.base / "current", self.base / "target", self.home, [])
+            absolute = impact.compare_plugins(self.base / "current", self.base / "target", self.home, {})
             with contextlib.chdir(self.base):
-                relative = impact.compare_plugins(Path("current"), Path("target"), self.home, [])
+                relative = impact.compare_plugins(Path("current"), Path("target"), self.home, {})
         self.assertIn("1 new qmllint warning, such as Demo.qml: Palette is gone", absolute[0].title)
         self.assertEqual(relative, absolute)
 
@@ -1504,7 +1504,7 @@ class PickingQmllint(unittest.TestCase):
             return impact.find_qmllint()
 
     def checked(self, on_path, installed=None):
-        checked = []
+        checked = {}
         with mock.patch.object(impact.shutil, "which", return_value=on_path), \
                 mock.patch.object(impact, "QMLLINT", installed or str(self.base / "missing")):
             findings = impact.compare_plugins(self.base, self.base, self.home, checked)
@@ -1521,7 +1521,7 @@ class PickingQmllint(unittest.TestCase):
         older, newer = self.says("qt5", "qmllint 1.0"), self.says("qt6", "qmllint 6.12.0", lint="exit 0")
         self.assertEqual(self.found(older, newer)[0], newer)
         # Linting with the Qt 5 script would fail.
-        self.assertEqual(self.checked(older, newer)[0], ["1 plugin linted"])
+        self.assertEqual(self.checked(older, newer)[0], {"plugins": {"linted": 1}})
 
     def test_qt6_on_path_comes_first(self):
         first, second = self.says("first", "qmllint 6.12.0"), self.says("second", "qmllint 6.4.2")
@@ -1530,7 +1530,7 @@ class PickingQmllint(unittest.TestCase):
     def test_only_qt5_is_unknown_and_names_what_was_found(self):
         older = self.says("qmllint", "qmllint 1.0")
         checked, findings = self.checked(older)
-        self.assertEqual(checked, [])
+        self.assertEqual(checked, {})
         self.assertEqual([finding.level for finding in findings], ["unknown"])
         self.assertFalse(findings[0].partial)
         self.assertEqual(findings[0].evidence, ["~/.config/omarchy/plugins"])
@@ -1544,7 +1544,7 @@ class PickingQmllint(unittest.TestCase):
 
     def test_only_qt5_does_not_matter_without_plugins(self):
         shutil.rmtree(self.home / ".config/omarchy/plugins")
-        self.assertEqual(self.checked(self.says("qmllint", "qmllint 1.0")), (["no plugins"], []))
+        self.assertEqual(self.checked(self.says("qmllint", "qmllint 1.0")), ({"plugins": {"linted": 0}}, []))
 
     def test_one_path_is_named_once(self):
         older = self.says("qmllint", "qmllint 1.0")
@@ -1622,7 +1622,7 @@ class RealQmllint(unittest.TestCase):
 
     def findings(self, current, target):
         with mock.patch.object(impact.shutil, "which", return_value=REAL_QMLLINT):
-            return impact.compare_plugins(current, target, self.home, [])
+            return impact.compare_plugins(current, target, self.home, {})
 
     def test_a_module_the_release_removes_is_a_new_warning(self):
         findings = self.findings(self.base / "current", self.base / "target")
@@ -1880,6 +1880,123 @@ class Program(ProgramCase):
             code, _, err = self.check("--debug")
         self.assertEqual(code, 2)
         self.assertIn("Traceback", err)
+
+
+class Json(ProgramCase):
+    def document(self, *args, **kwargs):
+        code, out, err = self.check("--json", *args, **kwargs)
+        return code, json.loads(out), err
+
+    def test_a_clean_run_is_a_clear_document(self):
+        code, document, err = self.document()
+        self.assertEqual((code, document["result"], err), (0, "clear", ""))
+        self.assertEqual(document["schemaVersion"], 1)
+        self.assertEqual(document["target"], {"name": "target", "prerelease": None})
+        self.assertEqual({check["state"] for check in document["checks"].values()}, {"ran"})
+
+    def test_stdout_holds_the_document_alone_even_when_something_else_prints(self):
+        def stray(*args):
+            print("stray")
+            return []
+
+        with mock.patch.object(impact, "compare_commands", side_effect=stray):
+            code, out, err = self.check("--json")
+        self.assertEqual(json.loads(out)["result"], "clear")
+        self.assertEqual((code, err), (0, "stray\n"))
+
+    def test_a_count_that_wasnt_looked_at_is_null_and_its_check_didnt_run(self):
+        (self.home / ".config/hypr").mkdir(parents=True)
+        (self.home / ".config/hypr/bindings.lua").symlink_to(self.base / "missing.lua")
+        code, document, _ = self.document(packages=None)
+        self.assertEqual((code, document["result"]), (3, "incomplete"))
+        self.assertEqual(document["checks"]["bindings"], {"state": "didNotRun", "checked": {"defaults": 1, "yours": None}})
+        self.assertEqual(document["checks"]["packages"], {"state": "didNotRun", "checked": {"pendingMigrations": None}})
+
+    def test_no_deleted_commands_and_no_plugins_are_counted_as_zero(self):
+        checks = self.document()[1]["checks"]
+        self.assertEqual(checks["commands"]["checked"], {"deletedCommands": 0, "yourFiles": 0})
+        self.assertEqual(checks["plugins"]["checked"], {"linted": 0})
+
+    def test_a_check_that_ran_in_part_says_so(self):
+        (self.base / "target/default/hypr/helpers.lua").write_text("function o.bind_foo(keys) end")
+        code, document, _ = self.document()
+        self.assertEqual((code, document["checks"]["bindings"]["state"]), (3, "ranInPart"))
+
+    def test_a_finding_has_every_field(self):
+        (self.base / "target/migrations/1.sh").write_text("omarchy-pkg-drop a\n")
+        code, document, _ = self.document(packages={"a"})
+        self.assertEqual((code, document["result"]), (1, "attention"))
+        self.assertEqual(document["findings"], [{
+            "check": "packages",
+            "level": "attention",
+            "title": "The update will remove a, which is installed here.",
+            "evidence": ["migrations/1.sh"],
+            "detail": "",
+            "fix": "After the update, run omarchy pkg add a (aur-add for an AUR package).",
+            "partial": False,
+        }])
+
+    def test_all_changes_nothing(self):
+        for tree in ("current", "target"):
+            (self.base / tree / "default/hypr/keys.lua").write_text('o.bind("SUPER + " .. key, "x", "y")')
+        self.assertEqual(self.check("--json", "--all")[1], self.check("--json")[1])
+        self.assertEqual(len(self.document()[1]["findings"]), 1)
+
+    def test_a_crash_is_a_document_with_the_line_from_stderr(self):
+        with mock.patch.object(impact, "compare_commands", side_effect=RuntimeError("broke\nbadly")):
+            code, document, err = self.document()
+        self.assertEqual(code, 2)
+        self.assertEqual(document, {"schemaVersion": 1, "result": "failed", "reason": "Unexpected RuntimeError: broke badly"})
+        self.assertEqual(err, "Unexpected RuntimeError: broke badly\n")
+
+    def test_an_unusable_tree_is_a_document(self):
+        shutil.rmtree(self.base / "target/shell")
+        code, document, err = self.document()
+        self.assertEqual((code, document["result"]), (2, "failed"))
+        self.assertEqual(document["reason"] + "\n", err)
+
+    def test_a_failed_download_is_a_document(self):
+        with mock.patch.object(impact.urllib.request, "urlopen", side_effect=OSError("no network")):
+            code, out, err = self.run_main("v1.2.3", "--json")
+        self.assertEqual((code, json.loads(out)["reason"]), (2, "Couldn't download the release: no network"))
+        self.assertEqual(err, "Couldn't download the release: no network\n")
+
+    def test_progress_on_a_terminal_stays_on_stderr(self):
+        self.terminal = True
+        code, out, err = self.download(io.BytesIO(self.archive()), args=("v1.2.3", "--json"))
+        self.assertEqual((code, json.loads(out)["target"]["name"]), (0, "v1.2.3"))
+        self.assertIn("Downloading v1.2.3", err)
+
+    def bad_usage(self, *args):
+        """What argparse exits with, and prints, for bad usage."""
+        out, err = io.StringIO(), io.StringIO()
+        with mock.patch("sys.argv", ["omaupdateimpact", *args]), contextlib.redirect_stdout(out), \
+                contextlib.redirect_stderr(err), self.assertRaises(SystemExit) as exit:
+            impact.main()
+        return exit.exception.code, out.getvalue(), err.getvalue()
+
+    def test_bad_usage_is_a_document_when_json_was_asked_for(self):
+        for flag in ("--json", "--js"):
+            with self.subTest(flag=flag):
+                code, out, err = self.bad_usage(flag, "--no-such-option")
+                self.assertEqual(code, 2)
+                self.assertEqual(json.loads(out), {
+                    "schemaVersion": 1, "result": "failed", "reason": "Bad usage: unrecognized arguments: --no-such-option",
+                })
+                self.assertIn("error: unrecognized arguments: --no-such-option", err)
+
+    def test_bad_usage_without_json_is_text_only(self):
+        code, out, err = self.bad_usage("--no-such-option")
+        self.assertEqual((code, out), (2, ""))
+        self.assertIn("usage:", err)
+
+    def test_json_is_asked_for_as_argparse_reads_it(self):
+        for argv, wanted in (
+            (["--json"], True), (["--j"], True), (["v1.2.3", "--jso"], True),
+            ([], False), (["-j"], False), (["--"], False), (["--", "--json"], False), (["--jsonx"], False),
+        ):
+            with self.subTest(argv=argv):
+                self.assertEqual(impact.wants_json(argv), wanted)
 
 
 class Bindings(ProgramCase):
@@ -2831,6 +2948,40 @@ class Channels(ProgramCase):
         self.assertEqual(code, 0)
         self.assertIn("Couldn't check for newer releases on other channels. GitHub rejected GITHUB_TOKEN.", out)
         self.assertNotIn("fictional", out)
+
+    def test_up_to_date_is_a_document_with_the_newer_releases(self):
+        self.on_channel("stable", version="1.2.2-1")
+        code, out, err = self.fetch("v1.2.2", "--json", own_tree=True)
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(json.loads(out), {
+            "schemaVersion": 1,
+            "result": "noUpdate",
+            "installed": "1.2.2-1",
+            "channel": "stable",
+            "target": {"name": "v1.2.2", "prerelease": False},
+            "newer": [{"tag": "v2.0.0-rc2", "channel": "rc"}, {"tag": "v1.2.3", "channel": "stable"}],
+            "newerProblem": None,
+        })
+
+    def test_up_to_date_on_the_newest_release_names_no_newer_one(self):
+        self.on_channel("rc", version="2.0.0rc2-1")
+        document = json.loads(self.fetch("--json", own_tree=True)[1])
+        self.assertEqual((document["newer"], document["newerProblem"]), ([], None))
+
+    def test_up_to_date_with_no_listing_says_newer_is_unknown_and_why(self):
+        self.on_channel("stable", version="1.2.3-1")
+        self.listing_error = refused(403, x_ratelimit_remaining="0")
+        code, out, _ = self.fetch("--json", own_tree=True)
+        document = json.loads(out)
+        self.assertEqual((code, document["result"], document["newer"]), (0, "noUpdate", None))
+        self.assertTrue(document["newerProblem"].startswith(
+            "Couldn't check for newer releases on other channels. GitHub's rate limit"
+        ))
+
+    def test_a_channel_without_tags_is_a_document(self):
+        self.on_channel("edge")
+        code, out, err = self.fetch("--json")
+        self.assertEqual((code, json.loads(out)["reason"] + "\n"), (2, err))
 
     def test_a_tree_given_by_hand_is_compared_even_at_the_same_version(self):
         (self.base / "target/migrations/1.sh").write_text("omarchy-pkg-drop a\n")

@@ -379,6 +379,20 @@ its evidence included.
 When there is no update, the document says so and names any newer release on
 another channel. A failure that ends in exit 2 is a document too, with the reason.
 
+`result` names the kind of document and maps to one exit code: `clear`, `noUpdate`,
+`attention`, `failed` or `incomplete`. A count of something that wasn't looked at is
+`null`, as the "Checked" line leaves it out, so it can't read as zero. The text
+report is printed from the same document, so the two can't disagree.
+
+While a run goes, anything printed goes to stderr, so stdout holds the document
+alone. Bad usage is a document too: `--json` is read before argparse, abbreviations
+included, so its error can answer in JSON. So is an old Python. `--help` and
+`--version` print text.
+
+The schema is in `docs/json.md`. Its examples are the command's output on small
+fictional trees, kept as golden files in `tests/fixtures/json`, and a test fails
+when either stops matching. `python3 -m tests.golden` writes them again.
+
 ## Files
 
 - `~/.cache/omaupdateimpact/<tag>`: unpacked releases. `XDG_CACHE_HOME` replaces

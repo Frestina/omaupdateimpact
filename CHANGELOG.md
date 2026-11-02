@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- `--json` prints one document for scripts and the coming bar plugin: what was
+  checked, each check's state, and every finding with its evidence. Every exit code
+  has one. See [docs/json.md](docs/json.md).
+
 ## 0.1.0 (2026-11-02)
 
 The first release.

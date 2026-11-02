@@ -7,14 +7,43 @@ text. See README.md.
 
 import sys
 
+# A breaking change to the --json document bumps this. See docs/json.md.
+SCHEMA_VERSION = 1
+
+
+def wants_json(argv):
+    """Whether --json was asked for, read before argparse so bad usage can answer in JSON too.
+
+    argparse takes an abbreviation, and --json is the only option starting --j.
+    """
+    for arg in argv:
+        if arg == "--":
+            return False
+        if len(arg) > 2 and "--json".startswith(arg):
+            return True
+    return False
+
+
+def failure(reason):
+    """The --json document for a run that ends in exit 2."""
+    return {"schemaVersion": SCHEMA_VERSION, "result": "failed", "reason": reason}
+
+
 # Before the other imports, and this file must still parse on an old Python, or it
 # gets a traceback instead. tarfile's filter= needs 3.11.4.
 if sys.version_info < (3, 11, 4):
     found = ".".join(map(str, sys.version_info[:3]))
-    print("omaupdateimpact needs Python 3.11.4 or newer, and this is " + found + ".", file=sys.stderr)
+    reason = "omaupdateimpact needs Python 3.11.4 or newer, and this is " + found + "."
+    print(reason, file=sys.stderr)
+    if wants_json(sys.argv[1:]):
+        import json
+
+        print(json.dumps(failure(reason), indent=2))
     sys.exit(2)
 
 import argparse
+import contextlib
+import dataclasses
 import gzip
 import http.client
 import json
@@ -55,6 +84,16 @@ QMLLINT = "/usr/lib/qt6/bin/qmllint"
 QMLLINT_VERSION = re.compile(r"qmllint (\d{1,3})\.[\d.]+", re.ASCII)
 LINT_TIMEOUT = 60
 ATTENTION, NOTE, UNKNOWN = "attention", "note", "unknown"
+# Each check, and what it counts for the "Checked" line.
+CHECKS = {
+    "bindings": ("defaults", "yours"),
+    "packages": ("pendingMigrations",),
+    "commands": ("deletedCommands", "yourFiles"),
+    "plugins": ("linted",),
+}
+RAN, RAN_IN_PART, DIDNT_RUN = "ran", "ranInPart", "didNotRun"
+# What a run came to, and its exit code.
+RESULTS = {"clear": 0, "noUpdate": 0, "attention": 1, "failed": 2, "incomplete": 3}
 DOWNLOAD_ERRORS = (OSError, EOFError, ValueError, zlib.error, tarfile.TarError, http.client.HTTPException)
 VERSION = re.compile(r"(?:\d+:)?v?(\d+)\.(\d+)\.(\d+)(?:-?rc(\d+))?(?:-\d+)?")
 TAG = re.compile(r"v\d+\.\d+\.\d+(?:-rc\d+)?", re.ASCII)
@@ -906,7 +945,7 @@ def compare_packages(target, home, installed, checked):
     dropped, unread = package_changes(target / "migrations", already_run)
     read = sum(p.name not in already_run for p in (target / "migrations").glob("*.sh")) - len(unread)
     if read or not unread:
-        checked.append(counted(read, "pending migration"))
+        checked["packages"] = {"pendingMigrations": read}
     findings = []
     for package in sorted(set(dropped) & installed):
         conditional, migration, *other = dropped[package]
@@ -1008,8 +1047,9 @@ def shipped_copy(data, root, shipped):
 def compare_commands(current, target, home, checked):
     removed = {p.name for p in (current / "bin").glob("omarchy-*")}
     removed -= {p.name for p in (target / "bin").glob("omarchy-*")}
+    checked["commands"] = {"deletedCommands": len(removed)}
     if not removed:
-        checked.append("no deleted commands")
+        checked["commands"]["yourFiles"] = 0
         return []
     pattern = re.compile(r"(?<![\w-])(" + "|".join(map(re.escape, sorted(removed))) + r")(?![\w-])")
     shipped = shipped_files(current)
@@ -1031,7 +1071,7 @@ def compare_commands(current, target, home, checked):
         original = shipped_copy(data, current, shipped) if found else None
         calls.extend((str(path), command, numbers, original) for command, numbers in found.items())
     if read or not unread:
-        checked.append(f"{read} of your files for {counted(len(removed), 'deleted command')}")
+        checked["commands"]["yourFiles"] = read
     findings = []
     for path, command, numbers, original in sorted(calls, key=lambda call: call[:2]):
         shown = path.replace(str(home), "~", 1)
@@ -1139,7 +1179,7 @@ def compare_plugins(current, target, home, checked):
         title = f"{shown} couldn't be read, so plugins weren't linted."
         return [Finding("plugins", UNKNOWN, title, [shown], detail=f"{reason}.")]
     if not installed:
-        checked.append("no plugins")
+        checked["plugins"] = {"linted": 0}
         return []
     findings = [
         Finding("plugins", UNKNOWN, f"{p.name} is a broken link, so it wasn't linted.", [f"{shown}/{p.name}"])
@@ -1173,7 +1213,7 @@ def compare_plugins(current, target, home, checked):
                 [f"{shown}/{plugin.name}/{sample[0]}"],
             ))
     if linted:
-        checked.append(f"{counted(linted, 'plugin')} linted")
+        checked["plugins"] = {"linted": linted}
         for finding in findings:
             finding.partial = finding.level == UNKNOWN
         findings.append(Finding(
@@ -1331,23 +1371,52 @@ def installed_channel(version):
     return "dev" if version.startswith("dev") else ask("omarchy-version-channel")
 
 
-def described(name, channel):
+def described(target, channel):
     kind = {True: "prerelease", False: "not a prerelease", None: "can't tell if it's a prerelease"}
-    return f"{name} ({channel} channel, {kind[is_prerelease(name)]})"
+    return f"{target['name']} ({channel} channel, {kind[target['prerelease']]})"
 
 
-def report_no_update(version, tag, channel):
-    print(f"Omarchy {version} is already {described(tag, channel)}. There is no update.")
+def document(result, version, channel, name, **rest):
+    """The --json document about a release. The text report is printed from it too."""
+    return {
+        "schemaVersion": SCHEMA_VERSION,
+        "result": result,
+        "installed": version,
+        "channel": channel,
+        "target": {"name": name, "prerelease": is_prerelease(name)},
+        **rest,
+    }
+
+
+def no_update(version, tag, channel):
+    """The release is already installed. Any newer one is on another channel."""
     try:
-        newer = newer_releases(version)
+        newer = [{"tag": t, "channel": "rc" if is_prerelease(t) else "stable"} for t in newer_releases(version)]
     except DOWNLOAD_ERRORS as error:
         reason = f" {error}" if isinstance(error, (RateLimited, TokenRejected)) else ""
-        print(f"Couldn't check for newer releases on other channels.{reason}")
-        return 0
-    for release in newer:
-        name = "rc" if is_prerelease(release) else "stable"
-        print(f"Newer on the {name} channel: {release}. To check it: omaupdateimpact {release}")
-    return 0
+        problem = f"Couldn't check for newer releases on other channels.{reason}"
+        return document("noUpdate", version, channel, tag, newer=None, newerProblem=problem)
+    return document("noUpdate", version, channel, tag, newer=newer, newerProblem=None)
+
+
+def check_states(findings):
+    """Whether each check ran, ran in part or didn't run. Not running outranks running in part."""
+    unknown = [finding for finding in findings if finding.level == UNKNOWN]
+    not_run = {finding.check for finding in unknown if not finding.partial}
+    in_part = {finding.check for finding in unknown if finding.partial}
+    return {check: DIDNT_RUN if check in not_run else RAN_IN_PART if check in in_part else RAN for check in CHECKS}
+
+
+def compared(version, channel, name, checked, findings):
+    """The document for a comparison. A count that wasn't looked at is None, so it can't read as zero."""
+    levels = {finding.level for finding in findings}
+    result = "attention" if ATTENTION in levels else "incomplete" if UNKNOWN in levels else "clear"
+    states = check_states(findings)
+    checks = {
+        check: {"state": states[check], "checked": {count: checked.get(check, {}).get(count) for count in counts}}
+        for check, counts in CHECKS.items()
+    }
+    return document(result, version, channel, name, checks=checks, findings=findings)
 
 
 def counted(number, noun):
@@ -1370,6 +1439,26 @@ def wrapped(text, first="", rest=""):
     return filled.replace(KEPT_SPACE, " ")
 
 
+def checked_line(checks):
+    """The "Checked" line. A count of None wasn't looked at, so it isn't listed."""
+    bindings, packages, commands, plugins = (checks[check]["checked"] for check in CHECKS)
+    parts = [counted(bindings["defaults"], "default binding")]
+    if bindings["yours"] is not None:
+        parts.append(f"{bindings['yours']} of yours")
+    if packages["pendingMigrations"] is not None:
+        parts.append(counted(packages["pendingMigrations"], "pending migration"))
+    if commands["deletedCommands"] == 0:
+        parts.append("no deleted commands")
+    elif commands["yourFiles"] is not None:
+        deleted = counted(commands["deletedCommands"], "deleted command")
+        parts.append(f"{commands['yourFiles']} of your files for {deleted}")
+    if plugins["linted"] == 0:
+        parts.append("no plugins")
+    elif plugins["linted"] is not None:
+        parts.append(f"{counted(plugins['linted'], 'plugin')} linted")
+    return wrapped(f"Checked {', '.join(parts)}.")
+
+
 def print_section(title, findings, level, colour):
     found = [finding for finding in findings if finding.level == level]
     if found:
@@ -1381,28 +1470,62 @@ def print_section(title, findings, level, colour):
                 print(wrapped(finding.fix, "    Fix: ", " " * 9).replace("Fix:", painted("Fix:", GREEN), 1))
 
 
-def print_closing(findings):
-    levels = {finding.level for finding in findings}
-    unknown = [finding for finding in findings if finding.level == UNKNOWN]
-    not_run = {finding.check for finding in unknown if not finding.partial}
-    in_part = {finding.check for finding in unknown if finding.partial} - not_run
+def print_closing(document):
+    states = {check: value["state"] for check, value in document["checks"].items()}
+    not_run = sorted(check for check, state in states.items() if state == DIDNT_RUN)
+    in_part = sorted(check for check, state in states.items() if state == RAN_IN_PART)
     lines = []
     if not_run:
-        lines.append(f"These checks didn't run: {', '.join(sorted(not_run))}.")
+        lines.append(f"These checks didn't run: {', '.join(not_run)}.")
     if in_part:
-        lines.append(f"These checks ran in part: {', '.join(sorted(in_part))}.")
+        lines.append(f"These checks ran in part: {', '.join(in_part)}.")
     if lines:
         print(f"\n{painted(' '.join(lines), YELLOW)}")
-    elif ATTENTION not in levels:
+    elif document["result"] == "clear":
         print(f"\n{painted('Nothing found that needs attention.', GREEN)}")
 
 
+def print_report(document, everything):
+    findings = document["findings"]
+    print(f"Omarchy {document['installed']} -> {described(document['target'], document['channel'])}. Nothing was changed.")
+    print(checked_line(document["checks"]))
+    print_section("Needs attention", findings, ATTENTION, RED)
+    notes = sum(finding.level == NOTE for finding in findings)
+    if everything:
+        print_section("Worth knowing", findings, NOTE, BOLD)
+    elif notes:
+        print(f"\n{painted('Worth knowing', BOLD)}: {counted(notes, 'note')}. Add --all to see them.")
+    print_section("Limits of this check", findings, UNKNOWN, YELLOW)
+    print_closing(document)
+
+
+def print_no_update(document):
+    already = described(document["target"], document["channel"])
+    print(f"Omarchy {document['installed']} is already {already}. There is no update.")
+    if document["newerProblem"]:
+        print(document["newerProblem"])
+    for release in document["newer"] or []:
+        tag = release["tag"]
+        print(f"Newer on the {release['channel']} channel: {tag}. To check it: omaupdateimpact {tag}")
+
+
+def print_document(document, options):
+    """Print a document as JSON, or as text. A failure has already said why on stderr."""
+    if options.json:
+        print(json.dumps(document, indent=2, default=dataclasses.asdict))
+    elif document["result"] == "noUpdate":
+        print_no_update(document)
+    elif document["result"] != "failed":
+        print_report(document, options.all)
+
+
 def fail(what, error, debug):
-    """Explain a failure on one line, with the traceback under --debug, and exit 2."""
+    """Explain a failure on one line, with the traceback under --debug, and give its document."""
     if debug:
         traceback.print_exception(error)
-    print(f"{what}: {' '.join(str(error).split())}", file=sys.stderr)
-    return 2
+    reason = f"{what}: {' '.join(str(error).split())}"
+    print(reason, file=sys.stderr)
+    return failure(reason)
 
 
 def run(options):
@@ -1423,7 +1546,7 @@ def run(options):
             tag = tag or channel_tag(channel)
             installed, wanted = version_key(version), version_key(tag)
             if own_tree and installed and installed == wanted:
-                return report_no_update(version, tag, channel)
+                return no_update(version, tag, channel)
             target = fetch_release(tag, cache)
         except DOWNLOAD_ERRORS as error:
             return fail("Couldn't download the release", error, options.debug)
@@ -1433,9 +1556,9 @@ def run(options):
     current_defaults, target_defaults = parse_defaults(options.root, "installed"), parse_defaults(target, "release")
 
     # Only what was really looked at goes in here, so a check that didn't run isn't listed.
-    checked = [counted(len(target_defaults.binds), "default binding")]
+    checked = {"bindings": {"defaults": len(target_defaults.binds)}}
     if not unreadable:
-        checked.append(f"{len(user.binds)} of yours")
+        checked["bindings"]["yours"] = len(user.binds)
     findings = [
         *unreadable,
         *compare_bindings(current_defaults, target_defaults, user),
@@ -1443,23 +1566,20 @@ def run(options):
         *compare_commands(options.root, target, options.home, checked),
         *compare_plugins(options.root, target, options.home, checked),
     ]
+    return compared(version, channel, tag or target.name, checked, findings)
 
-    print(f"Omarchy {version} -> {described(tag or target.name, channel)}. Nothing was changed.")
-    print(wrapped(f"Checked {', '.join(checked)}."))
-    print_section("Needs attention", findings, ATTENTION, RED)
-    notes = sum(finding.level == NOTE for finding in findings)
-    if options.all:
-        print_section("Worth knowing", findings, NOTE, BOLD)
-    elif notes:
-        print(f"\n{painted('Worth knowing', BOLD)}: {counted(notes, 'note')}. Add --all to see them.")
-    print_section("Limits of this check", findings, UNKNOWN, YELLOW)
-    print_closing(findings)
-    levels = {finding.level for finding in findings}
-    return 1 if ATTENTION in levels else 3 if UNKNOWN in levels else 0
+
+class Parser(argparse.ArgumentParser):
+    """Bad usage gives a --json document too, when one was asked for."""
+
+    def error(self, message):
+        if wants_json(sys.argv[1:]):
+            print(json.dumps(failure(f"Bad usage: {message}"), indent=2))
+        super().error(message)
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Check your Omarchy setup against a release.")
+    parser = Parser(description="Check your Omarchy setup against a release.")
     parser.add_argument("tag", nargs="?", help="release tag (default: what your channel would deliver)")
     parser.add_argument("--version", action="version", version=f"omaupdateimpact {__version__}")
     parser.add_argument(
@@ -1474,16 +1594,23 @@ def main():
     )
     parser.add_argument("--home", type=Path, help="read your config from this folder (default: your home)")
     parser.add_argument("--all", action="store_true", help="show every note, not only how many there are")
+    parser.add_argument("--json", action="store_true", help="print one JSON document instead (see docs/json.md)")
     parser.add_argument("--debug", action="store_true", help="show the traceback when something fails")
     options = parser.parse_args()
     try:
-        return run(options)
+        # Anything else printed goes to stderr, so stdout holds the document alone.
+        with contextlib.redirect_stdout(sys.stderr) if options.json else contextlib.nullcontext():
+            document = run(options)
+        print_document(document, options)
+        return RESULTS[document["result"]]
     except UnusableTree as error:
-        return fail("Can't compare", error, options.debug)
+        document = fail("Can't compare", error, options.debug)
     except NoRelease as error:
-        return fail("Can't pick a release", error, options.debug)
+        document = fail("Can't pick a release", error, options.debug)
     except Exception as error:  # noqa: BLE001
-        return fail(f"Unexpected {type(error).__name__}", error, options.debug)
+        document = fail(f"Unexpected {type(error).__name__}", error, options.debug)
+    print_document(document, options)
+    return RESULTS["failed"]
 
 
 if __name__ == "__main__":

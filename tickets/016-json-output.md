@@ -28,9 +28,9 @@ Give the plugin, and anyone else, a stable way to read a result.
 
 ## Done when
 
-- [ ] Output parses for every exit code, with tests.
-- [ ] Nothing but JSON reaches stdout, with a test.
-- [ ] The document holds what the text report shows: what was checked, each check's
+- [x] Output parses for every exit code, with tests.
+- [x] Nothing but JSON reaches stdout, with a test.
+- [x] The document holds what the text report shows: what was checked, each check's
       state and every finding with its evidence, with a test.
-- [ ] The schema doc matches a golden file that a test checks.
-- [ ] `tests/run` passes.
+- [x] The schema doc matches a golden file that a test checks.
+- [x] `tests/run` passes.
