@@ -38,4 +38,4 @@ shim. CI has no `mise`, so it passes.
 - [x] A `python3` first on the inherited `PATH` that only prints an error doesn't
       change the install tests, with a test that fails without the fix.
 - [x] `tests/run` passes on the owner's machine with `mise`'s shims on `PATH`.
-- [ ] CI passes on all three jobs.
+- [x] CI passes on all three jobs.
