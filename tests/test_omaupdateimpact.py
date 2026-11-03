@@ -1237,6 +1237,102 @@ class Edits(unittest.TestCase):
     def test_a_function_that_runs_its_arguments_without_sudo_isnt_sudo(self):
         self.assertEqual(len(self.unknown('run() { "$@"; }\nrun rm -f "$1"\n')), 1)
 
+    def test_an_argument_holds_what_the_call_passes(self):
+        self.write(".config/app/app.conf")
+        fix = 'fix() {\n  local config="$1"\n  [[ -f $config ]] || return 0\n  sed -i s/a/b/ "$config"\n}\n'
+        for call in ('fix "$HOME/.config/app/app.conf"', "fix ~/.config/app/app.conf", 'file=~/.config/app/app.conf\nfix "$file"'):
+            with self.subTest(call):
+                self.assertEqual(titles(self.findings(fix + call + "\n"), "note"), [
+                    "migrations/1.sh, line 4, looks like it edits ~/.config/app/app.conf, which differs from Omarchy's default.",
+                ])
+        self.write(".config/app/app.conf", "colour = blue\n")
+        self.assertEqual(self.findings(fix + "fix ~/.config/app/app.conf\n"), [])
+
+    def test_each_argument_and_each_call_are_followed(self):
+        self.write(".config/app/app.conf")
+        self.write(".config/other.conf")
+        text = (
+            'put() { echo "$2" >>"$1"; }\nput ~/.config/app/app.conf x\nput ~/.config/missing.conf y\n'
+            'gone() { rm -f "$@"; }\ngone ~/.config/other.conf\n'
+        )
+        self.assertEqual(self.notes(text), [
+            "migrations/1.sh, line 1, looks like it edits ~/.config/app/app.conf, which differs from Omarchy's default.",
+            "migrations/1.sh, line 4, looks like it removes ~/.config/other.conf, which Omarchy has no default for.",
+        ])
+
+    def test_an_argument_passed_on_to_another_function_is_followed(self):
+        self.write(".config/app/app.conf")
+        text = (
+            'replace() {\n  local target="$1"\n  cat "$tmp" >"$target"\n}\n'
+            'fix() {\n  local file="$1"\n  [[ -f $file ]] || return 0\n  replace "$file" old new\n}\n'
+            'for path in ~/.config/app/app.conf ~/.config/missing.conf; do\n  fix "$path"\ndone\n'
+        )
+        self.assertEqual(self.notes(text), [
+            "migrations/1.sh, line 3, looks like it edits ~/.config/app/app.conf, which differs from Omarchy's default.",
+        ])
+
+    def test_an_argument_only_known_when_it_runs_is_unknown(self):
+        fix = 'fix() {\n  sed -i s/a/b/ "$1"\n}\n'
+        for call in ('fix "$(pick)"', "read -r file\nfix \"$file\"", 'fix "$1"', "fix", ""):
+            with self.subTest(call):
+                self.assertEqual(self.unknown(fix + call + "\n"), [
+                    "Couldn't tell which files migrations/1.sh writes on line 2, so check it by hand.",
+                ])
+        self.assertEqual(len(self.unknown(fix + "fix /etc/app.conf\nfix \"$(pick)\"\n")), 1)
+
+    def test_an_argument_a_call_leaves_out_takes_its_default(self):
+        self.write(".config/app/app.conf")
+        text = 'fix() { sed -i s/a/b/ "${2:-$HOME/.config/app/app.conf}"; }\nfix x\n'
+        self.assertEqual(len(self.notes(text)), 1)
+
+    def test_a_definition_isnt_a_call(self):
+        for text in ('fix() {\n  rm -f "$1"\n}\n', 'function fix {\n  rm -f "$1"\n}\n', 'function fix() {\n  rm -f "$1"\n}\n'):
+            with self.subTest(text):
+                self.assertEqual(len(self.unknown(text)), 1)
+
+    def test_after_a_shift_arguments_are_unknown(self):
+        self.write(".config/app/app.conf")
+        before = 'fix() {\n  local file=$1\n  shift\n  rm -f "$file"\n}\nfix ~/.config/app/app.conf x\n'
+        self.assertEqual(len(self.notes(before)), 1)
+        after = 'fix() {\n  shift\n  rm -f "$1"\n}\nfix x ~/.config/app/app.conf\n'
+        self.assertEqual(len(self.unknown(after)), 1)
+        looped = 'fix() {\n  while (( $# )); do\n    rm -f "$1"\n    shift\n  done\n}\nfix ~/.config/app/app.conf x\n'
+        self.assertEqual(len(self.unknown(looped)), 1)
+        reset = 'fix() {\n  set -- "$HOME/.x"\n  rm -f "$1"\n}\nfix ~/.config/app/app.conf\n'
+        self.assertEqual(len(self.unknown(reset)), 1)
+
+    def test_a_function_that_never_settles_is_unknown(self):
+        text = 'deeper() {\n  rm -f "$1"\n  deeper "$1/x"\n}\ndeeper ~/.config\n'
+        self.assertEqual(len(self.unknown(text)), 1)
+
+    def test_a_pattern_is_cut_from_a_known_value(self):
+        self.write(".config/app/app.conf")
+        for word in (
+            "${name##*/}", "${long#/usr/share/}", "${backup%.bak}", "${backup%%.*}.conf",
+            '${dir#"$prefix"/}.conf', "${missing%x}app.conf",
+        ):
+            text = (
+                "name=/usr/share/x/app.conf\nlong=/usr/share/app.conf\nbackup=app.conf.bak\n"
+                f'dir=/usr/share/app\nprefix=/usr/share\nmissing=\nrm -f "$HOME/.config/app/{word}"\n'
+            )
+            with self.subTest(word):
+                self.assertEqual(self.notes(text), [
+                    "migrations/1.sh, line 7, looks like it removes ~/.config/app/app.conf, which differs from Omarchy's default.",
+                ])
+
+    def test_the_shortest_and_longest_matches_differ(self):
+        self.assertEqual(impact.cut("a/b/c", "#", "*/"), "b/c")
+        self.assertEqual(impact.cut("a/b/c", "##", "*/"), "c")
+        self.assertEqual(impact.cut("a.b.c", "%", ".*"), "a.b")
+        self.assertEqual(impact.cut("a.b.c", "%%", ".*"), "a")
+        self.assertEqual(impact.cut("abc", "#", "x"), "abc")
+
+    def test_a_pattern_it_cant_read_is_unknown(self):
+        for word in ("${name##$(pick)}", "${name#$prefix}", '${name##"*"}', "${name/x/y}", "${name:1}"):
+            with self.subTest(word):
+                text = f'name=/usr/share/x/app.conf\nrm -f "$HOME/.config/app/{word}"\n'
+                self.assertEqual(len(self.unknown(text)), 1)
+
     def test_a_command_that_only_prints_writes_nothing(self):
         self.write(".config/app/app.conf")
         self.assertEqual(self.findings("echo rm -f ~/.config/app/app.conf\ncommand -v rm\n"), [])

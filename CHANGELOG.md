@@ -7,7 +7,8 @@
   has one. See [docs/json.md](docs/json.md).
 - A new check reads the migrations you haven't run for files of yours they look like
   they edit or remove. A file that is still Omarchy's default says nothing. The rest
-  are notes, and a path it can't place is a limit.
+  are notes, and a path it can't place is a limit. A function's arguments are
+  followed from its calls, and `${name##*/}` and its like are read.
 
 ## 0.1.0 (2026-11-02)
 

@@ -152,9 +152,9 @@ With `--json`, every exit code comes with a document. See [docs/json.md](docs/js
 - A removal is "will remove" unless it sits inside an `if`, a loop, a `case`, a
   function, or after `&&` or `||`. A migration that exits early, as with
   `x || exit 0`, still says "will remove".
-- A migration's writes are read as text too. A path only known when it runs, such
-  as `"$1"`, is reported as a limit, unless `sudo` writes it, which is taken to be a
-  system file. So is `find` in your files with `-delete`, or with `-exec` running a
+- A migration's writes are read as text too. A function's `"$1"` holds what its
+  calls pass. A path only known when it runs, such as a `$(...)` or an array, is
+  reported as a limit, unless `sudo` writes it, which is taken to be a system file. So is `find` in your files with `-delete`, or with `-exec` running a
   writer. Other writers, such as `xargs`, `awk -i inplace`, `perl -i`, `rsync`,
   `truncate` or a `bash -c` string, aren't read, and neither is a write made by a
   release command, such as `omarchy-bar`. A loop over files may change only some

@@ -307,15 +307,29 @@ A path is read as bash would expand it, without running anything:
 - `~`, `$HOME` and the variables the migration sets are followed, wherever it sets
   them. A variable set in more than one place holds each value, and a `for` loop's
   variable holds each word of its list.
+- In a function the migration defines, `$1`, `$2` and `"$@"` hold what each call
+  passes, read as any other word is. A function called more than once holds each
+  call's values, as a variable set in more than one place does. An argument a call
+  leaves out is empty, and past a `"$@"` in a call each later argument can hold any
+  of them. Arguments pass on through calls to other functions.
+- After a function's first `shift` or `set`, its arguments are only known when it
+  runs, and so they are anywhere in it when one of those is in a loop. So are the
+  arguments of a function nothing calls, and of one whose values never settle, as
+  when it calls itself with a longer path each time.
 - A variable the migration doesn't set takes its default, so
   `${XDG_CONFIG_HOME:-$HOME/.config}` is `~/.config`. `$OMARCHY_PATH` is the release.
+- `${name#pattern}`, `${name##pattern}`, `${name%pattern}` and `${name%%pattern}`
+  cut what the pattern matches from a value that is known, as bash does. v4.5.0-rc2's
+  1786719479 links to `skills/${name##*/}`. A pattern with both quotes and a `*`, `?`
+  or `[` is only known when it runs, as a quoted `*` matches only itself.
 - `{a,b}` lists are spelled out, and wildcards are matched in your home.
 - `mktemp` makes a file by its template, or one that isn't yours when it has none.
   `realpath` and `readlink -f` name the file they're given.
 
-A path only known when the migration runs, such as `$1`, a `$(...)` or a variable
-from `read`, is `unknown`, once per migration, with its lines. The title lists up
-to three lines and counts more. So is a relative
+A path only known when the migration runs, such as `$1` outside a function, a
+`$(...)`, an array or a variable from `read`, is `unknown`, once per migration, with
+its lines. v4.5.0-rc2's 1791723398 passes `${files[0]}`, an array, so its write is
+`unknown`. The title lists up to three lines and counts more. So is a relative
 path, as it depends on where the migration runs. A path that is known as far as a
 folder outside your home, such as `/etc/$name`, isn't, and neither is one written
 under `sudo`, which is for system files. v4.5.0-rc2 removes files that `find` lists

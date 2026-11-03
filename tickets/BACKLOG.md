@@ -50,6 +50,19 @@ Paths already ruled out are not here; they are under
   `omarchy-bar put`, `omarchy-mise-install` or `mise settings unset` editing your
   files isn't seen. The packages check already follows `bin` commands; the same walk
   could look for writes, with the "may" wording, as their arguments aren't followed.
+- **Arrays in migration writes.** The reader takes `files=(a b)` as only known when
+  it runs, so v4.5.0-rc2's 1791723398 stays `unknown`. It installs `${files[0]}` and
+  `${files[1]}` through a function. With 1791470456, whose path comes from a
+  `$(...)`, it keeps v4.5.0 at exit 3 wherever it is pending. Reading a literal array
+  means changing the tokenizer the packages check shares, so it needs its own ticket.
+- **Wildcards in the release.** v4.5.0-rc2's 1786719479 and 1787843905 link each
+  folder in `$OMARCHY_PATH/default/agents/skills`. The wildcard is matched in your
+  home, so the note names every file in your skills folder, not only Omarchy's
+  skills, and it can't tell a link that already points there. Matching it in the
+  release would name the links one by one.
+- **One note per wrapper.** v4.5.0-rc2's 1791382872 removes the `~/.local/bin`
+  wrappers of 20 tools, but only those still as Omarchy wrote them. Each one you
+  have is its own note. Watch whether that is too many.
 - **Loops that edit only some files.** v4.5.0-rc2's 1791696584 and 1791875754 go
   through every launcher and change only web apps. The note names every launcher
   that isn't Omarchy's, so on a real machine it named three that aren't web apps.

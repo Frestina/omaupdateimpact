@@ -39,11 +39,11 @@ the write becomes a note or nothing.
 
 ## Done when
 
-- [ ] A write to `"$1"` in a function called with a changed file of yours gives a
+- [x] A write to `"$1"` in a function called with a changed file of yours gives a
       note, and one called with an unchanged default says nothing. With tests.
-- [ ] A call with an argument only known when it runs is still `unknown`, with a
+- [x] A call with an argument only known when it runs is still `unknown`, with a
       test.
-- [ ] `${name##*/}` and its three neighbours are read, with tests.
+- [x] `${name##*/}` and its three neighbours are read, with tests.
 - [ ] Run over v4.5.0-rc2's and v4.5.0-rc3's migrations, the unknowns left have
       been read, and each is a path that is only known when the migration runs.
-- [ ] `tests/run` passes, with `ruff` run, from a scratch venv if it isn't installed.
+- [x] `tests/run` passes, with `ruff` run, from a scratch venv if it isn't installed.

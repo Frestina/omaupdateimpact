@@ -44,6 +44,7 @@ if sys.version_info < (3, 11, 4):
 import argparse
 import contextlib
 import dataclasses
+import fnmatch
 import glob
 import gzip
 import http.client
@@ -60,7 +61,7 @@ import traceback
 import urllib.error
 import urllib.request
 import zlib
-from collections import Counter
+from collections import ChainMap, Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -128,9 +129,11 @@ RUNNERS = {
 }
 ASSIGNMENT = re.compile(r"[A-Za-z_]\w*\+?=")
 NAME = re.compile(r"[A-Za-z_]\w*")
-PARAMETER = re.compile(r"([A-Za-z_]\w*)(?::?([-=])(.*))?", re.DOTALL)
+PARAMETER = re.compile(r"([A-Za-z_]\w*|\d+|@)(?:(:?[-=]|##?|%%?)(.*))?", re.DOTALL)
+UNBRACED = re.compile(r"[A-Za-z_]\w*|[\d@]")
 # A word stands for no more than this many paths, so a loop over loops stays small.
 MOST_EXPANSIONS = 64
+MOST_PASSES = 16
 # Where Omarchy keeps the default of a file in your home: the folder there, and in a tree.
 DEFAULT_FOLDERS = [(".config", "config"), (".local/share/applications", "applications")]
 # Omarchy's state and caches, which aren't files you change.
@@ -1049,24 +1052,57 @@ def braces(word):
     return [word]
 
 
+def cut(text, operator, pattern):
+    """text without the shortest start (#), longest start (##), shortest end (%) or longest end (%%) that pattern matches."""
+    if operator[0] == "#":
+        ends = range(len(text) + 1) if operator == "#" else range(len(text), -1, -1)
+        return next((text[end:] for end in ends if fnmatch.fnmatchcase(text[:end], pattern)), text)
+    starts = range(len(text), -1, -1) if operator == "%" else range(len(text) + 1)
+    return next((text[:start] for start in starts if fnmatch.fnmatchcase(text[start:], pattern)), text)
+
+
+def stripped(values, operator, pattern, variables, home):
+    """What values are with what pattern matches cut off, as ${name#pattern} and its like cut it."""
+    try:
+        text, inner, end = shell_word(pattern, 0)
+    except ShellUnread:
+        return [("", False)]
+    patterns = expansions(text, variables, home) if end == len(pattern) and not inner else [("", False)]
+    # A quoted * matches only itself, which fnmatch can't tell from one that matches anything.
+    quoted = re.search(r"[\"'\\]", pattern) is not None
+    if any(not whole or (quoted and re.search(r"[*?[]", glob_text)) for glob_text, whole in patterns):
+        return [("", False)]
+    found = [(cut(text, operator, glob_text), True) if whole else ("", False) for text, whole in values for glob_text, _ in patterns]
+    return list(dict.fromkeys(found))
+
+
 def parameter(inner, variables, home):
-    """What ${inner} can stand for. Anything but a name, with or without a default, is only known when it runs."""
+    """What ${inner} can stand for.
+
+    A name or a function's argument can have a default, or a pattern to cut off.
+    Anything else is only known when it runs.
+    """
     found = PARAMETER.fullmatch(inner)
     if not found:
         return [("", False)]
-    name, operator, default = found.groups()
+    name, operator, rest = found.groups()
     if name in variables:
         values = variables[name]
     elif name == "HOME":
         values = [(str(home), True)]
     elif name == "OMARCHY_PATH":
         values = [(INSTALLED, True)]
+    elif not NAME.fullmatch(name):
+        # Arguments are only known inside a function the script calls: see script_values.
+        return [("", False)]
     else:
         # One the script doesn't set is taken as unset, so its default holds.
-        values = [("", bool(operator))]
+        values = [("", operator is not None and operator[-1] in "-=")]
     if not operator:
         return values
-    fallback = expansions(default, variables, home)
+    if operator[-1] not in "-=":
+        return stripped(values, operator, rest, variables, home)
+    fallback = expansions(rest, variables, home)
     return list(dict.fromkeys(part for value in values for part in (fallback if value == ("", True) else [value])))
 
 
@@ -1083,8 +1119,8 @@ def expanded(word, variables, home):
             end = brace_end(word, index + 2)
             parts, index = parameter(word[index + 2 : end - 1], variables, home), end
         else:
-            # $1, $@ and what shell_word left of a $(...) are only known when it runs.
-            name = NAME.match(word, index + 1)
+            # $1 and $@ are a function's arguments. $#, $? and what shell_word left of a $(...) are only known when it runs.
+            name = UNBRACED.match(word, index + 1)
             parts, index = (parameter(name.group(), variables, home), name.end()) if name else ([("", False)], len(word))
         values = list(dict.fromkeys(
             (text + more, whole) if known else (text, known) for text, known in values for more, whole in parts
@@ -1122,20 +1158,26 @@ def substituted(words, variables, home):
     return None
 
 
-def script_variables(commands, home):
-    """What each variable a script sets can hold, from every place that sets it, in order."""
+def held_too(held, values):
+    held.extend(value for value in values if value not in held)
+
+
+def script_variables(commands, home, arguments):
+    """What each variable a script sets can hold, from every place that sets it, in order.
+
+    arguments gives what a command's $1, $2 and "$@" hold, if they are known.
+    """
     variables, previous = {}, []
 
     def assign(name, values):
-        held = variables.setdefault(name, [])
-        held.extend(value for value in values if value not in held)
+        held_too(variables.setdefault(name, []), values)
 
     for words in commands:
-        head = words[0]
+        head, known = words[0], ChainMap(arguments(words), variables)
         if head in ("for", "select") and len(words) > 1 and NAME.fullmatch(words[1]):
             listed = words[3:] if words[2:3] == ["in"] else None
             assign(words[1], [("", False)] if listed is None else [
-                value for word in listed for value in expansions(word, variables, home)
+                value for word in listed for value in expansions(word, known, home)
             ])
         elif head in ("read", "mapfile", "readarray"):
             for name in words[1:]:
@@ -1152,8 +1194,8 @@ def script_variables(commands, home):
                         assign(name[:-1], [("", False)])
                     else:
                         # A $(...) comes just before the command holding it.
-                        path = substituted(previous, variables, home) if value == "$" else None
-                        assign(name, expansions(value, variables, home) if path is None else path)
+                        path = substituted(previous, ChainMap(arguments(previous), variables), home) if value == "$" else None
+                        assign(name, expansions(value, known, home) if path is None else path)
         previous = words
     return variables
 
@@ -1203,29 +1245,136 @@ def braced(token, brace):
     return type(token) is Word and token == brace
 
 
-def wrapper_functions(tokens):
-    """The functions a script defines that run the command they're given, and whether they run it with sudo."""
-    found, index = {}, 0
-    while index < len(tokens):
-        token, name = tokens[index], None
-        if isinstance(token, Op) and token == "()" and index and type(tokens[index - 1]) is Word:
-            name = tokens[index - 1]
-        elif type(token) is Word and token == "function" and index + 1 < len(tokens) and type(tokens[index + 1]) is Word:
-            name = tokens[index + 1]
-        start = next((i for i in range(index + 1, len(tokens)) if braced(tokens[i], "{")), None) if name else None
-        if start is None:
-            index += 1
+def function_bodies(tokens):
+    """Each function a script defines: the word that names it, and where in tokens the { and } of its body are."""
+    found = []
+    for index, token in enumerate(tokens):
+        if braced(token, "function") and index + 1 < len(tokens) and type(tokens[index + 1]) is Word:
+            name, start = tokens[index + 1], index + 2
+        elif isinstance(token, Op) and token == "()" and index and type(tokens[index - 1]) is Word:
+            if index > 1 and braced(tokens[index - 2], "function"):
+                continue
+            name, start = tokens[index - 1], index + 1
+        else:
+            continue
+        while start < len(tokens) and isinstance(tokens[start], Op) and tokens[start] in ("()", "\n"):
+            start += 1
+        if start == len(tokens) or not braced(tokens[start], "{"):
             continue
         depth, end = 0, start
         for end in range(start, len(tokens)):
             depth += braced(tokens[end], "{") - braced(tokens[end], "}")
             if not depth:
                 break
+        found.append((name, start, end))
+    return found
+
+
+def wrapper_functions(tokens):
+    """The functions a script defines that run the command they're given, and whether they run it with sudo."""
+    found = {}
+    for name, start, end in function_bodies(tokens):
         runs = [words for words in simple_commands(tokens[start + 1 : end]) if "$@" in words or "${@}" in words]
         if runs:
             found[name] = any(word == "sudo" or found.get(word) for words in runs for word in words)
-        index = end + 1
     return found
+
+
+def argument_scope(tokens, commands, bodies):
+    """A function giving the function whose arguments a command's $1 and "$@" are, or None if they're only known when it runs.
+
+    That is the innermost function the command is in. After that function's first
+    shift or set they could be anything, and so they are anywhere in it if one of
+    those is in a loop.
+    """
+    spans = [(tokens[start].at, tokens[end].at, name) for name, start, end in bodies]
+    loops = [(token.at, 1 if token == "do" else -1) for index, token in enumerate(tokens) if (
+        type(token) is Word and token in ("do", "done") and (not index or isinstance(tokens[index - 1], Op))
+    )]
+
+    def innermost(at):
+        return max((span for span in spans if span[0] < at < span[1]), default=None)
+
+    shifted = {}
+    for words in commands:
+        moves = words[0] == "shift" or (words[0] == "set" and any(
+            word == "--" or not word.startswith(("-", "+")) for word in words[1:]
+        ))
+        span = innermost(words[0].at) if moves else None
+        if span:
+            in_loop = sum(step for at, step in loops if span[0] < at < words[0].at) > 0
+            first = shifted.get(span, words[0].at)
+            shifted[span] = -1 if in_loop or first < 0 else min(first, words[0].at)
+
+    def scope(words):
+        span = innermost(words[0].at) if words else None
+        moved = shifted.get(span)
+        return None if span is None or (moved is not None and (moved < 0 or words[0].at > moved)) else span[2]
+
+    return scope
+
+
+def function_calls(commands, bodies):
+    """The commands that call a function the script defines, as the function's name and its arguments."""
+    names, naming = {name for name, _, _ in bodies}, {name.at for name, _, _ in bodies}
+    for words in commands:
+        words = list(itertools.dropwhile(ASSIGNMENT.match, [word for word in words if not isinstance(word, Redirect)]))
+        # A function's own name where it's defined isn't a call.
+        if words and words[0] in names and words[0].at not in naming:
+            yield words
+
+
+def function_arguments(calls, values):
+    """What each function's $1, $2 and so on, and "$@", can hold: what each call passes, as values reads it.
+
+    An argument a call doesn't pass is empty. Past a "$@" any argument can land
+    anywhere, so each later one can hold any of them.
+    """
+    passed = {}
+    for words in calls:
+        passed.setdefault(words[0], []).append([(word, values(words, word)) for word in words[1:]])
+    found = {}
+    for name, lists in passed.items():
+        numbers = range(1, max(9, *map(len, lists)) + 1)
+        held = found[name] = {str(number): [] for number in numbers} | {"@": []}
+        for arguments in lists:
+            spread = next((index for index, (word, _) in enumerate(arguments) if word in ("$@", "${@}")), len(arguments))
+            for number in numbers:
+                if number > spread:
+                    held_too(held[str(number)], [value for _, parts in arguments[spread:] for value in parts] + [("", True)])
+                else:
+                    held_too(held[str(number)], arguments[number - 1][1] if number <= len(arguments) else [("", True)])
+            held_too(held["@"], [value for _, parts in arguments for value in parts])
+    return found
+
+
+def script_values(tokens, commands, home):
+    """What each variable a script sets can hold, and a function giving what a command's $1, $2 and "$@" hold.
+
+    A function's arguments hold what every call to it passes, read as any other
+    word is, so the script is read again until what they hold settles. A function
+    no call reaches, or one that never settles, as when it calls itself with a
+    longer path each time, has arguments only known when it runs.
+    """
+    bodies = function_bodies(tokens)
+    scope, calls = argument_scope(tokens, commands, bodies), list(function_calls(commands, bodies))
+
+    def arguments(words):
+        return positional.get(scope(words), {})
+
+    def settled(held):
+        return {name: {number: set(values) for number, values in numbers.items()} for name, numbers in held.items()}
+
+    # Until a call has been read, the arguments it passes hold nothing.
+    positional = function_arguments(calls, lambda words, word: [])
+    for _ in range(MOST_PASSES):
+        variables = script_variables(commands, home, arguments)
+        found = function_arguments(calls, lambda words, word, held=variables: expansions(word, ChainMap(arguments(words), held), home))
+        if settled(found) == settled(positional):
+            return variables, arguments
+        positional = found
+    positional = {}
+    return script_variables(commands, home, arguments), arguments
 
 
 def writer_at(words, wrappers):
@@ -1369,24 +1518,25 @@ def script_writes(text, home):
     """
     tokens = shell_tokens(text)[0]
     commands = list(simple_commands(tokens))
-    variables, wrappers = script_variables(commands, home), wrapper_functions(tokens)
+    (variables, arguments), wrappers = script_values(tokens, commands, home), wrapper_functions(tokens)
     paths, unclear = {}, set()
     for words in commands:
+        known = ChainMap(arguments(words), variables)
         targets, searched, sudo = written(words, wrappers)
         line = text.count("\n", 0, words[0].at) + 1
         for word, removes, sources, stays in targets:
-            for value in expansions(word, variables, home):
+            for value in expansions(word, known, home):
                 folder = your_path(value, home)
-                for path in copied_into(folder, word, sources, stays, variables, home) if folder else [value]:
+                for path in copied_into(folder, word, sources, stays, known, home) if folder else [value]:
                     place = your_path(path, home)
                     if place is None and not sudo:
                         unclear.add(line)
-                    elif place and not (stays is not None and linked_already(place, sources, variables, home)):
+                    elif place and not (stays is not None and linked_already(place, sources, known, home)):
                         lines, only_removes = paths.get(place, (set(), True))
                         paths[place] = (lines | {line}, only_removes and removes)
         # What find changes is only known when it runs.
         for word in searched:
-            for value in expansions(word, variables, home):
+            for value in expansions(word, known, home):
                 place = your_path(value, home)
                 if (place is None and not sudo) or (place and existing(place, home)):
                     unclear.add(line)
