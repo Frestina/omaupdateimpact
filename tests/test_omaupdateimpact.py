@@ -1,4 +1,5 @@
 import contextlib
+import errno
 import gzip
 import importlib.machinery
 import importlib.util
@@ -7,6 +8,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import tarfile
 import tempfile
 import threading
@@ -1702,6 +1704,31 @@ class OwnFiles(unittest.TestCase):
         self.plugin(self.plugins / "ours", impact.PLUGIN_ID)
         self.assertEqual(self.commands(), ([], 0))
         self.assertEqual(self.linted(), ([], 0, []))
+
+    @unittest.skipIf(os.geteuid() == 0, "root reads a denied folder")
+    def test_a_plugin_that_cant_be_read_doesnt_stop_the_run_on_python_3_11(self):
+        # Python 3.11's Path.is_file and is_dir raise on a denied stat, and newer ones
+        # return False. The minimum is 3.11, so this test gives them 3.11's behaviour.
+        def as_on_3_11(kind):
+            def check(path):
+                try:
+                    return kind(os.stat(path).st_mode)
+                except OSError as error:
+                    if error.errno not in (errno.ENOENT, errno.ENOTDIR, errno.EBADF, errno.ELOOP):
+                        raise
+                    return False
+            return check
+
+        denied = self.plugin(self.plugins / "denied", impact.PLUGIN_ID)
+        denied.chmod(0)
+        self.addCleanup(denied.chmod, 0o755)
+        with mock.patch.object(Path, "is_file", as_on_3_11(stat.S_ISREG)), \
+                mock.patch.object(Path, "is_dir", as_on_3_11(stat.S_ISDIR)):
+            own = impact.own_paths(self.home)
+            findings = impact.compare_commands(self.base / "current", self.base / "target", self.home, {})
+        # Its manifest can't be read, so it isn't left out, and the commands check says so.
+        self.assertNotIn(impact.real_path(denied), own)
+        self.assertEqual([(f.level, f.evidence) for f in findings], [("unknown", ["~/.config/omarchy/plugins/denied"])])
 
     def test_a_plugin_that_isnt_this_tool_beside_it_still_is(self):
         self.plugin(self.plugins / "ours", impact.PLUGIN_ID)

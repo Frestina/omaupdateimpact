@@ -68,7 +68,7 @@ when.
 | # | Ticket | Depends on | Status |
 | --- | --- | --- | --- |
 | 021 | [Plugin design](021-plugin-design.md) | 016 | done |
-| 028 | [The command leaves its own files out](028-skip-own-files.md) | 021 | done |
+| 028 | [The command leaves its own files out](028-skip-own-files.md) | 021 | in progress |
 | 022 | [Bar widget and panel](022-plugin-panel.md) | 021, 028 | done |
 | 027 | [Two runs share the cache](027-two-runs-share-the-cache.md) | 005 | todo |
 | 023 | [Marketplace listing](023-marketplace-listing.md) | 015, 022, 027 | todo |

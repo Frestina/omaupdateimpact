@@ -34,6 +34,8 @@ itself.
 - Review follow-ups: the folder above `bin/` is the tool's own only when it is
   recognisably this tool, so a copy in `~/.local/bin` or a package in `/usr/bin`
   leaves none of your files out.
+- Review follow-ups, after CI: a plugin you can't read doesn't crash the run on
+  Python 3.11.
 
 ## Not in this ticket
 
@@ -55,3 +57,6 @@ itself.
 - [x] A command in a fictional `/usr/bin` still reads a file of yours linked to
       `/usr/local/bin`.
 - [x] The spec says what makes the folder above `bin/` the tool's own.
+- [ ] A plugin whose `manifest.json` can't be stat'ed is read as yours on Python
+      3.11 too, CI passes on all three jobs, and a test fails without the fix on the
+      Python that runs `tests/run` locally.
