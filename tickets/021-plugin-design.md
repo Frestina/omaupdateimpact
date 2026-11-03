@@ -31,5 +31,5 @@ Decide and record in the spec:
 
 ## Done when
 
-- [ ] Each decision above is in the spec, with the reason.
-- [ ] 022 can be built without another design decision.
+- [x] Each decision above is in the spec, with the reason.
+- [x] 022 can be built without another design decision.

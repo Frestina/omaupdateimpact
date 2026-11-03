@@ -14,6 +14,7 @@ Show the result on the desktop, for people who would never run the CLI.
 ## Spec
 
 - [Product shape](../SPEC.md#product-shape)
+- [Plugin](../SPEC.md#plugin), which 021 decided
 
 ## Scope
 

@@ -62,7 +62,8 @@ One repository with a CLI at the core and a thin plugin on top, in this order:
 3. **An Omarchy menu row** is the cheap way to reach people who don't live in a
    terminal.
 4. **A bar plugin** shows the result on the desktop and in the marketplace, where
-   Omarchy users find tools. It holds no rules and only renders the JSON.
+   Omarchy users find tools. It holds no rules and only renders the JSON. See
+   [Plugin](#plugin).
 
 A separate desktop app is rejected: see [Rejected](#rejected).
 
@@ -579,7 +580,8 @@ when either stops matching. `python3 -m tests.golden` writes them again.
   and `--home` moves `~/.config` with it, as it does `~/.cache`.
 
 The command writes nothing else. `install.sh` writes its link, and with `--menu`
-one marked block in Omarchy's menu file. See [Install](#install).
+one marked block in Omarchy's menu file. See [Install](#install). The plugin writes
+nothing, and its command writes only these. See [Plugin](#plugin).
 
 ## Install
 
@@ -641,6 +643,128 @@ about the menu when there is no block.
 The AUR package is in `packaging/aur`, and isn't published. It installs to `/usr/bin`
 and doesn't use `install.sh`.
 
+## Plugin
+
+The plugin shows the result in the bar, for people who never open a terminal. It
+holds no rules. It runs the command and renders its `--json`, so the two can't
+disagree. Decided in 021, against the shell in v4.0.6 and v4.5.0-rc2.
+
+- **One repository.** `manifest.json` sits at the root of this one, beside the
+  command, as in Frestina's other plugins. `omarchy plugin add` clones the whole
+  repository, so the plugin and the command it runs are always the same version. A
+  second repository would have to keep a copy of the command in step.
+- **The command comes with the plugin.** The plugin runs its own
+  `bin/omaupdateimpact`, found from its QML's own path, and never one on `PATH`.
+  One on `PATH` could be another version, with another `schemaVersion`. Nothing is
+  installed for it: it needs Python 3.11.4, and Omarchy's base packages already
+  pull Python in. `install.sh` stays for terminal users and the menu row.
+- **The id is `io.github.frestina.omaupdateimpact`.** It can't change once
+  published, as it names the plugin's folder and its entry in `shell.json`. It
+  follows the other Frestina plugins and stays out of the reserved `omarchy.*`.
+- **No links in the repository.** `omarchy plugin validate` refuses a plugin that
+  holds one. There are none now, and a fixture that needs one makes it in the test.
+
+### Kinds
+
+`kinds` is `service` and `bar-widget`. The QML is in `plugin/`.
+
+- The **service** is the only thing that runs the command. The shell loads one,
+  however many monitors there are, so a check runs once and not once per monitor.
+  It keeps the last result in memory and writes nothing.
+- The **bar widget** draws the icon on each monitor and opens its own panel on a
+  click. It finds the service through the shell's `serviceFor`, with its own id.
+  The panel belongs to the widget. It isn't a `panel` kind, as nothing else opens
+  it.
+- Enabling the widget enables the service. The shell counts a plugin that isn't
+  Omarchy's as enabled when its id is anywhere in `shell.json`, and the bar entry
+  is one such place.
+- A replacement bar gives its widgets no service. The widget then shows that it
+  couldn't check, and says why.
+- The service answers IPC on its id, with one method, `check`, which does what
+  "Check again" does. It is for tests and scripts.
+
+### When it checks
+
+The command already knows when there is an update. With none, it makes one request
+to GitHub, for the list of releases, and downloads nothing. With one, it downloads
+that release once and keeps it in the cache, so later checks read it from there. So
+the download, about 200 MB, happens once, when a new release appears.
+
+- The first check is 2 minutes after the service loads, so the network has time to
+  come up after login.
+- Then one every `checkEveryHours`, the widget's one setting. It is 6 by default,
+  as for Omarchy's own update icon, and goes from 1 to 168. 0 checks only when
+  asked, for a metered connection. The widget hands it to the service.
+- "Check again" checks now and starts the wait over. A check already running isn't
+  started twice.
+- An update restarts the shell, so the service loads again and checks the new
+  version 2 minutes later. No hook is needed.
+- It doesn't use `omarchy-update-available` to decide. That runs `checkupdates`,
+  which asks the package mirrors, and only GitHub may be asked. It also follows the
+  package, not the tag the command compares with.
+
+### What the bar shows
+
+The service reads `result` and the exit code. If they disagree, if the output isn't
+one JSON document, or if `schemaVersion` isn't 1, the check couldn't be read, and
+that is shown as "couldn't check", with the last line of stderr.
+
+| State | When | Icon | Tooltip |
+| --- | --- | --- | --- |
+| Not checked | No result yet | Muted, with `…` | "Checking…", or "Not checked yet" when it checks only when asked |
+| Quiet | `noUpdate` or `clear` | Muted, no mark | "Omarchy v4.0.6 is up to date", or "v4.5.0: nothing needs attention" |
+| Attention | `attention` | Warning colour, with the count to review | "v4.5.0: 2 things need attention" |
+| Couldn't check | `incomplete`, `failed`, output it couldn't read, no service, or no command | Text colour, with `?` | "Couldn't check v4.5.0" and why |
+
+- The icon is always there. A hidden icon would look the same as a widget that
+  never ran.
+- The count is the attention findings that aren't reviewed, as `result` counts them.
+- `attention` with checks that didn't run in full shows as attention. The panel
+  lists the limits.
+- While a check runs, the last state stays, and the tooltip adds "Checking…".
+- Colours are theme tokens, by role: muted text, text, and the warning colour.
+
+### The panel
+
+It follows the report's order, and shows what the document holds without working
+anything out:
+
+1. The installed version, the release, the channel, and when it was checked.
+2. Needs attention: each finding that isn't reviewed, with its title and detail,
+   reason and reference, fix, evidence and id. Its text can be selected, so a fix
+   can be copied. This section is never collapsed.
+3. Couldn't check: each check that didn't run in full, and each `unknown` finding.
+   Never collapsed, as in the report.
+4. Notes: a count, collapsed. Opening it lists them.
+5. Reviewed: a count.
+
+With `noUpdate`, it says Omarchy is up to date and names any newer release on
+another channel, from `newer`, or `newerProblem`. With `failed`, it shows `reason`.
+
+It has two buttons. "Check again" checks now. "Open report" runs the same bundled
+command in `omarchy-launch-floating-terminal-with-presentation`, as the menu row
+does. No button changes the system. Marking a finding reviewed stays in the
+terminal, with `--ack`, for now.
+
+### What it runs and touches
+
+- It runs only the bundled command with `--json`, and the terminal launcher for
+  "Open report". It reads stdout as the document.
+- It asks nothing over the network. The command makes its GET requests to GitHub,
+  as from a terminal.
+- It writes nothing. The command writes its cache, as from a terminal.
+- `omarchy plugin remove` deletes the plugin's folder. The cache and the reviewed
+  findings stay, as after `install.sh --uninstall`, and the README names them.
+
+### Tests
+
+- One JavaScript file maps a document and exit code to a state and the panel's
+  sections. The QML imports it, and tests run it under `node` on
+  `tests/fixtures/json` and a document for every result. They skip when `node`
+  isn't installed, as the `qmllint` ones do.
+- The plugin passes `omarchy plugin validate`.
+- The demo and preview use fixture JSON from a fictional run, never a real one.
+
 ## Docs
 
 The report at the top of the README and the recording in `docs/demo.svg` are the
@@ -691,7 +815,5 @@ So this tool can't gate an update, and users have to run it themselves.
 
 ## Open questions
 
-- Does a plugin get a second repository, or live in this one? Default: this one.
-  Settled in [021](tickets/021-plugin-design.md).
 - Are `edge` and `dev` worth supporting by comparing with the branch tip? In the
   [backlog](tickets/BACKLOG.md).

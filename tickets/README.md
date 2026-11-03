@@ -67,6 +67,7 @@ when.
 
 | # | Ticket | Depends on | Status |
 | --- | --- | --- | --- |
-| 021 | [Plugin design](021-plugin-design.md) | 016 | todo |
+| 021 | [Plugin design](021-plugin-design.md) | 016 | done |
 | 022 | [Bar widget and panel](022-plugin-panel.md) | 021 | todo |
-| 023 | [Marketplace listing](023-marketplace-listing.md) | 015, 022 | todo |
+| 027 | [Two runs share the cache](027-two-runs-share-the-cache.md) | 005 | todo |
+| 023 | [Marketplace listing](023-marketplace-listing.md) | 015, 022, 027 | todo |

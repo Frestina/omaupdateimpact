@@ -22,6 +22,10 @@ Paths already ruled out are not here; they are under
   could show the result before the update starts. Blocked on upstream
   ([PR #10398](https://github.com/omacom/omarchy/pull/10398)). Worth commenting on
   that PR with this use case once the tool is public.
+- **Mark a finding reviewed from the panel.** A button that runs `--ack` with the
+  finding's id. It writes only the reviewed file, which `--ack` is allowed to, but
+  022 keeps every button read-only, so a first version is easy to trust. Waits for
+  someone to want it outside the terminal.
 - **What the update adds.** New packages, new services, download size. Waits
   because it isn't what breaks things, and Update Review covers packages.
 
