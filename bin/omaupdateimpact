@@ -144,6 +144,13 @@ TEST_END = re.compile(r"\s\]\]")
 COPIED = re.compile(r'hl\.unbind\("[^"]*"\)|omarchy pkg add \S+')
 REPORT_WIDTH = 88
 KEPT_SPACE = "\xa0"
+# The release notes, kept in the release's folder in the cache. No release file has this name.
+NOTES = ".omaupdateimpact-notes.md"
+# A change as GitHub lists it in the notes: what changed, who changed it, and where.
+NOTE_ENTRY = re.compile(r"\s*[-*] (.+?) by @[\w-]+(?:, @[\w-]+)* in (\S+)\s*")
+NOTE_KEYS = re.compile(
+    r"(?<![\w+])(?:(?:" + "|".join([*MODIFIERS, *MODIFIER_SPELLINGS]) + r")\s*\+\s*)+\w+", re.IGNORECASE
+)
 GREEN, RED, YELLOW, BOLD = "1;32", "1;31", "1;33", "1"
 
 
@@ -175,6 +182,15 @@ class Parsed:
 
 
 @dataclass
+class Reason:
+    """The change in the release notes that a finding comes from."""
+
+    text: str
+    reference: str
+    evidence: str
+
+
+@dataclass
 class Finding:
     check: str
     level: str
@@ -184,9 +200,18 @@ class Finding:
     fix: str = ""
     # An unknown that leaves the rest of its check standing.
     partial: bool = False
+    reason: Reason | None = None
+    # What it is about, as (kind, name) pairs, for finding its reason. It isn't in the document.
+    about: tuple = field(default=(), compare=False, repr=False)
 
     def text(self):
         return " ".join(part for part in (self.title, self.detail) if part)
+
+    def data(self):
+        """The finding as the --json document holds it. What it is about isn't copied, as a Word can't be."""
+        data = dataclasses.asdict(dataclasses.replace(self, about=()))
+        del data["about"]
+        return data
 
 
 class UnusableTree(Exception):
@@ -474,6 +499,11 @@ def unbind_calls(binds):
     return " and ".join(f'hl.unbind("{keys}")' for keys in spelled(binds))
 
 
+def keys(*chords):
+    """What a finding about these chords is about. A list of many isn't about any one."""
+    return tuple(("keys", chord) for chord in chords)
+
+
 def same_actions(one, other):
     """Whether two chords do the same. A press alone isn't the same as a press and release pair."""
     return all(any(a.same_action(b) for b in other) for a in one) and all(
@@ -546,6 +576,7 @@ def compare_bindings(current, target, user):
             detail="Both will fire.",
             # Below your binding it would turn that off as well.
             fix=f"Add {unbind_calls(tgt[chord])} above your binding, or choose another key.",
+            about=keys(chord),
         ))
 
     for chord in sorted(user.unbinds):
@@ -561,6 +592,7 @@ def compare_bindings(current, target, user):
                     f"{moved[chord]}, so it comes back.",
                     [*unbound, *sources(cur[chord], tgt[moved[chord]])],
                     fix=f"Add {unbind_calls(tgt[moved[chord]])} too.",
+                    about=keys(chord, moved[chord]),
                 ))
         elif chord not in tgt:
             findings.append(Finding(
@@ -568,6 +600,7 @@ def compare_bindings(current, target, user):
                 NOTE,
                 f"{chord}: your unbind no longer does anything, the default is gone.",
                 [*unbound, *sources(cur[chord])],
+                about=keys(chord),
             ))
         elif chord in arrived and chord in user.binds and turned_off(chord, tgt[chord]):
             findings.append(Finding(
@@ -576,6 +609,7 @@ def compare_bindings(current, target, user):
                 f'{chord}: your binding now replaces "{label(tgt[chord])}", '
                 f'not "{label(cur[chord])}".',
                 sources(user.binds[chord], tgt[chord]),
+                about=keys(chord),
             ))
 
     # A move is one change, with what it replaced and what took its place. A key that
@@ -589,7 +623,7 @@ def compare_bindings(current, target, user):
         if chord in taken_over and chord not in moved.values():
             title += f' {chord} is now "{label(tgt[chord])}".'
             evidence.append(tgt[chord])
-        findings.append(Finding("bindings", NOTE, title, sources(*evidence)))
+        findings.append(Finding("bindings", NOTE, title, sources(*evidence), about=keys(chord, other)))
 
     for chord in sorted(taken_over - set(moved) - set(moved.values())):
         findings.append(Finding(
@@ -597,6 +631,7 @@ def compare_bindings(current, target, user):
             NOTE,
             f'{chord} is now "{label(tgt[chord])}", it was "{label(cur[chord])}".',
             sources(cur[chord], tgt[chord]),
+            about=keys(chord),
         ))
 
     fresh = sorted(
@@ -1007,6 +1042,7 @@ def compare_packages(target, home, installed, checked):
             f"The update {when} {package}, which is installed here.",
             [f"migrations/{migration}", *other],
             fix=f"{after}, run omarchy pkg add {package} (aur-add for an AUR package).",
+            about=(("migration", f"migrations/{migration}"), ("package", package)),
         ))
     for migration, *files in sorted(unread):
         title = f"Couldn't read what migrations/{migration} removes, so check it by hand."
@@ -1602,7 +1638,7 @@ def edit_finding(migration, places, lines, removes, changed, home):
         title = f"{where} {shown}, which Omarchy has no default for."
     for path, default in changed:
         evidence += [str(path).replace(str(home), "~", 1), *([default] if default else [])]
-    return Finding("edits", NOTE, title, evidence, detail=detail)
+    return Finding("edits", NOTE, title, evidence, detail=detail, about=(("migration", migration),))
 
 
 def compare_edits(current, target, home, checked):
@@ -1759,13 +1795,14 @@ def compare_commands(current, target, home, checked):
         shown = path.replace(str(home), "~", 1)
         lines = [f"{shown}:{number}" for number in numbers]
         title = f"{shown} calls {command}, which the release deletes."
+        about = (("command", command),)
         if original:
             detail = "It's Omarchy's own file, unchanged, so there's nothing for you to fix."
-            findings.append(Finding("commands", NOTE, title, [*lines, original], detail=detail))
+            findings.append(Finding("commands", NOTE, title, [*lines, original], detail=detail, about=about))
         else:
             where = f"line {numbers[0]}" if len(numbers) == 1 else f"lines {', '.join(map(str, numbers))}"
             fix = f"Change or remove {where}. This tool can't tell what replaces the command."
-            findings.append(Finding("commands", ATTENTION, title, lines, fix=fix))
+            findings.append(Finding("commands", ATTENTION, title, lines, fix=fix, about=about))
     for path, reason in sorted(unread.items()):
         shown = str(path).replace(str(home), "~", 1)
         title = f"{shown} couldn't be read, so it wasn't checked for deleted commands."
@@ -1907,6 +1944,66 @@ def compare_plugins(current, target, home, checked):
     return findings
 
 
+def read_notes(tree):
+    """The changes listed in a release's notes: each line number, what changed, and where. Empty without notes."""
+    path = tree / NOTES
+    try:
+        text = path.read_text(errors="replace") if path.is_file() else ""
+    except OSError:
+        return []
+    found = ((number, NOTE_ENTRY.fullmatch(line)) for number, line in enumerate(text.split("\n"), 1))
+    return [(number, *entry.groups()) for number, entry in found if entry]
+
+
+def description(path):
+    """What a migration says it does: the line it echoes first, as Omarchy's migrations do. None if it doesn't."""
+    try:
+        words = shell_tokens(path.read_text(errors="replace").split("\n", 1)[0])[0]
+    except (OSError, ShellUnread):
+        return None
+    if [type(word) for word in words] == [Word, Word] and words[0] == "echo" and "$" not in words[1]:
+        return words[1]
+    return None
+
+
+def plain_words(text):
+    return " ".join(text.casefold().split()).rstrip(".")
+
+
+def change_names(text, kind, name):
+    """Whether a change in the notes clearly names what a finding is about.
+
+    A package may start with a capital, as a name in a sentence does, and a
+    migration goes by what it says it does.
+    """
+    if kind == "keys":
+        return name in {normalize_keys(found) for found in NOTE_KEYS.findall(text)}
+    if kind == "migration":
+        return plain_words(text) == plain_words(name)
+    spellings = {name, name[:1].upper() + name[1:]} if kind == "package" else {name}
+    # A full stop can end the sentence the name is in.
+    pattern = rf"(?<![\w@.+-])(?:{'|'.join(map(re.escape, spellings))})(?![\w@+-]|\.\w)"
+    return re.search(pattern, text) is not None
+
+
+def give_reasons(findings, tree):
+    """Link each finding to the change in the release notes it comes from, when one change alone names it.
+
+    Two that name it are unsure, and a wrong reason is worse than none.
+    """
+    entries = read_notes(tree)
+    for finding in findings:
+        changes = {}
+        for kind, name in finding.about:
+            name = description(tree / name) if kind == "migration" else name
+            for number, text, reference in entries:
+                if name and change_names(text, kind, name):
+                    changes.setdefault((text, reference), number)
+        if len(changes) == 1:
+            ((text, reference), number), = changes.items()
+            finding.reason = Reason(text, reference, f"{NOTES}:{number}")
+
+
 def version_key(text):
     """A sort key for a tag or a package version, or None for anything else.
 
@@ -2039,6 +2136,32 @@ def fetch_release(tag, cache):
     return root
 
 
+def fetch_notes(tag, root):
+    """Keep a release's notes in its folder. Without them findings give no reason, and nothing else changes.
+
+    A tag with no release has no notes, and that is kept too, so it isn't asked again.
+    """
+    if (root / NOTES).exists():
+        return
+    try:
+        try:
+            release = api(f"releases/tags/{tag}")
+        except urllib.error.HTTPError as error:
+            if error.code != 404:
+                raise
+            release = {}
+        body = release.get("body") if isinstance(release, dict) else None
+        # GitHub gives null for a release without notes.
+        if not isinstance(release, dict) or (body is not None and not isinstance(body, str)):
+            raise ValueError("the releases API gave no usable notes")
+        # Written whole and then moved, so notes cut short never pass for the notes.
+        with tempfile.NamedTemporaryFile("w", dir=root, delete=False, encoding="utf-8", newline="") as out:
+            out.write(body or "")
+        os.replace(out.name, root / NOTES)
+    except DOWNLOAD_ERRORS as error:
+        print(f"Couldn't fetch the release notes, so no finding says why: {' '.join(str(error).split())}", file=sys.stderr)
+
+
 def ask(command):
     """What an Omarchy command on PATH prints, or "unknown"."""
     try:
@@ -2154,6 +2277,9 @@ def print_section(title, findings, level, colour):
         print(f"\n{painted(title, colour)}")
         for finding in found:
             print(wrapped(finding.text(), "  - ", "    "))
+            if finding.reason:
+                why = f"{finding.reason.text.rstrip('.')} ({finding.reason.reference})."
+                print(wrapped(why, "    Why: ", " " * 9))
             if finding.fix:
                 # Painted after filling, because colour codes would count as width.
                 print(wrapped(finding.fix, "    Fix: ", " " * 9).replace("Fix:", painted("Fix:", GREEN), 1))
@@ -2201,7 +2327,7 @@ def print_no_update(document):
 def print_document(document, options):
     """Print a document as JSON, or as text. A failure has already said why on stderr."""
     if options.json:
-        print(json.dumps(document, indent=2, default=dataclasses.asdict))
+        print(json.dumps(document, indent=2, default=Finding.data))
     elif document["result"] == "noUpdate":
         print_no_update(document)
     elif document["result"] != "failed":
@@ -2237,6 +2363,7 @@ def run(options):
             if own_tree and installed and installed == wanted:
                 return no_update(version, tag, channel)
             target = fetch_release(tag, cache)
+            fetch_notes(tag, target)
         except DOWNLOAD_ERRORS as error:
             return fail("Couldn't download the release", error, options.debug)
     check_tree(target, "release")
@@ -2256,6 +2383,7 @@ def run(options):
         *compare_plugins(options.root, target, options.home, checked),
         *compare_edits(options.root, target, options.home, checked),
     ]
+    give_reasons(findings, target)
     return compared(version, channel, tag or target.name, checked, findings)
 
 

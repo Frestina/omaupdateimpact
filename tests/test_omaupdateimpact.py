@@ -2212,10 +2212,22 @@ class ProgramCase(unittest.TestCase):
             tar.add(self.base / "target", arcname="omarchy-1.2.3")
         return output.getvalue()
 
-    def download(self, *responses, args=("v1.2.3",)):
-        """Run with each network request answered by the next response."""
-        with mock.patch.object(impact.urllib.request, "urlopen", side_effect=responses), \
-                mock.patch.object(impact, "installed_packages", return_value=set()):
+    def download(self, *responses, args=("v1.2.3",), notes=None, packages=frozenset()):
+        """Run with each network request answered by the next response, and the notes by notes or a 404."""
+        answers = iter(responses)
+
+        def answer(request, timeout):
+            if "/releases/tags/" in request.full_url:
+                if notes is None:
+                    raise refused(404)
+                return io.BytesIO(json.dumps({"body": notes}).encode())
+            response = next(answers)
+            if isinstance(response, BaseException):
+                raise response
+            return response
+
+        with mock.patch.object(impact.urllib.request, "urlopen", side_effect=answer), \
+                mock.patch.object(impact, "installed_packages", return_value=packages):
             return self.run_main(*args)
 
     def assert_download_failed(self, result):
@@ -2445,7 +2457,16 @@ class Json(ProgramCase):
             "detail": "",
             "fix": "After the update, run omarchy pkg add a (aur-add for an AUR package).",
             "partial": False,
+            "reason": None,
         }])
+
+    def test_a_package_named_as_the_migration_spells_it_still_prints(self):
+        # With more installed than removed, the name is the one read from the migration.
+        (self.base / "target/migrations/1.sh").write_text("omarchy-pkg-drop a\n")
+        code, document, _ = self.document(packages={"a", "b", "c"})
+        self.assertEqual((code, [finding["title"] for finding in document["findings"]]), (
+            1, ["The update will remove a, which is installed here."],
+        ))
 
     def test_all_changes_nothing(self):
         for tree in ("current", "target"):
@@ -2508,6 +2529,238 @@ class Json(ProgramCase):
         ):
             with self.subTest(argv=argv):
                 self.assertEqual(impact.wants_json(argv), wanted)
+
+
+def change(text, number):
+    """A line of release notes, as GitHub lists a change."""
+    return f"- {text} by @fictional-dev in #{number}\r\n"
+
+
+class Reasons(ProgramCase):
+    """Fictional notes. The target drops fictional-editor, and you have it installed."""
+
+    def setUp(self):
+        super().setUp()
+        self.migration("1.sh", 'echo "Replace Fictional Editor with Quill"\nomarchy-pkg-drop fictional-editor\n')
+
+    def migration(self, name, text):
+        (self.base / "target/migrations" / name).write_text(text)
+
+    def notes(self, *lines):
+        (self.base / "target" / impact.NOTES).write_text("".join(lines), newline="")
+
+    def findings(self, *args, packages=frozenset({"fictional-editor"})):
+        code, out, _ = self.check("--json", *args, packages=packages)
+        return code, json.loads(out)["findings"]
+
+    def reasons(self, **kwargs):
+        return [finding["reason"] for finding in self.findings(**kwargs)[1]]
+
+    def test_a_removal_takes_the_change_its_migration_describes(self):
+        self.notes("## Deprecations\r\n\r\n", change("Replace Fictional Editor with Quill", 101))
+        self.assertEqual(self.reasons(), [{
+            "text": "Replace Fictional Editor with Quill",
+            "reference": "#101",
+            "evidence": f"{impact.NOTES}:3",
+        }])
+        out = " ".join(self.check(packages={"fictional-editor"})[1].split())
+        self.assertIn(
+            "The update will remove fictional-editor, which is installed here. "
+            "Why: Replace Fictional Editor with Quill (#101). Fix: After the update", out
+        )
+
+    def test_the_description_matches_whatever_its_case_spacing_and_full_stop(self):
+        self.notes(change("replace  fictional editor with quill.", 101))
+        self.assertEqual(self.reasons()[0]["reference"], "#101")
+
+    def test_a_change_listed_twice_is_one_change(self):
+        line = change("Replace Fictional Editor with Quill", 101)
+        self.notes("## Removals\r\n", line, "## Deprecations\r\n", line)
+        self.assertEqual(self.reasons()[0]["evidence"], f"{impact.NOTES}:2")
+
+    def test_a_change_that_names_the_package_is_its_reason(self):
+        self.migration("1.sh", "omarchy-pkg-drop fictional-editor\n")
+        for text in ("Retire fictional-editor", "Stop shipping fictional-editor.", "Swap Fictional-editor for Quill"):
+            with self.subTest(text=text):
+                self.notes(change(text, 102))
+                self.assertEqual(self.reasons()[0]["text"], text)
+
+    def test_a_longer_name_or_another_case_isnt_the_package(self):
+        self.migration("1.sh", "omarchy-pkg-drop fictional-editor\n")
+        for text in ("Retire fictional-editor-git", "Retire @fictional-editor", "Retire FICTIONAL-EDITOR", "Retire fictional-editor.app"):
+            with self.subTest(text=text):
+                self.notes(change(text, 102))
+                self.assertEqual(self.reasons(), [None])
+
+    def test_two_changes_that_name_it_give_no_reason(self):
+        self.notes(change("Replace Fictional Editor with Quill", 101), change("Make fictional-editor faster", 102))
+        self.assertEqual(self.reasons(), [None])
+
+    def test_a_finding_with_no_clear_match_gives_no_reason(self):
+        self.notes(change("Replace Fictional Editor with Quill and Ink", 101), "- Replace Fictional Editor with Quill\r\n")
+        self.assertEqual(self.reasons(), [None])
+        self.assertNotIn("Why:", self.check(packages={"fictional-editor"})[1])
+
+    def test_a_shortcut_takes_the_one_change_that_names_its_keys(self):
+        (self.home / ".config/hypr").mkdir(parents=True)
+        (self.home / ".config/hypr/bindings.lua").write_text('o.bind("SUPER + M", "Mail", "mail")')
+        (self.base / "target/default/hypr/bindings.lua").write_text(
+            'o.bind("SUPER + W", "Close", "close-it")\no.bind("SUPER + M", "Minimize", "min")'
+        )
+        for text, wanted in (
+            ("Add `Super + M` to minimize a window", True),
+            ("Add Win + m to minimize a window", True),
+            ("Add Super + Shift + M to minimize a window", False),
+            ("Add Super + MM to minimize a window", False),
+        ):
+            with self.subTest(text=text):
+                self.notes(change(text, 104))
+                self.assertEqual(self.reasons(packages=frozenset()), [{
+                    "text": text, "reference": "#104", "evidence": f"{impact.NOTES}:1",
+                } if wanted else None])
+
+    def test_a_move_takes_the_one_change_that_names_either_key(self):
+        (self.base / "current/default/hypr/bindings.lua").write_text('o.bind("SUPER + C", "Calc", "calc")')
+        (self.base / "target/default/hypr/bindings.lua").write_text('o.bind("SUPER + SHIFT + C", "Calc", "calc")')
+        self.notes(change("Move Calculator to Super + Shift + C", 105))
+        _, findings = self.findings("--all", packages=frozenset())
+        self.assertEqual(findings[0]["title"], 'Moved: "Calc" from SUPER + C to SUPER + SHIFT + C.')
+        self.assertEqual(findings[0]["reason"]["reference"], "#105")
+
+    def test_a_list_of_new_shortcuts_takes_no_reason(self):
+        (self.base / "target/default/hypr/bindings.lua").write_text(
+            'o.bind("SUPER + W", "Close", "close-it")\no.bind("SUPER + N", "Notes", "notes")'
+        )
+        self.notes(change("Add Super + N for notes", 106))
+        self.assertEqual(self.reasons(packages=frozenset()), [None])
+
+    def test_a_deleted_command_takes_the_one_change_that_names_it(self):
+        (self.base / "current/bin/omarchy-sync-notes").write_text("#!/bin/bash\n")
+        (self.home / ".local/bin").mkdir(parents=True)
+        (self.home / ".local/bin/sync").write_text("#!/bin/sh\nomarchy-sync-notes\n")
+        for text, wanted in (("Fold omarchy-sync-notes into omarchy-sync", True), ("Add omarchy-sync-notes-all", False)):
+            with self.subTest(text=text):
+                self.notes(change(text, 107))
+                self.assertEqual(self.reasons(packages=frozenset())[0] is not None, wanted)
+
+    def test_an_edit_takes_the_change_its_migration_describes(self):
+        (self.home / ".config/app").mkdir(parents=True)
+        (self.home / ".config/app/app.conf").write_text("mine\n")
+        self.migration("1.sh", 'echo "Brighten the app theme"\nsed -i s/a/b/ ~/.config/app/app.conf\n')
+        self.notes(change("Brighten the app theme", 108))
+        self.assertEqual(self.reasons(packages=frozenset())[0]["reference"], "#108")
+
+    def test_a_migration_that_doesnt_echo_first_says_nothing(self):
+        for text in (
+            '# Replace Fictional Editor with Quill\nomarchy-pkg-drop fictional-editor\n',
+            'true\necho "Replace Fictional Editor with Quill"\nomarchy-pkg-drop fictional-editor\n',
+            'echo "Replace Fictional Editor with $NAME"\nomarchy-pkg-drop fictional-editor\n',
+            'echo "Replace Fictional Editor" "with Quill"\nomarchy-pkg-drop fictional-editor\n',
+        ):
+            with self.subTest(text=text):
+                self.migration("1.sh", text)
+                self.notes(change("Replace Fictional Editor with Quill", 101), change("Replace Fictional Editor with $NAME", 102))
+                self.assertEqual(self.reasons(), [None])
+
+    def test_a_line_that_isnt_a_listed_change_is_no_reason(self):
+        self.notes(
+            "Replace Fictional Editor with Quill by @fictional-dev in #101\r\n",
+            "- Replace Fictional Editor with Quill (#101)\r\n",
+            "- Replace Fictional Editor with Quill by fictional-dev in #101\r\n",
+        )
+        self.assertEqual(self.reasons(), [None])
+
+    def test_an_unknown_takes_no_reason(self):
+        self.migration("1.sh", 'echo "Replace Fictional Editor with Quill"\nomarchy-pkg-drop "${editors[@]}"\n')
+        self.notes(change("Replace Fictional Editor with Quill", 101))
+        self.assertEqual(self.reasons(), [None])
+
+    def test_missing_notes_change_nothing_but_the_reasons(self):
+        self.notes(change("Replace Fictional Editor with Quill", 101))
+        with_notes = self.check("--json", packages={"fictional-editor"})
+        (self.base / "target" / impact.NOTES).unlink()
+        without = self.check("--json", packages={"fictional-editor"})
+        self.assertEqual(with_notes[0], without[0])
+        self.assertEqual(json.loads(without[1])["findings"][0]["reason"], None)
+        self.assertEqual(
+            json.loads(with_notes[1]) | {"findings": None}, json.loads(without[1]) | {"findings": None}
+        )
+
+
+class Notes(ProgramCase):
+    """Fetching the notes along with a release, and keeping them in its folder."""
+
+    INSTALLED = frozenset({"fictional-editor"})
+
+    def setUp(self):
+        super().setUp()
+        (self.base / "target/migrations/1.sh").write_text('echo "Retire Fictional Editor"\nomarchy-pkg-drop fictional-editor\n')
+        self.kept = self.cache / "omaupdateimpact/v1.2.3" / impact.NOTES
+
+    def download(self, *args, notes=None):
+        return super().download(io.BytesIO(self.archive()), args=("v1.2.3", *args), notes=notes, packages=self.INSTALLED)
+
+    def answered(self, notes, *args):
+        """Run with the archive, and the notes request answered by notes."""
+        with mock.patch.object(impact.urllib.request, "urlopen", side_effect=[io.BytesIO(self.archive()), notes]), \
+                mock.patch.object(impact, "installed_packages", return_value=self.INSTALLED):
+            return self.run_main("v1.2.3", *args)
+
+    def test_notes_are_kept_with_the_release_and_give_reasons(self):
+        notes = "## Deprecations\r\n\r\n" + change("Retire Fictional Editor", 109)
+        code, out, err = self.download(notes=notes)
+        self.assertEqual((code, err), (1, ""))
+        self.assertIn("Why: Retire Fictional Editor (#109).", out)
+        self.assertEqual(self.kept.read_bytes(), notes.encode())
+
+    def test_kept_notes_arent_fetched_again(self):
+        self.download(notes=change("Retire Fictional Editor", 109))
+        with mock.patch.object(impact.urllib.request, "urlopen") as urlopen, \
+                mock.patch.object(impact, "installed_packages", return_value=self.INSTALLED):
+            code, out, _ = self.run_main("v1.2.3")
+        urlopen.assert_not_called()
+        self.assertEqual(code, 1)
+        self.assertIn("Why: Retire Fictional Editor (#109).", out)
+
+    def test_a_cached_release_without_notes_fetches_only_the_notes(self):
+        shutil.copytree(self.base / "target", self.cache / "omaupdateimpact/v1.2.3")
+        with mock.patch.object(impact.urllib.request, "urlopen", return_value=io.BytesIO(b'{"body": "notes"}')) as urlopen:
+            self.assertEqual(self.run_main("v1.2.3")[0], 0)
+        self.assertEqual([call.args[0].full_url for call in urlopen.call_args_list], [
+            "https://api.github.com/repos/omacom/omarchy/releases/tags/v1.2.3",
+        ])
+        self.assertEqual(self.kept.read_text(), "notes")
+
+    def test_a_tag_with_no_release_or_no_notes_keeps_empty_notes(self):
+        for notes in (lambda: refused(404), lambda: io.BytesIO(b'{"body": null}'), lambda: io.BytesIO(b"{}")):
+            with self.subTest(notes=notes):
+                shutil.rmtree(self.cache, ignore_errors=True)
+                code, _, err = self.answered(notes())
+                self.assertEqual((code, err), (1, ""))
+                self.assertEqual(self.kept.read_text(), "")
+
+    def test_notes_that_cant_be_fetched_change_nothing_but_the_reasons(self):
+        document = json.loads(self.download("--json", notes=change("Retire Fictional Editor", 109))[1])
+        self.assertEqual(document["findings"][0]["reason"]["reference"], "#109")
+        document["findings"][0]["reason"] = None
+        failures = (
+            lambda: OSError("no network"), lambda: refused(500), lambda: refused(403, x_ratelimit_remaining="0"),
+            lambda: io.BytesIO(b"not json"), lambda: io.BytesIO(b"[]"), lambda: io.BytesIO(b'{"body": 1}'),
+        )
+        for failure in failures:
+            with self.subTest(failure=failure):
+                shutil.rmtree(self.cache)
+                code, out, err = self.answered(failure(), "--json")
+                self.assertEqual((code, json.loads(out)), (1, document))
+                self.assertTrue(err.startswith("Couldn't fetch the release notes, so no finding says why: "), err)
+                self.assertEqual(len(err.splitlines()), 1)
+                # Nothing is kept, not even part of the notes, so the next run asks again.
+                self.assertEqual({path.name for path in self.kept.parent.iterdir()}, {"bin", "default", "migrations", "shell"})
+
+    def test_a_target_folder_is_never_fetched_for(self):
+        with mock.patch.object(impact.urllib.request, "urlopen") as urlopen:
+            self.assertEqual(self.check("v1.2.3")[0], 0)
+        urlopen.assert_not_called()
 
 
 class Bindings(ProgramCase):
@@ -3083,6 +3336,7 @@ class Cache(ProgramCase):
     def test_a_cached_release_prunes_nothing(self):
         self.fetch_all("v1.0.0", "v1.1.0")
         shutil.copytree(self.base / "target", self.cache / "omaupdateimpact/v1.2.0")
+        (self.cache / "omaupdateimpact/v1.2.0" / impact.NOTES).touch()
         with mock.patch.object(impact.urllib.request, "urlopen") as urlopen, \
                 mock.patch.object(impact, "installed_packages", return_value=set()):
             self.assertEqual(self.run_main("v1.2.0")[0], 0)
@@ -3157,8 +3411,8 @@ class RateLimits(ProgramCase):
 
 class Tokens(ProgramCase):
     def requests(self, *args):
-        """What was sent for a stable run: the API request, then the archive request."""
-        answers = [io.BytesIO(b'{"tag_name": "v1.2.3"}'), io.BytesIO(self.archive())]
+        """What was sent for a stable run: the API request, the archive request, then the notes request."""
+        answers = [io.BytesIO(b'{"tag_name": "v1.2.3"}'), io.BytesIO(self.archive()), io.BytesIO(b'{"body": ""}')]
         with mock.patch.object(impact.urllib.request, "urlopen", side_effect=answers) as urlopen, \
                 mock.patch.object(impact, "installed_packages", return_value=set()):
             self.assertEqual(self.run_main("--channel", "stable")[0], 0)
@@ -3166,22 +3420,24 @@ class Tokens(ProgramCase):
 
     def test_github_token_goes_to_the_api_and_no_further(self):
         with mock.patch.dict(os.environ, GITHUB_TOKEN="fictional"):
-            listing, archive = self.requests()
+            listing, archive, notes = self.requests()
         self.assertEqual(listing.get_header("Authorization"), "Bearer fictional")
         self.assertEqual(listing.headers, {})
         self.assertFalse(archive.has_header("Authorization"))
+        self.assertEqual(notes.get_header("Authorization"), "Bearer fictional")
+        self.assertTrue(notes.full_url.startswith("https://api.github.com/"))
 
     def test_no_token_sends_no_header(self):
         for environment in ({}, {"GITHUB_TOKEN": ""}):
             with self.subTest(environment=environment), mock.patch.dict(os.environ, environment):
-                listing, _ = self.requests()
+                listing, *_ = self.requests()
                 self.assertFalse(listing.has_header("Authorization"))
                 shutil.rmtree(self.cache)
 
     def test_a_token_with_a_trailing_newline_still_works(self):
         for token in ("fictional\n", "fictional\r\n", "  fictional "):
             with self.subTest(token=token), mock.patch.dict(os.environ, GITHUB_TOKEN=token):
-                listing, _ = self.requests()
+                listing, *_ = self.requests()
                 self.assertEqual(listing.get_header("Authorization"), "Bearer fictional")
                 shutil.rmtree(self.cache)
 
@@ -3210,7 +3466,7 @@ class Tokens(ProgramCase):
 
     def test_a_redirect_drops_the_token(self):
         with mock.patch.dict(os.environ, GITHUB_TOKEN="fictional"):
-            listing, _ = self.requests()
+            listing, *_ = self.requests()
         followed = impact.urllib.request.HTTPRedirectHandler().redirect_request(
             listing, None, 302, "Found", {}, "https://elsewhere.invalid/",
         )
@@ -3269,6 +3525,8 @@ class Channels(ProgramCase):
             if self.listing_error:
                 raise self.listing_error
             return io.BytesIO(self.listing)
+        if "/releases/tags/" in url:
+            raise refused(404)
         return io.BytesIO(self.archive())
 
     def fetch(self, *args, own_tree=False, packages=frozenset()):
@@ -3282,7 +3540,8 @@ class Channels(ProgramCase):
             return self.run_main(*args)
 
     def assert_downloaded(self, tag):
-        self.assertTrue(self.urls[-1].endswith(f"/archive/refs/tags/{tag}.tar.gz"), self.urls)
+        archives = [url for url in self.urls if "/archive/" in url]
+        self.assertTrue(archives[-1].endswith(f"/archive/refs/tags/{tag}.tar.gz"), self.urls)
 
     def test_stable_takes_the_latest_stable_release(self):
         self.on_channel("stable")
@@ -3360,8 +3619,7 @@ class Channels(ProgramCase):
     def test_a_tag_overrides_the_channel(self):
         self.on_channel("stable")
         code, out, _ = self.fetch("v2.0.0-rc1", "--channel", "rc")
-        self.assertEqual((code, len(self.urls)), (0, 1))
-        self.assert_downloaded("v2.0.0-rc1")
+        self.assertEqual((code, [url.rsplit("/", 1)[-1] for url in self.urls]), (0, ["v2.0.0-rc1.tar.gz", "v2.0.0-rc1"]))
         self.assertIn("-> v2.0.0-rc1 (rc channel, prerelease).", out.splitlines()[0])
 
     def test_a_tag_works_on_a_channel_without_tags(self):

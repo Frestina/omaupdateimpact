@@ -1,7 +1,8 @@
 # Omarchy release files
 
 Trimmed copies of two real Omarchy releases, for the end-to-end tests. Every file is
-unchanged, and sits at the path it has in the release. Files are only left out.
+unchanged, and sits at the path it has in the release, but for the notes below.
+Files are only left out.
 
 | Folder | Source tag |
 | --- | --- |
@@ -25,6 +26,10 @@ What was kept:
   which the fictional home holds a changed copy of.
 - One migration in v4.0.6 and `shell/README.md` in both, because a tree needs
   something in each folder.
+- In v4.5.0-rc2, `.omaupdateimpact-notes.md`: the release notes, unchanged and whole,
+  as the [releases API](https://api.github.com/repos/omacom/omarchy/releases/tags/v4.5.0-rc2)
+  gave them on 2026-11-03 and the cache keeps them. They aren't in the release's
+  files. They are where the cache puts them, so `--target` reads them.
 
 With an empty home, the report on these trees was the same as on the full releases
 when they were trimmed.

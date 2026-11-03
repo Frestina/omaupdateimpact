@@ -142,6 +142,16 @@ On a terminal, stderr says what is downloading and counts the megabytes. GitHub
 doesn't send the archive's size, so the count is all there is to show. Off a
 terminal the download is silent.
 
+After the archive, the release's notes come from `releases/tags/<tag>`, and are kept
+in its folder as `.omaupdateimpact-notes.md`, as GitHub sent them. They are written
+whole and then moved into place, so notes cut short never pass for the notes. A
+release with no notes, or a tag with no release (a 404), keeps empty notes, so it
+isn't asked again. A release already in the cache without notes asks for them
+alone. Notes that can't be fetched leave one line on stderr and no file, so the next
+run asks again. Nothing else changes: the findings, the "Checked" line and the exit
+code are the same, only without reasons. With `--target`, the notes are read from
+that folder if they are there, and never fetched.
+
 ### Checks
 
 Each check returns findings and says whether it could run.
@@ -388,9 +398,42 @@ nothing is read, so nothing is unknown.
 
 ## Findings and exit codes
 
-A finding has a check, a level, a title, a detail, a fix when there is one, and
-evidence. Levels are `attention`, `note` and `unknown`. An `unknown` also says
-whether the rest of its check still stood.
+A finding has a check, a level, a title, a detail, a fix when there is one, a
+reason when the release notes give one, and evidence. Levels are `attention`, `note`
+and `unknown`. An `unknown` also says whether the rest of its check still stood.
+
+### Reasons
+
+A reason is the change in the release notes that a finding comes from. A wrong
+reason is worse than none, so a finding takes one only when exactly one change names
+it. The same change listed in two sections is one change. A change is a list item
+as GitHub writes it, `- what changed by @someone in #123`: its text, without who
+made it, and its reference. Other lines aren't changes, such as the breaking-changes
+bullets, which name no pull request.
+
+What a change can name:
+
+- **A package:** the name as a word, or with a capital first letter, as a name in a
+  sentence has. `Tensaku` names `tensaku`, and `fictional-editor-git` doesn't name
+  `fictional-editor`. A name the notes spell another way, such as "Xournal++" for
+  `xournalpp`, isn't found.
+- **A migration**, for a removal or an edit it makes: a change whose text is what the
+  migration echoes on its first line, as Omarchy's migrations do, case, spacing and
+  a full stop aside. v4.5.0-rc2's 1791345484 echoes "Replace the Disk Usage TUI with
+  Disktree", which is #14426, and so the `dua-cli` it removes has that reason. An
+  echo with a variable in it says nothing.
+- **A command:** the deleted command's name as a word.
+- **Keys:** a chord in the change, such as `Super + Shift + Q`, read as the
+  bindings check reads keys. A move is about both its keys. A list of new or removed
+  shortcuts isn't about any one key, so it takes no reason.
+
+An `unknown` takes no reason: a limit of this tool isn't in the notes. A migration's
+first line isn't a reason by itself, only a way to find its change, so without notes
+no finding has a reason.
+
+The report prints the reason on a `Why:` line, after the finding and before its fix,
+with its reference, such as `Why: Replace the Disk Usage TUI with Disktree (#14426).`
+Its evidence is the line in the notes.
 
 | Exit | Meaning |
 | --- | --- |
@@ -460,7 +503,8 @@ only, and `NO_COLOR` turns it off unless it's empty.
 
 `--json` prints one document and nothing else: `schemaVersion`, the installed
 version, the target, the channel, what was checked, each check's state, and the
-findings. Exit codes don't change. A breaking change bumps `schemaVersion`.
+findings. Exit codes don't change. A breaking change bumps `schemaVersion`. A
+finding's reason has its text, its reference and its evidence, or is `null`.
 
 The plugin holds no rules, so the document carries what the report works out. What
 was checked is data, not the "Checked" line's text. Each check says whether it ran,
@@ -486,8 +530,9 @@ when either stops matching. `python3 -m tests.golden` writes them again.
 
 ## Files
 
-- `~/.cache/omaupdateimpact/<tag>`: unpacked releases. `XDG_CACHE_HOME` replaces
-  `~/.cache` unless it's empty. After a download, the release it fetched and the
+- `~/.cache/omaupdateimpact/<tag>`: unpacked releases, each with its notes as
+  `.omaupdateimpact-notes.md`. No release file has that name. `XDG_CACHE_HOME`
+  replaces `~/.cache` unless it's empty. After a download, the release it fetched and the
   newest other one by version stay, and the rest go. So an older release someone
   asks for is not removed before it's read. Nothing else in the cache is touched.
 - Reviewed findings, once they exist, in `~/.config/omaupdateimpact/`.

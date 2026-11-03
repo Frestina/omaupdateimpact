@@ -133,6 +133,28 @@ class ExitCodes(RealCommand):
         self.assertIn(f"Couldn't read what migrations/{UNREADABLE_MIGRATION} removes", flat(result.stdout))
         self.assertEqual(result.stdout.splitlines()[-1], "These checks ran in part: packages.")
 
+    def test_missing_notes_dont_change_the_exit_code(self):
+        release = self.base / "v4.5.0-rc2"
+        shutil.copytree(NEW, release)
+        (release / impact.NOTES).unlink()
+        unread = self.base / "unread-home"
+        shutil.copytree(self.clean_home, unread, symlinks=True)
+        (unread / ".local/state/omarchy/migrations" / UNREADABLE_MIGRATION).unlink()
+        for packages, home, code in (
+            (["fictional-editor"], self.clean_home, 0),
+            (["dua-cli"], self.clean_home, 1),
+            (["fictional-editor"], unread, 3),
+        ):
+            with self.subTest(packages=packages, home=home.name):
+                self.packages(*packages)
+                with_notes = self.compare(home, "--all")
+                without = self.command("--root", OLD, "--target", release, "--home", home, "--all")
+                self.assert_exit(with_notes, code)
+                self.assert_exit(without, code)
+                self.assertIn("Why:", with_notes.stdout)
+                self.assertNotIn("Why:", without.stdout)
+                self.assertEqual(without.stderr, "")
+
     def test_a_missing_pacman_exits_3(self):
         (self.stubs / "pacman").unlink()
         result = self.compare(self.clean_home)
@@ -291,6 +313,24 @@ class Report(RealCommand):
             'Fix: Add hl.unbind("SUPER + SHIFT + T") too.',
             self.attention(),
         )
+
+    def test_a_removal_says_why_from_the_release_notes(self):
+        self.assertIn(
+            "The update will remove dua-cli, which is installed here. "
+            "Why: Replace the Disk Usage TUI with Disktree (#14426). Fix: After the update, run omarchy pkg add dua-cli",
+            self.attention(),
+        )
+        findings = json.loads(self.compare(HOME, "--json").stdout)["findings"]
+        removal = next(finding for finding in findings if "remove dua-cli" in finding["title"])
+        self.assertEqual(removal["reason"], {
+            "text": "Replace the Disk Usage TUI with Disktree",
+            "reference": "#14426",
+            "evidence": f"{impact.NOTES}:328",
+        })
+
+    def test_a_finding_with_no_clear_match_says_no_why(self):
+        self.assertIn("The update may remove t3code-bin, which is installed here. Fix: If it goes", self.attention())
+        self.assertIn('SUPER + M: your "Music" will clash with the new default "Minimize window to the dock". Both will fire. Fix:', self.attention())
 
     def test_removed_packages_you_have_are_named(self):
         self.assertIn("The update will remove dua-cli, which is installed here.", self.attention())
@@ -457,7 +497,9 @@ class JsonDocs(unittest.TestCase):
         names = {key for text in self.printed.values() for key in keys(json.loads(text))}
         names |= {*impact.RESULTS, impact.RAN, impact.RAN_IN_PART, impact.DIDNT_RUN, *impact.CHECKS}
         names |= {count for counts in impact.CHECKS.values() for count in counts}
-        names |= {field.name for field in dataclasses.fields(impact.Finding)}
+        # What a finding is about is only for finding its reason, and isn't in the document.
+        names |= {field.name for field in dataclasses.fields(impact.Finding) if field.name != "about"}
+        names |= {field.name for field in dataclasses.fields(impact.Reason)}
         names |= {impact.ATTENTION, impact.NOTE, impact.UNKNOWN}
         for name in sorted(names):
             self.assertIn(f"`{name}`", self.doc)
@@ -659,6 +701,7 @@ class LocalDownloads(ProgramCase):
     CODELOAD = "/codeload/v4.5.0-rc2.tar.gz"
     LATEST = "/api/repos/omacom/omarchy/releases/latest"
     RELEASES = "/api/repos/omacom/omarchy/releases?per_page=100"
+    NOTES = "/api/repos/omacom/omarchy/releases/tags/v4.5.0-rc2"
 
     def setUp(self):
         super().setUp()
@@ -686,9 +729,16 @@ class LocalDownloads(ProgramCase):
             self.addCleanup(patcher.stop)
 
     def real_archive(self):
+        """The trimmed release as GitHub packs it, which is without its notes."""
         (self.base / "target").rename(self.base / "small")
         shutil.copytree(NEW, self.base / "target")
+        (self.base / "target" / impact.NOTES).unlink()
         return self.archive()
+
+    def serve_notes(self):
+        notes = (NEW / impact.NOTES).read_bytes()
+        self.routes[self.NOTES] = (200, {}, json.dumps({"tag_name": "v4.5.0-rc2", "body": notes.decode()}).encode())
+        return notes
 
     def serve(self, body, **headers):
         """GitHub redirects an archive to another host, and doesn't say its size."""
@@ -700,11 +750,28 @@ class LocalDownloads(ProgramCase):
 
     def test_a_download_gives_the_report_of_the_same_release_on_disk(self):
         self.serve(self.real_archive())
-        code, out, err = self.run_tag("v4.5.0-rc2")
+        notes = self.serve_notes()
+        code, out, err = self.run_tag("v4.5.0-rc2", "--all")
         self.assertEqual(err, "")
-        self.assertEqual([path for path, _ in self.seen], [self.ARCHIVE, self.CODELOAD])
-        self.assertEqual((code, out), self.run_tag("--target", str(NEW))[:2])
+        self.assertEqual([path for path, _ in self.seen], [self.ARCHIVE, self.CODELOAD, self.NOTES])
+        self.assertEqual((code, out), self.run_tag("--target", str(NEW), "--all")[:2])
+        self.assertIn("Why: Move Calculator to Super + Shift + Q,", out)
         self.assertTrue((self.cache / "omaupdateimpact/v4.5.0-rc2/bin").is_dir())
+        self.assertEqual((self.cache / "omaupdateimpact/v4.5.0-rc2" / impact.NOTES).read_bytes(), notes)
+
+    def test_notes_that_cant_be_fetched_leave_the_report_without_reasons(self):
+        self.serve(self.real_archive())
+        self.routes[self.NOTES] = (500, {}, b"")
+        code, out, err = self.run_tag("v4.5.0-rc2", "--all")
+        self.assertEqual(code, self.run_tag("--target", str(NEW))[0])
+        self.assertNotIn("Why:", out)
+        self.assertEqual(err, "Couldn't fetch the release notes, so no finding says why: HTTP Error 500: Internal Server Error\n")
+        self.assertFalse((self.cache / "omaupdateimpact/v4.5.0-rc2" / impact.NOTES).exists())
+        self.seen.clear()
+        notes = self.serve_notes()
+        self.assertIn("Why:", self.run_tag("v4.5.0-rc2", "--all")[1])
+        self.assertEqual([path for path, _ in self.seen], [self.NOTES])
+        self.assertEqual((self.cache / "omaupdateimpact/v4.5.0-rc2" / impact.NOTES).read_bytes(), notes)
 
     def test_a_cached_release_isnt_fetched_again(self):
         self.serve(self.real_archive())
@@ -779,6 +846,7 @@ class LocalDownloads(ProgramCase):
             (self.LATEST, "Bearer fictional-token"),
             (self.ARCHIVE, None),
             (self.CODELOAD, None),
+            (self.NOTES, "Bearer fictional-token"),
         ])
 
     def test_a_redirect_from_the_api_doesnt_carry_the_token(self):

@@ -24,10 +24,12 @@ Needs attention
     so it comes back.
     Fix: Add hl.unbind("SUPER + SHIFT + T") too.
   - The update will remove dua-cli, which is installed here.
+    Why: Replace the Disk Usage TUI with Disktree (#14426).
     Fix: After the update, run omarchy pkg add dua-cli (aur-add for an AUR package).
   - The update may remove t3code-bin, which is installed here.
     Fix: If it goes, run omarchy pkg add t3code-bin (aur-add for an AUR package).
   - The update will remove tensaku, which is installed here.
+    Why: Replace Tensaku with Omasnap for screenshots (#9446).
     Fix: After the update, run omarchy pkg add tensaku (aur-add for an AUR package).
   - ~/.bashrc calls omarchy-voxtype-remove, which the release deletes.
     Fix: Change or remove line 1. This tool can't tell what replaces the command.
@@ -94,8 +96,9 @@ If you already have that release, it says so, names any newer release on another
 channel, and exits 0. The `edge` and `dev` channels have no tagged releases, so
 those need a tag.
 
-The release is downloaded to `~/.cache/omaupdateimpact`. Two releases stay there and
-older ones are removed. If GitHub's rate limit gets in the way, set `GITHUB_TOKEN`.
+The release and its notes are downloaded to `~/.cache/omaupdateimpact`. Two releases
+stay there and older ones are removed. Without the notes, as when you are offline
+with a release already there, findings just don't say why. If GitHub's rate limit gets in the way, set `GITHUB_TOKEN`.
 Colour shows on a terminal only, and `NO_COLOR` turns it off.
 
 ## What it checks
@@ -117,6 +120,11 @@ Colour shows on a terminal only, and `NO_COLOR` turns it off.
   A file that is still
   Omarchy's default says nothing. The rest are notes, because a migration that is
   read and not run can't say what the file will hold.
+
+A finding says why, from the release notes, when one change there clearly names it.
+That is a package, a command or a key, or the change a migration describes in its
+first line. Two changes that name it give no reason, as a wrong one is worse than
+none.
 
 ## Exit codes
 
@@ -165,6 +173,9 @@ With `--json`, every exit code comes with a document. See [docs/json.md](docs/js
   that can't be read, or a text file over 10 MiB, is reported as a limit. A broken
   link counts, so remove the ones you don't need.
 - It doesn't read `omarchy_default_bindings = false` from your `hyprland.lua`.
+- A reason comes only from a change the notes list with its pull request. One that
+  names a package by another spelling, such as "Xournal++" for `xournalpp`, isn't
+  found. With `--target`, the notes are read from the folder, and never fetched.
 - It won't catch a failure during the update itself.
 
 ## Safety
@@ -176,7 +187,7 @@ It reads your config, so here is what it does with it.
 - **Nothing from a release runs.** Release files are read as text. A migration is
   split into shell tokens, never run. Key bindings are read without running Lua.
 - **Nothing about you leaves the machine.** It makes GET requests to GitHub for the
-  list of releases and the archive of a release. There is no telemetry, and the
+  list of releases, the archive of a release and its notes. There is no telemetry, and the
   report stays in your terminal.
 - **`GITHUB_TOKEN` goes to `api.github.com` only.** It isn't sent to the archive or
   on a redirect, and it is never printed.

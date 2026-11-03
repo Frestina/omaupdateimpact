@@ -9,6 +9,10 @@
   they edit or remove. A file that is still Omarchy's default says nothing. The rest
   are notes, and a path it can't place is a limit. A function's arguments are
   followed from its calls, and `${name##*/}` and its like are read.
+- A finding says why, from the release notes, when one change there clearly names
+  its package, command or keys, or the change its migration describes. The notes are
+  kept with the release in the cache. Without them findings give no reason, and
+  nothing else changes.
 
 ## 0.1.0 (2026-11-02)
 

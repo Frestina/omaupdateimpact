@@ -34,10 +34,11 @@ RELEASE = {
         'o.bind("SUPER + N", "Notifications", "omarchy-notifications")\n'
     ),
     "migrations/1700000000.sh": "true\n",
-    "migrations/1700000001.sh": "omarchy-pkg-drop fictional-editor\n",
+    "migrations/1700000001.sh": 'echo "Replace Fictional Editor with Fictional Writer"\nomarchy-pkg-drop fictional-editor\n',
     "migrations/1700000002.sh": 'omarchy-pkg-drop "${targets[@]}"\n',
     "migrations/1700000003.sh": "sed -i 's/dark/light/' ~/.config/fictional-app/theme.conf\n",
     "shell/Bar.qml": "Item {}\n",
+    impact.NOTES: "## Deprecations\n\n- Replace Fictional Editor with Fictional Writer by @fictional-dev in #101\n",
 }
 HOME = {
     ".config/hypr/bindings.lua": 'o.bind("SUPER + M", "Music", "fictional-player")\n',

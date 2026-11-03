@@ -52,7 +52,8 @@
       ],
       "detail": "Both will fire.",
       "fix": "Add hl.unbind(\"SUPER + M\") above your binding, or choose another key.",
-      "partial": false
+      "partial": false,
+      "reason": null
     },
     {
       "check": "bindings",
@@ -63,7 +64,8 @@
       ],
       "detail": "",
       "fix": "",
-      "partial": false
+      "partial": false,
+      "reason": null
     },
     {
       "check": "packages",
@@ -74,7 +76,12 @@
       ],
       "detail": "",
       "fix": "After the update, run omarchy pkg add fictional-editor (aur-add for an AUR package).",
-      "partial": false
+      "partial": false,
+      "reason": {
+        "text": "Replace Fictional Editor with Fictional Writer",
+        "reference": "#101",
+        "evidence": ".omaupdateimpact-notes.md:3"
+      }
     },
     {
       "check": "packages",
@@ -85,7 +92,8 @@
       ],
       "detail": "",
       "fix": "",
-      "partial": true
+      "partial": true,
+      "reason": null
     },
     {
       "check": "commands",
@@ -96,7 +104,8 @@
       ],
       "detail": "",
       "fix": "Change or remove line 2. This tool can't tell what replaces the command.",
-      "partial": false
+      "partial": false,
+      "reason": null
     },
     {
       "check": "edits",
@@ -108,7 +117,8 @@
       ],
       "detail": "It is read, not run, so the result isn't known. omaforecast can show it by running the migration in a sandbox.",
       "fix": "",
-      "partial": false
+      "partial": false,
+      "reason": null
     }
   ]
 }

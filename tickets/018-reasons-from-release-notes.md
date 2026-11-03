@@ -26,7 +26,7 @@ Disktree (#14426)". A reason changes what a person does about a finding.
 
 ## Done when
 
-- [ ] On v4.5.0-rc2 the `dua-cli` removal shows its reason, with a fixture.
-- [ ] A finding with no clear match shows no reason, with a test.
-- [ ] Missing notes don't change the exit code, with a test.
-- [ ] `tests/run` passes.
+- [x] On v4.5.0-rc2 the `dua-cli` removal shows its reason, with a fixture.
+- [x] A finding with no clear match shows no reason, with a test.
+- [x] Missing notes don't change the exit code, with a test.
+- [x] `tests/run` passes.

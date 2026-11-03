@@ -144,10 +144,19 @@ Paths already ruled out are not here; they are under
   it before then.
 - **A relative `XDG_CACHE_HOME`.** The XDG spec says to ignore it, and it's used as
   given. Waits for a real report.
-- **Control characters in text from a release.** A description in a binding goes to
-  the terminal as written, so an escape code in one would reach it. It only shows
-  text, and nothing runs. Strip them in the report, and in `--json` (016) if it
-  matters there.
+- **Control characters in text from a release.** A description in a binding, or a
+  reason from the release notes (018), goes to the terminal as written, so an escape
+  code in one would reach it. It only shows text, and nothing runs. Strip them in the
+  report, and in `--json` (016) if it matters there.
+- **A migration's own description as the reason.** Every v4.5.0-rc2 migration echoes
+  what it does on its first line, but only 2 of 211 match a change in the notes word
+  for word. The echo could be the reason when no change names the finding, and it
+  would work offline. 018 left it out: the ticket keeps reasons to the notes, and
+  "Use dua for Disk Usage TUI" on a migration that also drops `dust` says less than
+  it seems to. Waits to see how often findings come without a reason.
+- **Notes edited after they're kept.** The notes are fetched once per release, and an
+  RC's notes are sometimes edited later. A change added since isn't seen until the
+  release leaves the cache. Waits for a real miss.
 - **"Is now" on a key you turned off.** `hl.unbind` goes by text, so yours also turns
   off the default that lands on that key, and `SUPER + CTRL + T is now "Theme menu"`
   isn't true for you. It's a note and needs no action. Say the new default stays off.

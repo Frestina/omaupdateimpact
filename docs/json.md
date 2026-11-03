@@ -80,11 +80,22 @@ Each finding has every field, even an empty one.
 | `detail` | More about it, or `""`. |
 | `fix` | What to do, or `""`. Every `attention` finding has one. |
 | `partial` | On an `unknown`, `true` when the rest of its check still stood. |
+| `reason` | The change in the release notes it comes from, or `null`. |
 
-The report shows `title` and `detail` together, then the `fix`.
+The report shows `title` and `detail` together, then the `reason`, then the `fix`.
+
+A `reason` is there only when one change in the notes clearly names what the finding
+is about. Otherwise it is `null`, and so it is when the notes couldn't be fetched.
+
+| Field | Value |
+| --- | --- |
+| `text` | The change, as the notes list it, without who made it. |
+| `reference` | Where it was made, such as `#14426` or `omacom/omarchy-iso#310`. |
+| `evidence` | The line in the notes, such as `.omaupdateimpact-notes.md:328`. |
 
 Evidence in your home starts with `~`, and a line is `path:line`. Other paths are
-inside an Omarchy tree, such as `migrations/1700000001.sh`. A name that isn't
+inside an Omarchy tree, such as `migrations/1700000001.sh`. The notes are kept in the
+release's tree, as `.omaupdateimpact-notes.md`. A name that isn't
 UTF-8 is escaped as `\udcXX`, as JSON allows.
 
 This report is from small fictional trees:
@@ -144,7 +155,8 @@ This report is from small fictional trees:
       ],
       "detail": "Both will fire.",
       "fix": "Add hl.unbind(\"SUPER + M\") above your binding, or choose another key.",
-      "partial": false
+      "partial": false,
+      "reason": null
     },
     {
       "check": "bindings",
@@ -155,7 +167,8 @@ This report is from small fictional trees:
       ],
       "detail": "",
       "fix": "",
-      "partial": false
+      "partial": false,
+      "reason": null
     },
     {
       "check": "packages",
@@ -166,7 +179,12 @@ This report is from small fictional trees:
       ],
       "detail": "",
       "fix": "After the update, run omarchy pkg add fictional-editor (aur-add for an AUR package).",
-      "partial": false
+      "partial": false,
+      "reason": {
+        "text": "Replace Fictional Editor with Fictional Writer",
+        "reference": "#101",
+        "evidence": ".omaupdateimpact-notes.md:3"
+      }
     },
     {
       "check": "packages",
@@ -177,7 +195,8 @@ This report is from small fictional trees:
       ],
       "detail": "",
       "fix": "",
-      "partial": true
+      "partial": true,
+      "reason": null
     },
     {
       "check": "commands",
@@ -188,7 +207,8 @@ This report is from small fictional trees:
       ],
       "detail": "",
       "fix": "Change or remove line 2. This tool can't tell what replaces the command.",
-      "partial": false
+      "partial": false,
+      "reason": null
     },
     {
       "check": "edits",
@@ -200,7 +220,8 @@ This report is from small fictional trees:
       ],
       "detail": "It is read, not run, so the result isn't known. omaforecast can show it by running the migration in a sandbox.",
       "fix": "",
-      "partial": false
+      "partial": false,
+      "reason": null
     }
   ]
 }
