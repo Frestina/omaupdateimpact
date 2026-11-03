@@ -831,12 +831,14 @@ published. It can only be turned on once the repository is public.
 
 ## Neighbours
 
-Checked 2026-10-31. These are the closest tools; none compares your bindings,
-scripts and packages with a coming release.
+Checked 2026-10-31, and rumb added 2026-11-03. These are the closest tools; none
+reads a coming release's files and compares them with your bindings, scripts and
+packages.
 
 | Tool | What it does | How it differs |
 | --- | --- | --- |
 | [omaforecast](https://github.com/w-mir1/omaforecast) | Dry-runs migrations in a sandbox, shows config diffs, restores | Runs release code; its forecast covers files, not bindings or packages |
+| [rumb](https://github.com/HANCORE-linux/rumb) | Arch health dashboard: pending updates, failures since the last upgrade; previews an Omarchy rc | Reads release notes, not release files; checks only the keys the notes list as new defaults, against a running Hyprland; no migrations or deleted commands |
 | [OmaPreflight](https://github.com/p134c0d3/omarchy-omapreflight) | Diagnoses the current system before an update | Local only, never looks at the release |
 | [Aether Guard](https://github.com/eerengz/omarchy-plugin-aether-guard) | Local conditions before an update | Same: looks at this machine only |
 | [Update Review](https://github.com/jampick/omarchy-update-review) | Lists pending packages and restarts | About package versions, not your setup |
