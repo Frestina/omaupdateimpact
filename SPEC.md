@@ -46,8 +46,8 @@ answers one question: what will this update do to my machine?
 2. **Release code running.** Release files are read as text. `qmllint` reads QML,
    it doesn't run it.
 3. **Changes outside its own cache**, unless the user asked for it: an optional
-   install step, such as the menu entry, or `--ack`, which records a reviewed
-   finding.
+   install step, such as the menu entry, `--ack`, which records a reviewed
+   finding, or a setting chosen in the plugin's panel.
 4. **Anything leaving the machine.** It only makes GET requests to GitHub, with no
    telemetry. Findings stay local.
 5. **A finding without evidence.** Each one can name the line or file behind it.
@@ -617,8 +617,9 @@ shows three of them.
   and `--home` moves `~/.config` with it, as it does `~/.cache`.
 
 The command writes nothing else. `install.sh` writes its link, and with `--menu`
-one marked block in Omarchy's menu file. See [Install](#install). The plugin writes
-nothing, and its command writes only these. See [Plugin](#plugin).
+one marked block in Omarchy's menu file. See [Install](#install). The plugin changes
+only its own setting, when you choose one, and its command writes only these. See
+[Plugin](#plugin).
 
 ## Install
 
@@ -737,7 +738,11 @@ the download, about 200 MB, happens once, when a new release appears.
   come up after login.
 - Then one every `checkEveryHours`, the widget's one setting. It is 6 by default,
   as for Omarchy's own update icon, and goes from 1 to 168. 0 checks only when
-  asked, for a metered connection. The widget hands it to the service.
+  asked, for a metered connection. The widget hands it to the service. The panel
+  offers only when asked, 1, 6, 12 and 24 hours. A choice is saved on the widget's
+  own entry in `shell.json` through the shell's `updateEntryInline`, as Omarchy's
+  clock and weather panels save theirs. A value set by hand in the file is kept and
+  shown, even when the panel doesn't offer it.
 - "Check again" checks now and starts the wait over. A check already running isn't
   started twice. A run from a terminal or the menu at the same time shares the
   cache, and the release still downloads once. See [Downloads](#downloads).
@@ -793,21 +798,27 @@ anything out:
 5. Reviewed: a count.
 
 With `noUpdate`, it says Omarchy is up to date and names any newer release on
-another channel, from `newer`, or `newerProblem`. With `failed`, it shows `reason`.
+another channel, from `newer`, or `newerProblem`. Each newer release has a "Check"
+button that opens the report for that tag in the terminal, as "Open report" does. It
+says the release downloads first, about 200 MB, unless it is already in the cache.
+The bar keeps showing the user's own channel: a release chosen by hand is only in
+that report, as an update wouldn't deliver it. With `failed`, it shows `reason`.
 
-A left click opens it. It has two buttons. "Check again" checks now, as `r` does
-while it is open. "Open report" runs the same bundled command in
-`omarchy-launch-floating-terminal-with-presentation`, as the menu row does. No
-button changes the system. Marking a finding reviewed stays in the
-terminal, with `--ack`, for now.
+A left click opens it. "Check again" checks now, as `r` does while it is open.
+"Open report" runs the same bundled command in
+`omarchy-launch-floating-terminal-with-presentation`, as the menu row does. The
+"Check every" choice saves the widget's setting. Nothing else in the panel changes
+anything. Marking a finding reviewed stays in the terminal, with `--ack`, for now.
 
 ### What it runs and touches
 
 - It runs only the bundled command with `--json`, and the terminal launcher for
-  "Open report". It reads stdout as the document.
+  "Open report" and for checking a newer release by its tag. It reads stdout as the
+  document.
 - It asks nothing over the network. The command makes its GET requests to GitHub,
   as from a terminal.
-- It writes nothing. The command writes its cache, as from a terminal.
+- It writes only its own setting, through the shell, when the user picks one. The
+  command writes its cache, as from a terminal.
 - `omarchy plugin remove` deletes the plugin's folder. The cache and the reviewed
   findings stay, as after `install.sh --uninstall`, and the README names them.
 

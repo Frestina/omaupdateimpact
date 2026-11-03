@@ -2,7 +2,7 @@
 id: "023"
 title: Marketplace listing
 milestone: M4 Plugin
-depends_on: ["015", "022", "027"]
+depends_on: ["015", "022", "027", "029"]
 ---
 
 # 023 Marketplace listing
