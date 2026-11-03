@@ -578,7 +578,8 @@ when either stops matching. `python3 -m tests.golden` writes them again.
   written only by `--ack`. `XDG_CONFIG_HOME` replaces `~/.config` unless it's empty,
   and `--home` moves `~/.config` with it, as it does `~/.cache`.
 
-Nothing else is written.
+The command writes nothing else. `install.sh` writes its link, and with `--menu`
+one marked block in Omarchy's menu file. See [Install](#install).
 
 ## Install
 
@@ -595,10 +596,40 @@ own link, meaning a link that resolves to the checkout the script is in. Anythin
 else there, including a link to another checkout or a broken one, is left alone and
 is exit 1. Finding its own link already there is exit 0.
 
-`install.sh --uninstall` removes that link and nothing else. It names the cache
-and the reviewed findings when they are there, and leaves them for the user to
-delete. It says nothing is left behind only when neither is. `~/.local/bin` stays, even
-if the install created it, because other tools share it.
+`install.sh --uninstall` removes that link, and the menu row if `--menu` added it,
+and nothing else. It names the cache and the reviewed findings when they are there,
+and leaves them for the user to delete. It says nothing is left behind only when
+neither is. `~/.local/bin` stays, even if the install created it, because other
+tools share it.
+
+`install.sh --menu` does the same, then adds a row to the Omarchy menu, under
+Update, for people who don't open a terminal to update. It goes in
+`~/.config/omarchy/extensions/omarchy-menu.jsonc`, the file Omarchy's menu reads
+for user rows. Omarchy reads that path under `HOME`, so `XDG_CONFIG_HOME` doesn't
+move it. The format was checked against the menu code in v4.0.6 and v4.5.0-rc2.
+
+- The row is `update.omaupdateimpact`, labelled "Omarchy Impact". Its action is
+  `omarchy-launch-floating-terminal-with-presentation omaupdateimpact`, the launcher
+  Omarchy's own update row uses. It finds the command on `PATH`, which Omarchy's
+  login shell sets. Omarchy adds user rows after its own, so it is the last row
+  under Update.
+- The row sits in a block between two comment lines,
+  `// omaupdateimpact: begin. ...` and `// omaupdateimpact: end`, put right after
+  the file's opening `{`. Nothing else in the file changes. A file that is missing,
+  or holds only comments, gets an object of its own after them.
+- The file is read the way Omarchy reads it: comments on their own lines and
+  trailing commas are dropped, then it is parsed as JSON. If Omarchy couldn't read
+  it, or wouldn't show the row with the user's other rows unchanged, the file is
+  left alone and it's exit 1. So is a begin mark without its end.
+- A block already there is rewritten in place to the current row, so running it
+  twice adds one row. A file that is a link stays one, and keeps its mode.
+- Without `$OMARCHY_PATH/default/omarchy/omarchy-menu.jsonc`, the menu that reads
+  the file isn't there, so nothing is installed and it's exit 1. `OMARCHY_PATH`
+  falls back to `~/.local/share/omarchy`. That check comes before the link.
+
+`install.sh --uninstall` removes that block, and only it, before the link. A
+broken block is left alone with exit 1, and the link still goes. It says nothing
+about the menu when there is no block.
 
 The AUR package is in `packaging/aur`, and isn't published. It installs to `/usr/bin`
 and doesn't use `install.sh`.

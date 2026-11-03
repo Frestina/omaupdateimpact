@@ -69,13 +69,18 @@ cd omaupdateimpact
 That links the command into `~/.local/bin`, so keep the clone where it is. Running
 it twice is harmless, and it won't replace a file that isn't its own link.
 
+To also add an "Omarchy Impact" row to the Omarchy menu, under Update, run
+`./install.sh --menu` instead. The row opens the report in a terminal. It goes in
+`~/.config/omarchy/extensions/omarchy-menu.jsonc`, between two marked comment
+lines, and nothing else in that file changes.
+
 To update, run `git pull` in the clone. To remove it, run this there:
 
 ```
 ./install.sh --uninstall
 ```
 
-That removes the link. It tells you where the cache and your reviewed findings are,
+That removes the link, and the menu row if you added it. It tells you where the cache and your reviewed findings are,
 and leaves them for you to delete.
 
 ## Usage
@@ -195,8 +200,8 @@ With `--json`, every exit code comes with a document. See [docs/json.md](docs/js
 It reads your config, so here is what it does with it.
 
 - **It changes nothing.** The only thing it writes is its cache. `--ack` adds a line
-  to `~/.config/omaupdateimpact/reviewed`, and `./install.sh` adds one link, each
-  only when you run it.
+  to `~/.config/omaupdateimpact/reviewed`. `./install.sh` adds one link, and with
+  `--menu` one menu row. Each happens only when you run it.
 - **Nothing from a release runs.** Release files are read as text. A migration is
   split into shell tokens, never run. Key bindings are read without running Lua.
 - **Nothing about you leaves the machine.** It makes GET requests to GitHub for the

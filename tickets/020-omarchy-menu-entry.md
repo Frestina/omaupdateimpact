@@ -28,7 +28,7 @@ closest place to reach them.
 
 ## Done when
 
-- [ ] The row appears in the menu and opens the report.
-- [ ] The file's other contents are untouched, including after uninstall.
-- [ ] Running the step twice adds one row.
-- [ ] `tests/run` passes.
+- [x] The row appears in the menu and opens the report.
+- [x] The file's other contents are untouched, including after uninstall.
+- [x] Running the step twice adds one row.
+- [x] `tests/run` passes.

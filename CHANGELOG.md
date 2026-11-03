@@ -18,6 +18,10 @@
   report counts it at the end. Reviews are kept in
   `~/.config/omaupdateimpact/reviewed`, a file you can edit. `install.sh
   --uninstall` names it and leaves it.
+- `./install.sh --menu` adds an "Omarchy Impact" row to the Omarchy menu, under
+  Update. It opens the report in a terminal. The row is a marked block in
+  `~/.config/omarchy/extensions/omarchy-menu.jsonc`, and `--uninstall` removes only
+  that block.
 
 ## 0.1.0 (2026-11-02)
 
