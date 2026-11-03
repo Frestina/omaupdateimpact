@@ -57,7 +57,7 @@ when.
 | --- | --- | --- | --- |
 | 016 | [JSON output](016-json-output.md) | 002 | done |
 | 017 | [Migrations that touch files you changed](017-migrations-touching-your-files.md) | 002 | done |
-| 018 | [Say why, from the release notes](018-reasons-from-release-notes.md) | 002 | done |
+| 018 | [Say why, from the release notes](018-reasons-from-release-notes.md) | 002 | in progress |
 | 019 | [Reviewed findings stay quiet](019-reviewed-findings.md) | 002 | todo |
 | 020 | [An entry in the Omarchy menu](020-omarchy-menu-entry.md) | 015 | todo |
 | 025 | [The install tests don't use the developer's PATH](025-install-tests-own-path.md) | 013 | done |

@@ -25,6 +25,7 @@ Disktree (#14426)". A reason changes what a person does about a finding.
 - Work offline: with no notes, the finding appears without a reason.
 - Review follow-ups: a package's name names a change only when that change removes
   or replaces something, as a change that fixes or adds a package isn't why it goes.
+  Round 2: a notes test used the machine's `pacman`, so CI's Ubuntu jobs failed.
 
 ## Done when
 
@@ -33,4 +34,6 @@ Disktree (#14426)". A reason changes what a person does about a finding.
 - [x] Missing notes don't change the exit code, with a test.
 - [x] Against v4.5.0-rc2's notes, a removal of `mpv`, `docker`, `file` or `which`
       takes no reason, and `tensaku` and `dua-cli` still do. With a test.
+- [ ] No test depends on whether `pacman` is installed, and CI is green on all
+      three jobs.
 - [x] `tests/run` passes.

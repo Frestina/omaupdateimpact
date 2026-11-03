@@ -2764,8 +2764,9 @@ class Notes(ProgramCase):
 
     def test_a_cached_release_without_notes_fetches_only_the_notes(self):
         shutil.copytree(self.base / "target", self.cache / "omaupdateimpact/v1.2.3")
-        with mock.patch.object(impact.urllib.request, "urlopen", return_value=io.BytesIO(b'{"body": "notes"}')) as urlopen:
-            self.assertEqual(self.run_main("v1.2.3")[0], 0)
+        with mock.patch.object(impact.urllib.request, "urlopen", return_value=io.BytesIO(b'{"body": "notes"}')) as urlopen, \
+                mock.patch.object(impact, "installed_packages", return_value=self.INSTALLED):
+            self.assertEqual(self.run_main("v1.2.3")[0], 1)
         self.assertEqual([call.args[0].full_url for call in urlopen.call_args_list], [
             "https://api.github.com/repos/omacom/omarchy/releases/tags/v1.2.3",
         ])
