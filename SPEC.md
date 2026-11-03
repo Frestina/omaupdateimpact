@@ -347,8 +347,10 @@ Any other file of yours a migration writes is a note. It says the migration "loo
 like it edits" or "removes" the file, with the lines, and whether the file differs
 from Omarchy's default or has none. The evidence names the lines, the file and the
 default. A path with wildcards is one note that names the files of yours it matches.
-Migrations often go through every launcher and change only some, so the note says
-that it may.
+So is a word that names more than one file of yours, through a loop or a function's
+calls: v4.5.0-rc2's 1791382872 removes `~/.local/bin/$command` for 20 tools, but only
+the wrappers Omarchy wrote. Migrations often go through every launcher and change
+only some, so the note says that it may.
 
 ### Reading your files
 

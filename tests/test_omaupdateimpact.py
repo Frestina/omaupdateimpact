@@ -1105,11 +1105,20 @@ class Edits(unittest.TestCase):
         self.write(".config/app/app.conf")
         self.assertEqual(len(self.notes('sed -i s/a/b/ "${XDG_CONFIG_HOME:-$HOME/.config}/app/app.conf"\n')), 1)
 
-    def test_a_loop_over_a_list_follows_each_file(self):
+    def test_a_loop_over_a_list_is_one_note_naming_each_file(self):
         self.write(".config/app/app.conf")
         self.write(".config/other.conf")
-        text = 'for file in "$HOME"/.config/{app/app,other}.conf; do\n  echo x >>"$file"\ndone\n'
-        self.assertEqual(len(self.notes(text)), 2)
+        text = 'for file in "$HOME"/.config/{app/app,other,missing}.conf; do\n  echo x >>"$file"\ndone\n'
+        findings = self.findings(text)
+        self.assertEqual(titles(findings, "note"), [
+            "migrations/1.sh, line 2, looks like it edits 2 files of yours that aren't Omarchy's default.",
+        ])
+        self.assertTrue(findings[0].detail.startswith(
+            "They are ~/.config/app/app.conf and ~/.config/other.conf. It may edit only some."
+        ))
+        self.assertEqual(findings[0].evidence, [
+            "migrations/1.sh:2", "~/.config/app/app.conf", "config/app/app.conf", "~/.config/other.conf",
+        ])
 
     def test_a_path_built_from_variables_is_unknown_not_skipped(self):
         for text in (
@@ -1259,6 +1268,23 @@ class Edits(unittest.TestCase):
             "migrations/1.sh, line 1, looks like it edits ~/.config/app/app.conf, which differs from Omarchy's default.",
             "migrations/1.sh, line 4, looks like it removes ~/.config/other.conf, which Omarchy has no default for.",
         ])
+
+    def test_a_function_called_for_several_files_of_yours_is_one_note(self):
+        for name in ("one", "two", "three"):
+            self.write(f".local/bin/{name}")
+        self.write(".config/app/app.conf", "colour = blue\n")
+        text = (
+            'drop() {\n  [[ $(head -1 "$1") == "#wrapper" ]] && rm -f "$1"\n}\n'
+            "drop ~/.local/bin/one\ndrop ~/.local/bin/two\ndrop ~/.local/bin/three\n"
+            "drop ~/.local/bin/missing\ndrop ~/.config/app/app.conf\n"
+        )
+        findings = self.findings(text)
+        self.assertEqual(titles(findings, "note"), [
+            "migrations/1.sh, line 2, looks like it removes 3 files of yours that aren't Omarchy's default.",
+        ])
+        self.assertTrue(findings[0].detail.startswith(
+            "They are ~/.local/bin/one, ~/.local/bin/three and ~/.local/bin/two. It may remove only some."
+        ))
 
     def test_an_argument_passed_on_to_another_function_is_followed(self):
         self.write(".config/app/app.conf")

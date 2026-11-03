@@ -1512,9 +1512,10 @@ def existing(path, home):
 def script_writes(text, home):
     """The paths in your home a script writes, and the lines where it can't tell what they write.
 
-    Each path maps to the lines that write it, and whether those only remove it. It
-    can hold wildcards. A path only known when it runs is a line it can't tell
-    about, unless sudo runs the command: that is for system files.
+    Each write is the paths one word names, sorted: a loop or a function's calls can
+    give it several, and a path can hold wildcards. It maps to the lines that write
+    it, and whether those only remove it. A path only known when it runs is a line
+    it can't tell about, unless sudo runs the command: that is for system files.
     """
     tokens = shell_tokens(text)[0]
     commands = list(simple_commands(tokens))
@@ -1525,6 +1526,7 @@ def script_writes(text, home):
         targets, searched, sudo = written(words, wrappers)
         line = text.count("\n", 0, words[0].at) + 1
         for word, removes, sources, stays in targets:
+            places = set()
             for value in expansions(word, known, home):
                 folder = your_path(value, home)
                 for path in copied_into(folder, word, sources, stays, known, home) if folder else [value]:
@@ -1532,8 +1534,10 @@ def script_writes(text, home):
                     if place is None and not sudo:
                         unclear.add(line)
                     elif place and not (stays is not None and linked_already(place, sources, known, home)):
-                        lines, only_removes = paths.get(place, (set(), True))
-                        paths[place] = (lines | {line}, only_removes and removes)
+                        places.add(place)
+            if places:
+                lines, only_removes = paths.get(tuple(sorted(places)), (set(), True))
+                paths[tuple(sorted(places))] = (lines | {line}, only_removes and removes)
         # What find changes is only known when it runs.
         for word in searched:
             for value in expansions(word, known, home):
@@ -1569,14 +1573,19 @@ def on_lines(numbers):
     return f"{'line' if len(numbers) == 1 else 'lines'} {listed(numbers)}"
 
 
-def edit_finding(migration, place, lines, removes, changed, home):
-    """The note for the files of yours a migration looks like it writes at one path."""
+def edit_finding(migration, places, lines, removes, changed, home):
+    """The note for the files of yours a migration looks like it writes at one path, or at the paths one word names."""
+    place = places[0]
     shown = str(place).replace(str(home), "~", 1)
     verb = "removes" if removes else "edits"
     evidence = [f"{migration}:{line}" for line in sorted(lines)]
     detail = "It is read, not run, so the result isn't known. omaforecast can show it by running the migration in a sandbox."
     where = f"{migration}, {on_lines(sorted(lines))}, looks like it {verb}"
-    if wildcard(place, home):
+    if len(places) > 1:
+        title = f"{where} {len(changed)} files of yours that aren't Omarchy's default."
+        names = listed(str(path).replace(str(home), "~", 1) for path, _ in changed)
+        detail = f"They are {names}. It may {verb[:-1]} only some. {detail}"
+    elif wildcard(place, home):
         folder = next(parent for parent in place.parents if not wildcard(parent, home))
         names = listed(str(path.relative_to(folder)) for path, _ in changed)
         title = (
@@ -1612,14 +1621,17 @@ def compare_edits(current, target, home, checked):
             unknown.append(Finding("edits", UNKNOWN, title, [migration]))
             continue
         read += 1
-        for place, (lines, removes) in sorted(paths.items()):
+        for places, (lines, removes) in sorted(paths.items()):
             changed = []
-            for file in existing(place, home):
+            for file in dict.fromkeys(file for place in places for file in existing(place, home)):
                 default, unchanged = omarchy_default(file, home, (current, target))
                 if not unchanged:
                     changed.append((file, default))
+            # Of several paths, one that is yours is a note on its own.
+            if len(places) > 1 and len(changed) == 1:
+                places = (changed[0][0],)
             if changed:
-                findings.append(edit_finding(migration, place, lines, removes, changed, home))
+                findings.append(edit_finding(migration, places, lines, removes, changed, home))
         if unclear:
             unknown.append(Finding(
                 "edits",

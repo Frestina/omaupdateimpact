@@ -154,12 +154,13 @@ With `--json`, every exit code comes with a document. See [docs/json.md](docs/js
   `x || exit 0`, still says "will remove".
 - A migration's writes are read as text too. A function's `"$1"` holds what its
   calls pass. A path only known when it runs, such as a `$(...)` or an array, is
-  reported as a limit, unless `sudo` writes it, which is taken to be a system file. So is `find` in your files with `-delete`, or with `-exec` running a
+  reported as a limit, unless `sudo` writes it, which is taken to be a system
+  file. So is `find` in your files with `-delete`, or with `-exec` running a
   writer. Other writers, such as `xargs`, `awk -i inplace`, `perl -i`, `rsync`,
   `truncate` or a `bash -c` string, aren't read, and neither is a write made by a
-  release command, such as `omarchy-bar`. A loop over files may change only some
-  of them, and the note can't tell which. `~/.cache` and `~/.local/state` aren't
-  counted as your files.
+  release command, such as `omarchy-bar`. A loop or a function called for several
+  files may change only some of them. Those are one note, and it can't tell which.
+  `~/.cache` and `~/.local/state` aren't counted as your files.
 - Your files are read as text. A command called from a binary isn't seen. A file
   that can't be read, or a text file over 10 MiB, is reported as a limit. A broken
   link counts, so remove the ones you don't need.

@@ -31,6 +31,9 @@ the write becomes a note or nothing.
   read for a value that is known, as v4.5.0-rc2's 1786719479 links to
   `skills/${name##*/}`.
 - Record the rules in the spec section above.
+- Review follow-ups: when one line writes several files of yours through a loop or
+  a function's calls, that is one note that names them and says it may change only
+  some, as a wildcard's note does.
 
 ## Not in this ticket
 
@@ -46,4 +49,7 @@ the write becomes a note or nothing.
 - [x] `${name##*/}` and its three neighbours are read, with tests.
 - [ ] Run over v4.5.0-rc2's and v4.5.0-rc3's migrations, the unknowns left have
       been read, and each is a path that is only known when the migration runs.
+- [x] A line that writes several files of yours through a loop or a function's
+      calls gives one note that names them and says it may change only some. With
+      a test.
 - [x] `tests/run` passes, with `ruff` run, from a scratch venv if it isn't installed.

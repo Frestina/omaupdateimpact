@@ -60,9 +60,6 @@ Paths already ruled out are not here; they are under
   home, so the note names every file in your skills folder, not only Omarchy's
   skills, and it can't tell a link that already points there. Matching it in the
   release would name the links one by one.
-- **One note per wrapper.** v4.5.0-rc2's 1791382872 removes the `~/.local/bin`
-  wrappers of 20 tools, but only those still as Omarchy wrote them. Each one you
-  have is its own note. Watch whether that is too many.
 - **Loops that edit only some files.** v4.5.0-rc2's 1791696584 and 1791875754 go
   through every launcher and change only web apps. The note names every launcher
   that isn't Omarchy's, so on a real machine it named three that aren't web apps.
