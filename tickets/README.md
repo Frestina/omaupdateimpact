@@ -56,7 +56,7 @@ when.
 | # | Ticket | Depends on | Status |
 | --- | --- | --- | --- |
 | 016 | [JSON output](016-json-output.md) | 002 | done |
-| 017 | [Migrations that touch files you changed](017-migrations-touching-your-files.md) | 002 | in progress |
+| 017 | [Migrations that touch files you changed](017-migrations-touching-your-files.md) | 002 | done |
 | 018 | [Say why, from the release notes](018-reasons-from-release-notes.md) | 002 | todo |
 | 019 | [Reviewed findings stay quiet](019-reviewed-findings.md) | 002 | todo |
 | 020 | [An entry in the Omarchy menu](020-omarchy-menu-entry.md) | 015 | todo |

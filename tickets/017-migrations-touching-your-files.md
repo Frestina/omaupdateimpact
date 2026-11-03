@@ -54,6 +54,6 @@ This finds likely ones by reading them, and says that's what it's doing.
       With tests.
 - [x] `find -exec grep` in your files gives nothing, and `find -exec rm` is
       `unknown`. With a test.
-- [ ] `ruff check bin/omaupdateimpact tests` passes with ruff 0.17.3, and CI is
+- [x] `ruff check bin/omaupdateimpact tests` passes with ruff 0.17.3, and CI is
       green on all three jobs.
 - [x] `tests/run` passes.
