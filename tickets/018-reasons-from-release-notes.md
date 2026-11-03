@@ -34,6 +34,6 @@ Disktree (#14426)". A reason changes what a person does about a finding.
 - [x] Missing notes don't change the exit code, with a test.
 - [x] Against v4.5.0-rc2's notes, a removal of `mpv`, `docker`, `file` or `which`
       takes no reason, and `tensaku` and `dua-cli` still do. With a test.
-- [ ] No test depends on whether `pacman` is installed, and CI is green on all
+- [x] No test depends on whether `pacman` is installed, and CI is green on all
       three jobs.
 - [x] `tests/run` passes.
