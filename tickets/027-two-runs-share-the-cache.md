@@ -34,7 +34,7 @@ package removals, which looks clean, so that half breaks the first rule.
 
 ## Done when
 
-- [ ] Two runs at once download a release once, and both finish with the same
+- [x] Two runs at once download a release once, and both finish with the same
       result. A test shows it, and fails without the lock.
-- [ ] A run reading an older release keeps it while another run prunes.
-- [ ] The spec says how the cache is shared.
+- [x] A run reading an older release keeps it while another run prunes.
+- [x] The spec says how the cache is shared.

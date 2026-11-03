@@ -6,6 +6,7 @@ read as text.
 """
 
 import argparse
+import contextlib
 import sys
 import tempfile
 from pathlib import Path
@@ -39,8 +40,8 @@ def main(argv=None):
     tags = impact.release_tags()
     if not tags:
         return report("The releases list", ["it holds no usable release."])
-    with tempfile.TemporaryDirectory() as cache:
-        return report(tags[0], problems(impact.fetch_release(tags[0], Path(cache))))
+    with tempfile.TemporaryDirectory() as cache, contextlib.ExitStack() as held:
+        return report(tags[0], problems(impact.fetch_release(tags[0], Path(cache), held)))
 
 
 if __name__ == "__main__":

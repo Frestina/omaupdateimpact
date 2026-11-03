@@ -1,3 +1,4 @@
+import argparse
 import contextlib
 import errno
 import gzip
@@ -13,6 +14,7 @@ import tarfile
 import tempfile
 import threading
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from email.message import Message
 from http.client import IncompleteRead
 from pathlib import Path
@@ -3573,6 +3575,120 @@ class Cache(ProgramCase):
         self.assertEqual(self.download(io.BytesIO(self.archive()))[0], 0)
         self.assertTrue((self.home / ".cache/omaupdateimpact/v1.2.3/bin").is_dir())
 
+
+
+class Noticed(io.StringIO):
+    """stderr that sets an event when a run says it is waiting."""
+
+    def __init__(self, event):
+        super().__init__()
+        self.event = event
+
+    def write(self, text):
+        if "Waiting" in text:
+            self.event.set()
+        return super().write(text)
+
+
+class Held(io.BytesIO):
+    """An archive whose download doesn't start until the event is set."""
+
+    def __init__(self, data, event):
+        super().__init__(data)
+        self.event = event
+
+    def read(self, *args):
+        self.event.wait(10)
+        return super().read(*args)
+
+
+class SharedCache(ProgramCase):
+    """Two runs at once, as threads. A lock on a folder holds against another thread as against another process."""
+
+    def setUp(self):
+        super().setUp()
+        (self.base / "target/migrations/1.sh").write_text("omarchy-pkg-drop a\n")
+        self.data = self.archive()
+        self.archives = []
+        self.downloading, self.second, self.go = threading.Event(), threading.Event(), threading.Event()
+        # With hold set, the first run to ask for the packages stops there until reading is done.
+        self.hold, self.reading, self.done_reading = False, threading.Event(), threading.Event()
+        self.stderr = Noticed(self.second)
+        self.enterContext(mock.patch.object(impact.urllib.request, "urlopen", self.answer))
+        self.enterContext(mock.patch.object(impact, "installed_packages", self.packages))
+        self.enterContext(contextlib.redirect_stderr(self.stderr))
+        self.pool = self.enterContext(ThreadPoolExecutor(2))
+        # Before the pool shuts down, so a failed test doesn't leave a run waiting.
+        self.addCleanup(self.go.set)
+        self.addCleanup(self.done_reading.set)
+
+    def answer(self, request, timeout):
+        if "/releases/tags/" in request.full_url:
+            raise refused(404)
+        self.archives.append(request.full_url)
+        if len(self.archives) > 1:
+            self.second.set()
+        self.downloading.set()
+        return Held(self.data, self.go)
+
+    def packages(self):
+        if self.hold and not self.reading.is_set():
+            self.reading.set()
+            self.assertTrue(self.done_reading.wait(10))
+        return {"a"}
+
+    def start(self, tag):
+        options = argparse.Namespace(
+            tag=tag, channel=None, target=None, root=self.base / "current", home=self.home,
+            ack=None, debug=False, all=False, json=False,
+        )
+        return self.pool.submit(impact.run, options)
+
+    def cache_release(self, tag):
+        shutil.copytree(self.base / "target", self.cache / "omaupdateimpact" / tag)
+        (self.cache / "omaupdateimpact" / tag / impact.NOTES).touch()
+
+    def cached(self):
+        return sorted(path.name for path in (self.cache / "omaupdateimpact").iterdir())
+
+    def test_two_runs_at_once_download_once_and_agree(self):
+        first = self.start("v1.2.3")
+        self.assertTrue(self.downloading.wait(10))
+        second = self.start("v1.2.3")
+        # The second run either waits for the cache or, without the lock, downloads too.
+        self.assertTrue(self.second.wait(10))
+        self.go.set()
+        first, second = first.result(10), second.result(10)
+        self.assertEqual(first["result"], "attention")
+        self.assertEqual(second, first)
+        self.assertEqual(len(self.archives), 1)
+        self.assertEqual(self.stderr.getvalue(), "Another omaupdateimpact run is using the cache. Waiting for it to finish.\n")
+        self.assertEqual(self.cached(), ["v1.2.3"])
+
+    def test_a_release_being_read_isnt_pruned_under_it(self):
+        self.go.set()
+        self.cache_release("v1.0.0")
+        self.cache_release("v1.1.0")
+        self.hold = True
+        # The packages are asked for after the bindings are read and before the migrations are.
+        older = self.start("v1.0.0")
+        self.assertTrue(self.reading.wait(10))
+        self.assertEqual(self.start("v1.2.0").result(10)["result"], "attention")
+        self.assertEqual(self.cached(), ["v1.0.0", "v1.1.0", "v1.2.0"])
+        self.done_reading.set()
+        self.assertEqual(older.result(10)["result"], "attention")
+        # Once no run reads it, the next download prunes it.
+        self.assertEqual(self.start("v1.3.0").result(10)["result"], "attention")
+        self.assertEqual(self.cached(), ["v1.2.0", "v1.3.0"])
+
+    def test_a_run_gives_up_on_a_cache_held_too_long(self):
+        cache = self.cache / "omaupdateimpact"
+        cache.mkdir(parents=True)
+        with mock.patch.object(impact, "CACHE_WAIT", 0.3), impact.locked(cache, impact.fcntl.LOCK_EX):
+            document = self.start("v1.2.3").result(10)
+        self.assertEqual(document["result"], "failed")
+        self.assertIn("another omaupdateimpact run held the cache", document["reason"])
+        self.assertEqual(self.archives, [])
 
 class RateLimits(ProgramCase):
     def api_failure(self, error):

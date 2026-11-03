@@ -154,6 +154,18 @@ run asks again. Nothing else changes: the findings, the "Checked" line and the e
 code are the same, only without reasons. With `--target`, the notes are read from
 that folder if they are there, and never fetched.
 
+Two runs can share the cache, such as the plugin's check and one from a terminal.
+A run locks the cache folder while it looks for its release, downloads it and
+prunes. Another run waits for that lock, even for a release already there, as a
+prune could otherwise take it. Then it finds the release in the cache, so a release
+downloads once. While it waits, stderr says once, on a terminal or not: "Another
+omaupdateimpact run is using the cache. Waiting for it to finish." It waits up to
+15 minutes. Then it fails as a download that failed, with exit 2, and says another
+run held the cache. A run also holds a shared lock on the release it reads, until
+it ends, and a prune leaves a locked release where it is. The locks are `flock` on
+the folders themselves, so no lock file is written, and the kernel frees them when
+a run ends, however it ends. With `--target`, nothing is locked.
+
 ### Checks
 
 Each check returns findings and says whether it could run.
@@ -597,7 +609,9 @@ shows three of them.
   `.omaupdateimpact-notes.md`. No release file has that name. `XDG_CACHE_HOME`
   replaces `~/.cache` unless it's empty. After a download, the release it fetched and the
   newest other one by version stay, and the rest go. So an older release someone
-  asks for is not removed before it's read. Nothing else in the cache is touched.
+  asks for is not removed before it's read. Nor is one that another run is
+  reading: the next download removes it. See [Downloads](#downloads). Nothing else
+  in the cache is touched.
 - `~/.config/omaupdateimpact/reviewed`: [reviewed findings](#reviewed-findings),
   written only by `--ack`. `XDG_CONFIG_HOME` replaces `~/.config` unless it's empty,
   and `--home` moves `~/.config` with it, as it does `~/.cache`.
@@ -725,7 +739,8 @@ the download, about 200 MB, happens once, when a new release appears.
   as for Omarchy's own update icon, and goes from 1 to 168. 0 checks only when
   asked, for a metered connection. The widget hands it to the service.
 - "Check again" checks now and starts the wait over. A check already running isn't
-  started twice.
+  started twice. A run from a terminal or the menu at the same time shares the
+  cache, and the release still downloads once. See [Downloads](#downloads).
 - An update restarts the shell, so the service loads again and checks the new
   version 2 minutes later. No hook is needed.
 - It doesn't use `omarchy-update-available` to decide. That runs `checkupdates`,

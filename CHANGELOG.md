@@ -24,6 +24,9 @@
   that block.
 - The command leaves its own files out: the checkout it runs from, and a plugin with
   its id. So a clone in the plugins folder, tests included, isn't reported as yours.
+- Two runs at once share the cache. The second waits for the first to download,
+  then reads the same release, instead of downloading it again and failing. A
+  release one run is reading isn't pruned by the other.
 
 ## 0.1.0 (2026-11-02)
 

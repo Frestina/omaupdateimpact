@@ -44,6 +44,7 @@ if sys.version_info < (3, 11, 4):
 import argparse
 import contextlib
 import dataclasses
+import fcntl
 import fnmatch
 import glob
 import gzip
@@ -58,6 +59,7 @@ import subprocess
 import tarfile
 import tempfile
 import textwrap
+import time
 import traceback
 import urllib.error
 import urllib.request
@@ -104,6 +106,9 @@ VERSION = re.compile(r"(?:\d+:)?v?(\d+)\.(\d+)\.(\d+)(?:-?rc(\d+))?(?:-\d+)?")
 TAG = re.compile(r"v\d+\.\d+\.\d+(?:-rc\d+)?", re.ASCII)
 TOKEN = re.compile(r"[\x21-\x7e]+")
 KEPT_RELEASES = 2
+# How long a run waits for another to finish with the cache, and how often it looks, in seconds.
+CACHE_WAIT = 15 * 60
+CACHE_POLL = 0.2
 PACKAGE = re.compile(r"[\w@.+-]+")
 PACKAGE_DROPS = {"omarchy-pkg-drop", "omarchy-pkg-remove"}
 PACKAGE_ADDS = {"omarchy-pkg-add", "omarchy-pkg-aur-add"}
@@ -2237,38 +2242,93 @@ def save(response, out, tag):
         print(file=sys.stderr)
 
 
+@contextlib.contextmanager
+def locked(path, how):
+    """Hold a lock on a folder in the cache. The kernel lets go of it when the run ends, however it ends."""
+    fd = os.open(path, os.O_RDONLY)
+    try:
+        fcntl.flock(fd, how)
+        yield
+    finally:
+        os.close(fd)
+
+
+@contextlib.contextmanager
+def cache_locked(cache):
+    """One run at a time downloads or prunes. Another waits, then finds the release there."""
+    cache.mkdir(parents=True, exist_ok=True)
+    fd = os.open(cache, os.O_RDONLY)
+    try:
+        deadline = time.monotonic() + CACHE_WAIT
+        waiting = False
+        while not try_lock(fd, fcntl.LOCK_EX):
+            if time.monotonic() >= deadline:
+                minutes = round(CACHE_WAIT / 60)
+                raise TimeoutError(f"another omaupdateimpact run held the cache for {minutes} minutes")
+            if not waiting:
+                print("Another omaupdateimpact run is using the cache. Waiting for it to finish.", file=sys.stderr)
+                waiting = True
+            time.sleep(CACHE_POLL)
+        yield
+    finally:
+        os.close(fd)
+
+
+def try_lock(fd, how):
+    try:
+        fcntl.flock(fd, how | fcntl.LOCK_NB)
+    except BlockingIOError:
+        return False
+    return True
+
+
 def prune(cache, tag, scratch):
     """Keep the release just fetched and the newest other. The rest move to scratch, which goes away.
 
     A rename is atomic, so a run cut short can't leave half a release that passes for a cached one.
+    A release another run is reading stays, and a later prune takes it.
     """
     releases = [path for path in cache.iterdir() if TAG.fullmatch(path.name)]
     releases.sort(key=lambda path: (path.name == tag, version_key(path.name)), reverse=True)
     for old in releases[KEPT_RELEASES:]:
-        old.rename(scratch / old.name)
+        try:
+            with locked(old, fcntl.LOCK_EX | fcntl.LOCK_NB):
+                old.rename(scratch / old.name)
+        except BlockingIOError:
+            continue
+        except FileNotFoundError:
+            # A link to nothing, which no run can be reading.
+            old.rename(scratch / old.name)
 
 
-def fetch_release(tag, cache):
+def fetch_release(tag, cache, held):
+    """The release's folder in the cache, downloaded if it isn't there. held keeps it until the run ends."""
     root = cache / tag
-    if not root.is_dir():
-        cache.mkdir(parents=True, exist_ok=True)
-        url = f"https://github.com/{REPO}/archive/refs/tags/{tag}.tar.gz"
-        with tempfile.TemporaryDirectory(dir=cache) as scratch:
-            archive = Path(scratch) / "release.tar.gz"
-            with github(url, 120) as response, archive.open("wb") as out:
-                save(response, out, tag)
-            # tarfile stops at the end-of-archive marker and never reaches gzip's checksum.
-            with gzip.open(archive) as stream:
-                while stream.read(1 << 20):
-                    pass
-            with tarfile.open(archive) as tar:
-                tar.extractall(scratch, filter="data")
-            unpacked = next((p for p in Path(scratch).iterdir() if p.is_dir()), None)
-            if unpacked is None:
-                raise tarfile.ReadError("the archive holds no release")
-            unpacked.rename(root)
-            prune(cache, tag, Path(scratch))
+    with cache_locked(cache):
+        if not root.is_dir():
+            download(tag, cache, root)
+        # Taken under the cache's lock, so no prune can come between finding the release and holding it.
+        held.enter_context(locked(root, fcntl.LOCK_SH))
     return root
+
+
+def download(tag, cache, root):
+    url = f"https://github.com/{REPO}/archive/refs/tags/{tag}.tar.gz"
+    with tempfile.TemporaryDirectory(dir=cache) as scratch:
+        archive = Path(scratch) / "release.tar.gz"
+        with github(url, 120) as response, archive.open("wb") as out:
+            save(response, out, tag)
+        # tarfile stops at the end-of-archive marker and never reaches gzip's checksum.
+        with gzip.open(archive) as stream:
+            while stream.read(1 << 20):
+                pass
+        with tarfile.open(archive) as tar:
+            tar.extractall(scratch, filter="data")
+        unpacked = next((p for p in Path(scratch).iterdir() if p.is_dir()), None)
+        if unpacked is None:
+            raise tarfile.ReadError("the archive holds no release")
+        unpacked.rename(root)
+        prune(cache, tag, Path(scratch))
 
 
 def fetch_notes(tag, root):
@@ -2489,6 +2549,12 @@ def fail(what, error, debug):
 
 
 def run(options):
+    # A release read from the cache is held until the run ends, so another run's prune leaves it.
+    with contextlib.ExitStack() as held:
+        return check(options, held)
+
+
+def check(options, held):
     if options.tag and not TAG.fullmatch(options.tag):
         raise NoRelease(f"{options.tag} isn't a release tag. Tags look like v1.2.3 or v1.2.3-rc1.")
     options.home = options.home or Path.home()
@@ -2509,7 +2575,7 @@ def run(options):
                 if options.ack:
                     raise NotReviewable("there is no update, so there is nothing to review.")
                 return no_update(version, tag, channel)
-            target = fetch_release(tag, cache)
+            target = fetch_release(tag, cache, held)
             fetch_notes(tag, target)
         except DOWNLOAD_ERRORS as error:
             return fail("Couldn't download the release", error, options.debug)
