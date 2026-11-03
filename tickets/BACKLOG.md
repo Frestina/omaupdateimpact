@@ -205,6 +205,13 @@ Paths already ruled out are not here; they are under
   unlikely, but one would leave the bar on its last state until the shell restarts.
   Stopping it mid-download leaves scratch in the cache (see above). Waits for a real
   report.
+- **The plugin's timer doesn't count sleep.** Qt's timers run on a clock that stops
+  while the machine sleeps, so a laptop that sleeps most of the day checks less often
+  than every 6 hours. A login or an update restarts the shell, which checks again.
+  Comparing the wall clock on a short timer would fix it. Waits for a real report.
+- **"Open report" with a space in `HOME`.** The launcher puts the command into a
+  second `bash -c`, so the quoted path is split again there. Quoting it twice would
+  fix it. Rare enough to wait for a real report.
 - **The plugin reads all of stdout.** The command is the plugin's own, so its output
   is trusted and isn't cut while it is read, only the stderr line it shows. Marketplace
   reviewers ask for limits while receiving. Revisit in 023 if review asks.
