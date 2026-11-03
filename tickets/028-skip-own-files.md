@@ -57,6 +57,6 @@ itself.
 - [x] A command in a fictional `/usr/bin` still reads a file of yours linked to
       `/usr/local/bin`.
 - [x] The spec says what makes the folder above `bin/` the tool's own.
-- [ ] A plugin whose `manifest.json` can't be stat'ed is read as yours on Python
+- [x] A plugin whose `manifest.json` can't be stat'ed is read as yours on Python
       3.11 too, CI passes on all three jobs, and a test fails without the fix on the
       Python that runs `tests/run` locally.
