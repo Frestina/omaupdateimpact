@@ -17,6 +17,8 @@ List the plugin where Omarchy users look for tools.
   version after 0.1.0, as the changelog's Unreleased holds `--json`, the edits
   check, reasons, `--ack`, the menu row and the plugin. `__version__` and
   `manifest.json` both say it, and the tag is made from it.
+- The CHANGELOG names the plugin under the new version: the bar icon, its panel,
+  checking a newer release and choosing how often. 022 left it out.
 - Remove the AUR package. It was never published, and publishing needs an AUR
   account, which the owner doesn't have. The plugin and the clone with
   `install.sh` are the two ways to install. Delete `packaging/aur` and its version
