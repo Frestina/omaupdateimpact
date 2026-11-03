@@ -21,8 +21,8 @@ List the plugin where Omarchy users look for tools.
   on its own: the plugin brings its own command, and the clone with `install.sh` is
   only for the terminal and the menu row.
 - A new `preview.png`: the icon in the top bar, just left of the owner's fleetlog
-  icon, not in a bar at the bottom. Before 0.1.0's rules let a real plugin show,
-  check with the owner that fleetlog is public; otherwise use a neighbour that is.
+  icon, not in a bar at the bottom. Every plugin on the owner's bar is in a public
+  repository, so they may show. Their data must still be fictional.
 
 ## Done when
 
@@ -30,6 +30,6 @@ List the plugin where Omarchy users look for tools.
 - [ ] The README's Install section puts the plugin first, and says the plugin and
       the terminal install each work on their own.
 - [ ] `preview.png` shows the icon in the top bar, left of the fleetlog icon, and
-      nothing else real.
+      no real data.
 - [ ] The plugin is listed, and installs with `omarchy plugin add` on a clean
       machine.
