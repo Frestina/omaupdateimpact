@@ -173,9 +173,11 @@ With `--json`, every exit code comes with a document. See [docs/json.md](docs/js
   that can't be read, or a text file over 10 MiB, is reported as a limit. A broken
   link counts, so remove the ones you don't need.
 - It doesn't read `omarchy_default_bindings = false` from your `hyprland.lua`.
-- A reason comes only from a change the notes list with its pull request. One that
-  names a package by another spelling, such as "Xournal++" for `xournalpp`, isn't
-  found. With `--target`, the notes are read from the folder, and never fetched.
+- A reason comes only from a change the notes list with its pull request. A package
+  counts only in a change that removes or replaces something. One that names a
+  package by another spelling, such as "Xournal++" for `xournalpp`, isn't found. A
+  package named like an ordinary word can match the wrong change: a removed `usage`
+  would take "Replace the Disk Usage TUI with Disktree". With `--target`, the notes are read from the folder, and never fetched.
 - It won't catch a failure during the update itself.
 
 ## Safety

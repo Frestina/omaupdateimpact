@@ -148,6 +148,8 @@ KEPT_SPACE = "\xa0"
 NOTES = ".omaupdateimpact-notes.md"
 # A change as GitHub lists it in the notes: what changed, who changed it, and where.
 NOTE_ENTRY = re.compile(r"\s*[-*] (.+?) by @[\w-]+(?:, @[\w-]+)* in (\S+)\s*")
+# A change that names a package is why it goes only when it starts this way. Others fix or add it.
+REMOVING = re.compile(r"(?:Remove|Replace|Drop|Switch|Retire)\b")
 NOTE_KEYS = re.compile(
     r"(?<![\w+])(?:(?:" + "|".join([*MODIFIERS, *MODIFIER_SPELLINGS]) + r")\s*\+\s*)+\w+", re.IGNORECASE
 )
@@ -1973,13 +1975,18 @@ def plain_words(text):
 def change_names(text, kind, name):
     """Whether a change in the notes clearly names what a finding is about.
 
-    A package may start with a capital, as a name in a sentence does, and a
-    migration goes by what it says it does.
+    A package may start with a capital, as a name in a sentence does. It counts
+    only in a change that removes or replaces, and before the first comma, as what
+    comes after one is about something else. A migration goes by what it says it does.
     """
     if kind == "keys":
         return name in {normalize_keys(found) for found in NOTE_KEYS.findall(text)}
     if kind == "migration":
         return plain_words(text) == plain_words(name)
+    if kind == "package":
+        if not REMOVING.match(text):
+            return False
+        text = text.partition(",")[0]
     spellings = {name, name[:1].upper() + name[1:]} if kind == "package" else {name}
     # A full stop can end the sentence the name is in.
     pattern = rf"(?<![\w@.+-])(?:{'|'.join(map(re.escape, spellings))})(?![\w@+-]|\.\w)"

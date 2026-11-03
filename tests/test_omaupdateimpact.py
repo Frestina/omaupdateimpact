@@ -23,6 +23,7 @@ impact = importlib.util.module_from_spec(spec)
 loader.exec_module(impact)
 
 
+FIXTURES = Path(__file__).parent / "fixtures"
 QMLLINT_OUTPUT = Path(__file__).parent / "fixtures/qmllint-6.12.0"
 REAL_QMLLINT = impact.find_qmllint()[0]
 # Answers --version as Qt 6 does, for a script in place of qmllint.
@@ -2580,10 +2581,23 @@ class Reasons(ProgramCase):
 
     def test_a_change_that_names_the_package_is_its_reason(self):
         self.migration("1.sh", "omarchy-pkg-drop fictional-editor\n")
-        for text in ("Retire fictional-editor", "Stop shipping fictional-editor.", "Swap Fictional-editor for Quill"):
+        for text in ("Retire fictional-editor", "Remove fictional-editor.", "Replace Fictional-editor with Quill"):
             with self.subTest(text=text):
                 self.notes(change(text, 102))
                 self.assertEqual(self.reasons()[0]["text"], text)
+
+    def test_a_change_that_fixes_or_adds_the_package_isnt_why_it_goes(self):
+        self.migration("1.sh", "omarchy-pkg-drop fictional-editor\n")
+        for text in (
+            "Fix fictional-editor crashing on start",
+            "Add a theme to fictional-editor",
+            "Speed up Fictional-editor",
+            "Remove the old theme, which broke fictional-editor",
+            "Make removing fictional-editor faster",
+        ):
+            with self.subTest(text=text):
+                self.notes(change(text, 102))
+                self.assertEqual(self.reasons(), [None])
 
     def test_a_longer_name_or_another_case_isnt_the_package(self):
         self.migration("1.sh", "omarchy-pkg-drop fictional-editor\n")
@@ -2593,7 +2607,7 @@ class Reasons(ProgramCase):
                 self.assertEqual(self.reasons(), [None])
 
     def test_two_changes_that_name_it_give_no_reason(self):
-        self.notes(change("Replace Fictional Editor with Quill", 101), change("Make fictional-editor faster", 102))
+        self.notes(change("Replace Fictional Editor with Quill", 101), change("Drop fictional-editor", 102))
         self.assertEqual(self.reasons(), [None])
 
     def test_a_finding_with_no_clear_match_gives_no_reason(self):
@@ -2685,6 +2699,32 @@ class Reasons(ProgramCase):
         self.assertEqual(
             json.loads(with_notes[1]) | {"findings": None}, json.loads(without[1]) | {"findings": None}
         )
+
+
+class ReasonsFromRealNotes(unittest.TestCase):
+    """v4.5.0-rc2's own notes, for packages a migration could remove."""
+
+    def reason(self, package):
+        finding = impact.Finding("packages", impact.ATTENTION, "", [], about=(("package", package),))
+        impact.give_reasons([finding], FIXTURES / "releases/v4.5.0-rc2")
+        return finding.reason and finding.reason.reference
+
+    def test_a_package_a_change_only_mentions_takes_no_reason(self):
+        for package in ("mpv", "docker", "file", "which", "neovim", "lua", "polkit", "tailscale", "clang", "gum"):
+            with self.subTest(package=package):
+                self.assertIsNone(self.reason(package))
+
+    def test_a_package_a_change_removes_or_replaces_takes_it(self):
+        self.assertEqual(self.reason("tensaku"), "#9446")
+        self.assertEqual(self.reason("lazydocker"), "#14230")
+
+    def test_dua_cli_still_takes_its_reason_through_its_migration(self):
+        finding = impact.Finding(
+            "packages", impact.ATTENTION, "", [],
+            about=(("migration", "migrations/1791345484.sh"), ("package", "dua-cli")),
+        )
+        impact.give_reasons([finding], FIXTURES / "releases/v4.5.0-rc2")
+        self.assertEqual(finding.reason.reference, "#14426")
 
 
 class Notes(ProgramCase):

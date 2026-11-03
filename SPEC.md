@@ -414,9 +414,16 @@ bullets, which name no pull request.
 What a change can name:
 
 - **A package:** the name as a word, or with a capital first letter, as a name in a
-  sentence has. `Tensaku` names `tensaku`, and `fictional-editor-git` doesn't name
-  `fictional-editor`. A name the notes spell another way, such as "Xournal++" for
-  `xournalpp`, isn't found.
+  sentence has, in a change that starts with Remove, Replace, Drop, Switch or Retire,
+  and before its first comma. A change that fixes or adds a package isn't why it
+  goes: in v4.5.0-rc2 "Turn on hardware video decoding in mpv" would be a wrong
+  reason for removing `mpv`. After a comma the sentence is about something else, as
+  in "Remove the Azerbaijani keyboard choice, which installed French AZERTY".
+  "Replace Tensaku with Omasnap for screenshots" names `tensaku`, and
+  `fictional-editor-git` doesn't name `fictional-editor`. A name the notes spell
+  another way, such as "Xournal++" for `xournalpp`, isn't found. A package named like
+  an ordinary word can still match one: `usage` would take "Replace the Disk Usage
+  TUI with Disktree".
 - **A migration**, for a removal or an edit it makes: a change whose text is what the
   migration echoes on its first line, as Omarchy's migrations do, case, spacing and
   a full stop aside. v4.5.0-rc2's 1791345484 echoes "Replace the Disk Usage TUI with

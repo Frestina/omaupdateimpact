@@ -23,10 +23,14 @@ Disktree (#14426)". A reason changes what a person does about a finding.
   command or a shortcut. The migration's own comments are a second source.
 - Show nothing when it's unsure. A wrong reason is worse than none.
 - Work offline: with no notes, the finding appears without a reason.
+- Review follow-ups: a package's name names a change only when that change removes
+  or replaces something, as a change that fixes or adds a package isn't why it goes.
 
 ## Done when
 
 - [x] On v4.5.0-rc2 the `dua-cli` removal shows its reason, with a fixture.
 - [x] A finding with no clear match shows no reason, with a test.
 - [x] Missing notes don't change the exit code, with a test.
+- [x] Against v4.5.0-rc2's notes, a removal of `mpv`, `docker`, `file` or `which`
+      takes no reason, and `tensaku` and `dua-cli` still do. With a test.
 - [x] `tests/run` passes.
