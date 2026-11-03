@@ -194,12 +194,13 @@ MENU = """{
 """
 ROW_ID = "update.omaupdateimpact"
 BLOCK = (
-    "\n  // omaupdateimpact: begin. ./install.sh --uninstall removes this block.\n"
+    "  // omaupdateimpact: begin. ./install.sh --uninstall removes this block.\n"
     '  "update.omaupdateimpact": {"icon":"\\uf002","label":"Omarchy Impact",'
     '"description":"What the next Omarchy update would change on this machine",'
     '"action":"omarchy-launch-floating-terminal-with-presentation omaupdateimpact"},\n'
-    "  // omaupdateimpact: end"
+    "  // omaupdateimpact: end\n"
 )
+INSTALLED_MENU = Path("/usr/share/omarchy/default/omarchy/omarchy-menu.jsonc")
 
 
 def menu_rows(text):
@@ -254,7 +255,7 @@ class MenuRow(Home):
     def test_only_the_block_is_added_and_uninstall_takes_only_it(self):
         self.menu.write_text(MENU)
         self.assert_exit(self.run_script("--menu"), 0)
-        self.assertEqual(self.menu.read_text(), "{" + BLOCK + MENU[1:])
+        self.assertEqual(self.menu.read_text(), "{\n" + BLOCK + MENU[2:])
         result = self.run_script("--uninstall")
         self.assert_exit(result, 0)
         self.assertIn(f"Removed the menu row from {self.menu}.", result.stdout)
@@ -273,24 +274,67 @@ class MenuRow(Home):
         self.assertEqual(once.decode().count(ROW_ID), 1)
 
     def test_an_edited_block_is_put_back_in_place(self):
-        self.menu.write_text(MENU.replace("{\n", "{" + BLOCK.replace("Omarchy Impact", "Mine") + "\n", 1))
+        self.menu.write_text(MENU.replace("{\n", "{\n" + BLOCK.replace("Omarchy Impact", "Mine"), 1))
         result = self.run_script("--menu")
         self.assert_exit(result, 0)
         self.assertIn(f"Updated the menu row in {self.menu}.", result.stdout)
-        self.assertEqual(self.menu.read_text(), "{" + BLOCK + MENU[1:])
+        self.assertEqual(self.menu.read_text(), "{\n" + BLOCK + MENU[2:])
 
     def test_a_missing_file_gets_an_object_of_its_own(self):
         self.menu.parent.rmdir()
         self.assert_exit(self.run_script("--menu"), 0)
-        self.assertEqual(self.menu.read_text(), "{" + BLOCK + "\n}\n")
+        self.assertEqual(self.menu.read_text(), "{\n" + BLOCK + "}\n")
         self.assertEqual(self.menu.stat().st_mode & 0o777, 0o644 & ~current_umask())
         self.assert_exit(self.run_script("--uninstall"), 0)
         self.assertEqual(self.menu.read_text(), "{\n}\n")
 
+    def test_uninstall_gives_back_the_bytes_when_the_brace_has_a_line_of_its_own(self):
+        for text in (
+            '{\r\n  "personal": {"icon":"x","label":"P"},\r\n}\r\n',
+            "{\n}\n",
+            "// Mine.\n{  \n}",
+            MENU,
+        ):
+            with self.subTest(text=text):
+                self.menu.write_bytes(text.encode())
+                self.assert_exit(self.run_script("--menu"), 0)
+                self.assertIn(ROW_ID, menu_rows(self.menu.read_text()))
+                self.assert_exit(self.run_script("--uninstall"), 0)
+                self.assertEqual(self.menu.read_bytes(), text.encode())
+
+    def test_a_crlf_file_gets_crlf_lines(self):
+        text = '{\r\n  "personal": {"icon":"x","label":"P"},\r\n}\r\n'
+        self.menu.write_bytes(text.encode())
+        self.assert_exit(self.run_script("--menu"), 0)
+        expected = "{\r\n" + BLOCK.replace("\n", "\r\n") + text[3:]
+        self.assertEqual(self.menu.read_bytes(), expected.encode())
+        self.assertIn("already", self.run_script("--menu").stdout)
+
+    def test_a_brace_with_more_on_its_line_is_split_and_stays_split(self):
+        self.menu.write_text("{}\n")
+        self.assert_exit(self.run_script("--menu"), 0)
+        self.assertEqual(self.menu.read_text(), "{\n" + BLOCK + "}\n")
+        self.assert_exit(self.run_script("--uninstall"), 0)
+        self.assertEqual(self.menu.read_text(), "{\n}\n")
+
+    def test_without_omarchy_path_it_looks_where_the_command_does(self):
+        # The real /usr/share/omarchy is read, since a test can't put a file there.
+        # It is there on an Omarchy machine and missing in CI, so both are checked.
+        for unset in (None, ""):
+            with self.subTest(OMARCHY_PATH=unset):
+                env = {} if unset is None else {"OMARCHY_PATH": unset}
+                result = Home.run_script(self, "--menu", **env)
+                if INSTALLED_MENU.is_file():
+                    self.assert_exit(result, 0)
+                    self.assertIn(ROW_ID, self.menu.read_text())
+                else:
+                    self.assert_exit(result, 1)
+                    self.assertIn(f"There is no Omarchy menu at {INSTALLED_MENU} ", result.stderr)
+
     def test_a_file_of_only_comments_keeps_them(self):
         self.menu.write_text("// Rows of mine go here.")
         self.assert_exit(self.run_script("--menu"), 0)
-        self.assertEqual(self.menu.read_text(), "// Rows of mine go here.\n{" + BLOCK + "\n}\n")
+        self.assertEqual(self.menu.read_text(), "// Rows of mine go here.\n{\n" + BLOCK + "}\n")
         self.assertIn(ROW_ID, menu_rows(self.menu.read_text()))
 
     def test_a_menu_on_one_line(self):
@@ -308,7 +352,7 @@ class MenuRow(Home):
         self.menu.symlink_to(dotfiles)
         self.assert_exit(self.run_script("--menu"), 0)
         self.assertTrue(self.menu.is_symlink())
-        self.assertEqual(dotfiles.read_text(), "{" + BLOCK + MENU[1:])
+        self.assertEqual(dotfiles.read_text(), "{\n" + BLOCK + MENU[2:])
         self.assertEqual(dotfiles.stat().st_mode & 0o777, 0o600)
         self.assert_exit(self.run_script("--uninstall"), 0)
         self.assertTrue(self.menu.is_symlink())
@@ -341,7 +385,7 @@ class MenuRow(Home):
         self.menu.parent.rmdir()
         result = self.run_script("--menu")
         self.assert_exit(result, 1)
-        self.assertIn("no menu that reads", result.stderr)
+        self.assertIn(f"There is no Omarchy menu at {self.omarchy}/default/omarchy/omarchy-menu.jsonc", result.stderr)
         self.assertEqual(self.everything_in_home(), [".config", ".config/omarchy"])
 
     def test_a_link_that_is_left_alone_adds_no_row(self):

@@ -8,7 +8,8 @@ folder="$HOME/.local/bin"
 link="$folder/omaupdateimpact"
 # Omarchy's menu reads this path under HOME, not under XDG_CONFIG_HOME.
 menu_file="$HOME/.config/omarchy/extensions/omarchy-menu.jsonc"
-omarchy_menu="${OMARCHY_PATH:-$HOME/.local/share/omarchy}/default/omarchy/omarchy-menu.jsonc"
+# Where the command finds the installed tree: $OMARCHY_PATH, then /usr/share/omarchy.
+omarchy_menu="${OMARCHY_PATH:-/usr/share/omarchy}/default/omarchy/omarchy-menu.jsonc"
 
 is_own_link() {
   [[ -L "$link" && "$(readlink -f "$link")" == "$program" ]]
@@ -55,15 +56,27 @@ import tempfile
 action, path = sys.argv[1], sys.argv[2]
 ID = "update.omaupdateimpact"
 ROW = {
-    "icon": "",
+    "icon": "\uf002",
     "label": "Omarchy Impact",
     "description": "What the next Omarchy update would change on this machine",
     "action": "omarchy-launch-floating-terminal-with-presentation omaupdateimpact",
 }
 BEGIN = "// omaupdateimpact: begin. ./install.sh --uninstall removes this block."
 END = "// omaupdateimpact: end"
-BLOCK = "\n  " + BEGIN + "\n  " + json.dumps(ID) + ": " + json.dumps(ROW, separators=(",", ":")) + ",\n  " + END
-FOUND = re.compile(r"\n[ \t]*// omaupdateimpact: begin\b[^\n]*\n.*?\n[ \t]*// omaupdateimpact: end\b[^\n]*", re.S)
+LINES = [BEGIN, json.dumps(ID) + ": " + json.dumps(ROW, separators=(",", ":")) + ",", END]
+# Whole lines: from the start of the begin mark's line to the end mark's line ending.
+FOUND = re.compile(
+    r"^[ \t]*// omaupdateimpact: begin\b.*?^[ \t]*// omaupdateimpact: end\b[^\r\n]*(\r\n|\n|$)", re.M | re.S
+)
+
+
+def block(eol, last=None):
+    """The block's lines, each ending in eol, or the last one in last when it's given."""
+    return eol.join("  " + line for line in LINES) + (eol if last is None else last)
+
+
+def line_ending(text):
+    return "\r\n" if "\r\n" in text else "\n"
 
 
 def left_alone(why):
@@ -148,7 +161,9 @@ found = list(FOUND.finditer(text or ""))
 if len(found) > 1:
     left_alone("has more than one omaupdateimpact block")
 if found:
-    after = text[: found[0].start()] + BLOCK + text[found[0].end() :]
+    # In place, keeping the line ending after the end mark.
+    last = found[0].group(1)
+    after = text[: found[0].start()] + block(last or line_ending(text), last) + text[found[0].end() :]
     if after == text:
         print("The menu row is already in " + path + ".")
         sys.exit(0)
@@ -157,16 +172,23 @@ elif text is not None and "// omaupdateimpact: " in text:
     left_alone("has an omaupdateimpact block without its two marks")
 else:
     brace = opening_brace(text or "")
-    if brace is not None:
-        rest = text[brace + 1 :]
-        # The end mark is a comment to the end of its line, so it needs a line of its own.
-        after = text[: brace + 1] + BLOCK + ("" if re.match(r"[ \t]*(\r?\n|$)", rest) else "\n") + rest
+    newline = -1 if brace is None else text.find("\n", brace)
+    if newline >= 0 and not text[brace + 1 : newline].strip():
+        # The { has a line of its own, so the block goes in as whole lines after it,
+        # with that line's ending, and uninstall takes exactly those lines.
+        eol = "\r\n" if text[newline - 1] == "\r" else "\n"
+        after = text[: newline + 1] + block(eol) + text[newline + 1 :]
+    elif brace is not None:
+        # More follows the { on its line. The line is split there, and stays split.
+        eol = line_ending(text)
+        after = text[: brace + 1] + eol + block(eol) + text[brace + 1 :]
     else:
         # Nothing but comments, or no file: the rows get an object of their own.
         lead = text or ""
+        eol = line_ending(lead)
         if lead and not lead.endswith("\n"):
-            lead += "\n"
-        after = lead + "{" + BLOCK + "\n}\n"
+            lead += eol
+        after = lead + "{" + eol + block(eol) + "}" + eol
     done = "Added an Omarchy Impact row to the Update menu, in " + path + "."
 menu = rows(after)
 if menu is None or menu.get(ID) != ROW or others(menu) != others(before):
@@ -179,7 +201,7 @@ PY
 # Before the link, so a machine without this menu gets neither.
 check_omarchy_menu() {
   if [[ ! -f "$omarchy_menu" ]]; then
-    echo "This Omarchy has no menu that reads $menu_file, so nothing was installed." >&2
+    echo "There is no Omarchy menu at $omarchy_menu to read $menu_file, so nothing was installed." >&2
     exit 1
   fi
 }

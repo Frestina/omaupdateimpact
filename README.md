@@ -72,7 +72,8 @@ it twice is harmless, and it won't replace a file that isn't its own link.
 To also add an "Omarchy Impact" row to the Omarchy menu, under Update, run
 `./install.sh --menu` instead. The row opens the report in a terminal. It goes in
 `~/.config/omarchy/extensions/omarchy-menu.jsonc`, between two marked comment
-lines, and nothing else in that file changes.
+lines, and nothing else in that file changes. If that file is written on one line,
+the line is split after its `{`, and stays split after you remove the row.
 
 To update, run `git pull` in the clone. To remove it, run this there:
 
@@ -80,8 +81,8 @@ To update, run `git pull` in the clone. To remove it, run this there:
 ./install.sh --uninstall
 ```
 
-That removes the link, and the menu row if you added it. It tells you where the cache and your reviewed findings are,
-and leaves them for you to delete.
+That removes the link, and the menu row if you added it. It tells you where the
+cache and your reviewed findings are, and leaves them for you to delete.
 
 ## Usage
 

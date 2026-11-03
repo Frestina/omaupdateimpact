@@ -613,19 +613,26 @@ move it. The format was checked against the menu code in v4.0.6 and v4.5.0-rc2.
   Omarchy's own update row uses. It finds the command on `PATH`, which Omarchy's
   login shell sets. Omarchy adds user rows after its own, so it is the last row
   under Update.
-- The row sits in a block between two comment lines,
-  `// omaupdateimpact: begin. ...` and `// omaupdateimpact: end`, put right after
-  the file's opening `{`. Nothing else in the file changes. A file that is missing,
-  or holds only comments, gets an object of its own after them.
+- The row sits in a block of three whole lines, from
+  `// omaupdateimpact: begin. ...` to `// omaupdateimpact: end`. It goes on the
+  lines right after the file's opening `{`, with that line's own ending, CRLF
+  included. Nothing else in the file changes, and uninstall gives back the file
+  byte for byte.
+- Two cases keep a change after uninstall. When more follows the `{` on its line,
+  as in `{}` or a menu on one line, that line is split after the `{`, and stays
+  split. A file that is missing, or holds only comments, gets an object of its own
+  after them, and `{` and `}` stay.
 - The file is read the way Omarchy reads it: comments on their own lines and
   trailing commas are dropped, then it is parsed as JSON. If Omarchy couldn't read
   it, or wouldn't show the row with the user's other rows unchanged, the file is
   left alone and it's exit 1. So is a begin mark without its end.
 - A block already there is rewritten in place to the current row, so running it
   twice adds one row. A file that is a link stays one, and keeps its mode.
-- Without `$OMARCHY_PATH/default/omarchy/omarchy-menu.jsonc`, the menu that reads
-  the file isn't there, so nothing is installed and it's exit 1. `OMARCHY_PATH`
-  falls back to `~/.local/share/omarchy`. That check comes before the link.
+- Without `default/omarchy/omarchy-menu.jsonc` in the installed tree, the menu
+  that reads the file isn't there, so nothing is installed and it's exit 1. The
+  tree is found as the command finds it: `$OMARCHY_PATH`, then `/usr/share/omarchy`
+  when that is unset or empty, as from SSH or a TTY. That check comes before the
+  link.
 
 `install.sh --uninstall` removes that block, and only it, before the link. A
 broken block is left alone with exit 1, and the link still goes. It says nothing

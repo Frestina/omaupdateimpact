@@ -25,6 +25,8 @@ closest place to reach them.
 - The row opens the report in a terminal.
 - `install.sh --uninstall` removes exactly that block.
 - Follow Omarchy's menu extension format; confirm it against the installed docs.
+- Review follow-ups: find Omarchy where the command finds it, and make uninstall
+  give back the file's own bytes.
 
 ## Done when
 
@@ -32,3 +34,8 @@ closest place to reach them.
 - [x] The file's other contents are untouched, including after uninstall.
 - [x] Running the step twice adds one row.
 - [x] `tests/run` passes.
+- [x] Without `OMARCHY_PATH`, `--menu` looks for Omarchy's menu under
+  `/usr/share/omarchy`, the fallback the command uses, and the spec says so.
+- [x] Uninstall gives back the file byte for byte when the `{` had a line of its
+  own, CRLF files included. When `--menu` had to split the `{` line, as in `{}` or
+  a menu on one line, the spec and README say what stays.
