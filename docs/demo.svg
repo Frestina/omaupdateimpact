@@ -17,8 +17,8 @@ text { font: 14px ui-monospace, Menlo, Consolas, "DejaVu Sans Mono", monospace; 
 <rect id="command" x="33.2" y="16" width="225.6" height="18" fill="#1a1b26"/>
 <g id="report">
 <text x="16" y="48" xml:space="preserve">Omarchy 4.0.6-1 -&gt; v4.5.0-rc2 (rc channel, prerelease). Nothing was changed.</text>
-<text x="16" y="66" xml:space="preserve">Checked 207 default bindings, 3 of yours, 27 pending migrations, 7 of your files for 6</text>
-<text x="16" y="84" xml:space="preserve">deleted commands, 1 plugin linted.</text>
+<text x="16" y="66" xml:space="preserve">Checked 207 default bindings, 3 of yours, 27 pending migrations for packages and 28 for</text>
+<text x="16" y="84" xml:space="preserve">file edits, 7 of your files for 6 deleted commands, 1 plugin linted.</text>
 <text x="16" y="120" xml:space="preserve"><tspan font-weight="bold" fill="#f7768e">Needs attention</tspan></text>
 <text x="16" y="138" xml:space="preserve">  - ALT + ALT_R: your "Scratchpad" will clash with the new default "Start dictation</text>
 <text x="16" y="156" xml:space="preserve">    (push-to-talk) / Stop dictation (push-to-talk)". Both will fire.</text>
@@ -45,7 +45,7 @@ text { font: 14px ui-monospace, Menlo, Consolas, "DejaVu Sans Mono", monospace; 
 <text x="16" y="534" xml:space="preserve">    <tspan font-weight="bold" fill="#9ece6a">Fix:</tspan> Change or remove line 7. This tool can't tell what replaces the command.</text>
 <text x="16" y="552" xml:space="preserve">  - ~/.local/bin/end-of-day calls omarchy-system-reboot, which the release deletes.</text>
 <text x="16" y="570" xml:space="preserve">    <tspan font-weight="bold" fill="#9ece6a">Fix:</tspan> Change or remove line 4. This tool can't tell what replaces the command.</text>
-<text x="16" y="606" xml:space="preserve"><tspan font-weight="bold" fill="#ffffff">Worth knowing</tspan>: 11 notes. Add --all to see them.</text>
+<text x="16" y="606" xml:space="preserve"><tspan font-weight="bold" fill="#ffffff">Worth knowing</tspan>: 12 notes. Add --all to see them.</text>
 <text x="16" y="642" xml:space="preserve"><tspan font-weight="bold" fill="#e0af68">Limits of this check</tspan></text>
 <text x="16" y="660" xml:space="preserve">  - Couldn't read what migrations/1785351479.sh removes, so check it by hand.</text>
 <text x="16" y="696" xml:space="preserve"><tspan font-weight="bold" fill="#e0af68">These checks ran in part: packages.</tspan></text>

@@ -34,8 +34,8 @@ This finds likely ones by reading them, and says that's what it's doing.
 
 ## Done when
 
-- [ ] A migration with `sed -i` on a customized file gives a note, with a test.
-- [ ] The same migration on an unchanged file says nothing, with a test.
-- [ ] Paths built from variables are reported as unknown, not skipped.
-- [ ] Run over v4.5.0-rc2's migrations, the output has been read for false alarms.
-- [ ] `tests/run` passes.
+- [x] A migration with `sed -i` on a customized file gives a note, with a test.
+- [x] The same migration on an unchanged file says nothing, with a test.
+- [x] Paths built from variables are reported as unknown, not skipped.
+- [x] Run over v4.5.0-rc2's migrations, the output has been read for false alarms.
+- [x] `tests/run` passes.

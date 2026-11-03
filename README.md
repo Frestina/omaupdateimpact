@@ -10,8 +10,8 @@ on v4.0.6, looking at v4.5.0-rc2:
 ```
 $ omaupdateimpact v4.5.0-rc2
 Omarchy 4.0.6-1 -> v4.5.0-rc2 (rc channel, prerelease). Nothing was changed.
-Checked 207 default bindings, 3 of yours, 27 pending migrations, 7 of your files for 6
-deleted commands, 1 plugin linted.
+Checked 207 default bindings, 3 of yours, 27 pending migrations for packages and 28 for
+file edits, 7 of your files for 6 deleted commands, 1 plugin linted.
 
 Needs attention
   - ALT + ALT_R: your "Scratchpad" will clash with the new default "Start dictation
@@ -40,7 +40,7 @@ Needs attention
   - ~/.local/bin/end-of-day calls omarchy-system-reboot, which the release deletes.
     Fix: Change or remove line 4. This tool can't tell what replaces the command.
 
-Worth knowing: 11 notes. Add --all to see them.
+Worth knowing: 12 notes. Add --all to see them.
 
 Limits of this check
   - Couldn't read what migrations/1785351479.sh removes, so check it by hand.
@@ -112,6 +112,10 @@ Colour shows on a terminal only, and `NO_COLOR` turns it off.
   `~/.local/bin`, systemd user units, `~/.local/share/applications` and your bash,
   zsh or fish startup files. A file Omarchy put there, unchanged, is a note.
 - **Plugins:** `qmllint` warnings that are new with the release's shell.
+- **Edits:** files of yours that the migrations you haven't run look like they edit
+  or remove, with `sed -i`, `cp`, `mv`, `rm`, `>` and the like. A file that is still
+  Omarchy's default says nothing. The rest are notes, because a migration that is
+  read and not run can't say what the file will hold.
 
 ## Exit codes
 
@@ -147,6 +151,11 @@ With `--json`, every exit code comes with a document. See [docs/json.md](docs/js
 - A removal is "will remove" unless it sits inside an `if`, a loop, a `case`, a
   function, or after `&&` or `||`. A migration that exits early, as with
   `x || exit 0`, still says "will remove".
+- A migration's writes are read as text too. A path only known when it runs, such
+  as `"$1"`, is reported as a limit, unless `sudo` writes it, which is taken to be a
+  system file. A write made by a release command, such as `omarchy-bar`, isn't seen.
+  A loop over files may change only some of them, and the note can't tell which.
+  `~/.cache` and `~/.local/state` aren't counted as your files.
 - Your files are read as text. A command called from a binary isn't seen. A file
   that can't be read, or a text file over 10 MiB, is reported as a limit. A broken
   link counts, so remove the ones you don't need.
@@ -179,9 +188,10 @@ dependencies, so you can read what it does. To report a problem, see
 ## Next to omaforecast
 
 [omaforecast](https://github.com/w-mir1/omaforecast) dry-runs migrations in a sandbox
-and shows the config diffs. omaupdateimpact reads the release and needs no sandbox,
-but can't see what a migration does to a file. omaforecast runs the release and sees
-those edits, but its forecast doesn't cover your bindings or packages. They answer
+and shows the config diffs. omaupdateimpact reads the release and needs no sandbox.
+It can say that a migration looks like it edits a file you changed, but not what the
+file will hold. omaforecast runs the release and sees those edits, but its forecast
+doesn't cover your bindings or packages. They answer
 different questions, so use both if you want both answers.
 
 ## Project

@@ -18,7 +18,7 @@
     "packages": {
       "state": "ranInPart",
       "checked": {
-        "pendingMigrations": 1
+        "pendingMigrations": 2
       }
     },
     "commands": {
@@ -32,6 +32,12 @@
       "state": "ran",
       "checked": {
         "linted": 0
+      }
+    },
+    "edits": {
+      "state": "ran",
+      "checked": {
+        "pendingMigrations": 3
       }
     }
   },
@@ -90,6 +96,18 @@
       ],
       "detail": "",
       "fix": "Change or remove line 2. This tool can't tell what replaces the command.",
+      "partial": false
+    },
+    {
+      "check": "edits",
+      "level": "note",
+      "title": "migrations/1700000003.sh, line 1, looks like it edits ~/.config/fictional-app/theme.conf, which Omarchy has no default for.",
+      "evidence": [
+        "migrations/1700000003.sh:1",
+        "~/.config/fictional-app/theme.conf"
+      ],
+      "detail": "It is read, not run, so the result isn't known. omaforecast can show it by running the migration in a sandbox.",
+      "fix": "",
       "partial": false
     }
   ]

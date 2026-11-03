@@ -44,6 +44,7 @@ if sys.version_info < (3, 11, 4):
 import argparse
 import contextlib
 import dataclasses
+import glob
 import gzip
 import http.client
 import json
@@ -90,6 +91,7 @@ CHECKS = {
     "packages": ("pendingMigrations",),
     "commands": ("deletedCommands", "yourFiles"),
     "plugins": ("linted",),
+    "edits": ("pendingMigrations",),
 }
 RAN, RAN_IN_PART, DIDNT_RUN = "ran", "ranInPart", "didNotRun"
 # What a run came to, and its exit code.
@@ -113,6 +115,20 @@ NAMES_REMOVAL = re.compile(
     r"\bomarchy-pkg-(?:drop|remove)\b|\bomarchy pkg (?:drop|remove)\b"
     r"|\b(?:pacman|yay|paru)\b.*[\s\"'](?:-[a-zA-Z]*R|--remove)"
 )
+OUTPUT_REDIRECTS = {">", ">>", ">|", "&>", "&>>", "<>", ">&"}
+# Words that open or close a block, and so come before or stand apart from a command.
+BLOCK_WORDS = {"if", "then", "else", "elif", "fi", "while", "until", "do", "done", "case", "esac", "{", "}", "!", "time", "function"}
+DECLARES = {"local", "declare", "typeset", "export", "readonly"}
+WRAPPERS = {"sudo", "command", "builtin", "exec", "env", "nohup"}
+ASSIGNMENT = re.compile(r"[A-Za-z_]\w*\+?=")
+NAME = re.compile(r"[A-Za-z_]\w*")
+PARAMETER = re.compile(r"([A-Za-z_]\w*)(?::?([-=])(.*))?", re.DOTALL)
+# A word stands for no more than this many paths, so a loop over loops stays small.
+MOST_EXPANSIONS = 64
+# Where Omarchy keeps the default of a file in your home: the folder there, and in a tree.
+DEFAULT_FOLDERS = [(".config", "config"), (".local/share/applications", "applications")]
+# Omarchy's state and caches, which aren't files you change.
+NOT_YOURS = [".cache", ".local/state"]
 SHELL_OPERATOR = re.compile(r"\(\s*\)|&>>|&>|<<<|<<-|<<|<&|<>|<|>>|>&|>\||>|&&|\|\||\|&|;;&|;;|;&|[;&|()\n]")
 TEST_END = re.compile(r"\s\]\]")
 # A line to copy stays on one line of the report.
@@ -190,6 +206,19 @@ class LintFailed(Exception):
 
 class Op(str):
     """A shell operator, as opposed to a quoted word that spells the same."""
+
+
+class Word(str):
+    """A shell word, and where in the text it starts."""
+
+    def __new__(cls, text, at):
+        word = super().__new__(cls, text)
+        word.at = at
+        return word
+
+
+class Redirect(Word):
+    """A file that a command's output goes to."""
 
 
 def blank_comments(text):
@@ -670,7 +699,9 @@ def shell_word(text, index):
             end = string_end(text, index)
             if end - 1 == index or text[end - 1] != "`":
                 raise ShellUnread
-            inner.append(shell_tokens(text[index + 1 : end - 1])[0])
+            part = shell_tokens(text[index + 1 : end - 1])[0]
+            # Read on its own, so where each word starts moves along to the backtick.
+            inner.append([type(t)(t, t.at + index + 1) if isinstance(t, Word) else t for t in part])
             index = end
             word += "$"
         elif char == "(" and not quoted and word.endswith("="):
@@ -689,8 +720,9 @@ def shell_word(text, index):
 def shell_tokens(text, index=0, nested=False):
     """Split shell text into words and Ops, and say where it stopped.
 
-    Comments, redirects and heredoc bodies are dropped. A substitution comes before
-    the command holding it, because it runs first. Nested text stops at its own ).
+    Comments and heredoc bodies are dropped, and so are redirects, but for the file
+    output goes to, which is a Redirect. A substitution comes before the command
+    holding it, because it runs first. Nested text stops at its own ).
     """
     tokens, heredocs, start, depth, redirect = [], [], 0, 0, None
     while index < len(text):
@@ -705,8 +737,8 @@ def shell_tokens(text, index=0, nested=False):
             start += len(inner) + 2
             redirect = None
         elif text.startswith("((", index):
+            tokens.append(Word("((", index))
             index = closing(text, index + 1, "(", ")")
-            tokens.append("((")
         elif found and (found.group()[0] in "<>" or found.group().startswith("&>")):
             redirect = found.group()
             index = found.end()
@@ -723,6 +755,7 @@ def shell_tokens(text, index=0, nested=False):
             tokens.append(Op(operator))
             start = len(tokens)
         else:
+            at = index
             word, inner, index = shell_word(text, index)
             for part in inner:
                 tokens[start:start] = [Op("$("), *part, Op(")")]
@@ -730,9 +763,11 @@ def shell_tokens(text, index=0, nested=False):
             if redirect:
                 if redirect.startswith("<<") and redirect != "<<<":
                     heredocs.append((word, redirect == "<<-"))
+                elif redirect in OUTPUT_REDIRECTS and not (redirect == ">&" and (word.isdigit() or word == "-")):
+                    tokens.append(Redirect(word, at))
                 redirect = None
             elif not (word.isdigit() and text[index : index + 1] in ("<", ">")):
-                tokens.append(word)
+                tokens.append(Word(word, at))
             if word == "[[":
                 ended = TEST_END.search(text, index)
                 if not ended:
@@ -801,6 +836,8 @@ def package_commands(text):
         chained = blocks.pop()
 
     for token in [*shell_tokens(text)[0], Op("\n")]:
+        if isinstance(token, Redirect):
+            continue
         if not isinstance(token, Op):
             words.append(token)
             continue
@@ -936,12 +973,16 @@ def package_changes(migrations, already_run):
     return dropped, {(migration, *sorted(files)) for migration, files in unread.items()}
 
 
+def migrations_run(home):
+    state = home / ".local/state/omarchy/migrations"
+    return {p.name for p in state.iterdir()} if state.is_dir() else set()
+
+
 def compare_packages(target, home, installed, checked):
     if installed is None:
         title = "pacman wasn't available, so packages weren't checked."
         return [Finding("packages", UNKNOWN, title, ["pacman -Qq"])]
-    state = home / ".local/state/omarchy/migrations"
-    already_run = {p.name for p in state.iterdir()} if state.is_dir() else set()
+    already_run = migrations_run(home)
     dropped, unread = package_changes(target / "migrations", already_run)
     read = sum(p.name not in already_run for p in (target / "migrations").glob("*.sh")) - len(unread)
     if read or not unread:
@@ -965,6 +1006,375 @@ def compare_packages(target, home, installed, checked):
             title = f"Couldn't read what {' and '.join(files)} {verb}, called from migrations/{migration}, so check by hand."
         findings.append(Finding("packages", UNKNOWN, title, [f"migrations/{migration}", *files], partial=read > 0))
     return findings
+
+
+def simple_commands(text):
+    """Each simple command in a script, as its words, without the words that open or close a block."""
+    words = []
+    for token in [*shell_tokens(text)[0], Op("\n")]:
+        if not isinstance(token, Op):
+            words.append(token)
+            continue
+        while words and words[0] in BLOCK_WORDS and not isinstance(words[0], Redirect):
+            words = words[1:]
+        if words:
+            yield words
+        words = []
+
+
+def brace_end(word, index):
+    """Where the brace opened just before index closes, past its }."""
+    depth = 1
+    while index < len(word) and depth:
+        depth += (word[index] == "{") - (word[index] == "}")
+        index += 1
+    return index
+
+
+def braces(word):
+    """A word with its {a,b} lists spelled out, as bash does first. A ${...} isn't a list."""
+    index = word.find("{")
+    while index >= 0:
+        end = brace_end(word, index + 1)
+        inner = word[index + 1 : end - 1]
+        if word[index - 1 : index] != "$" and word[end - 1] == "}" and "," in inner and "{" not in inner:
+            return [out for part in inner.split(",") for out in braces(word[:index] + part + word[end:])]
+        index = word.find("{", end if word[index - 1 : index] == "$" else index + 1)
+    return [word]
+
+
+def parameter(inner, variables, home):
+    """What ${inner} can stand for. Anything but a name, with or without a default, is only known when it runs."""
+    found = PARAMETER.fullmatch(inner)
+    if not found:
+        return [("", False)]
+    name, operator, default = found.groups()
+    if name in variables:
+        values = variables[name]
+    elif name == "HOME":
+        values = [(str(home), True)]
+    elif name == "OMARCHY_PATH":
+        values = [(INSTALLED, True)]
+    else:
+        # One the script doesn't set is taken as unset, so its default holds.
+        values = [("", bool(operator))]
+    if not operator:
+        return values
+    fallback = expansions(default, variables, home)
+    return list(dict.fromkeys(part for value in values for part in (fallback if value == ("", True) else [value])))
+
+
+def expanded(word, variables, home):
+    values, index = [("", True)], 0
+    if word == "~" or word.startswith("~/"):
+        values, index = [(str(home), True)], 1
+    while index < len(word):
+        if word[index] != "$":
+            end = word.find("$", index)
+            end = len(word) if end < 0 else end
+            parts, index = [(word[index:end], True)], end
+        elif word.startswith("${", index):
+            end = brace_end(word, index + 2)
+            parts, index = parameter(word[index + 2 : end - 1], variables, home), end
+        else:
+            # $1, $@ and what shell_word left of a $(...) are only known when it runs.
+            name = NAME.match(word, index + 1)
+            parts, index = (parameter(name.group(), variables, home), name.end()) if name else ([("", False)], len(word))
+        values = list(dict.fromkeys(
+            (text + more, whole) if known else (text, known) for text, known in values for more, whole in parts
+        ))
+        if len(values) > MOST_EXPANSIONS:
+            return [("", False)]
+    return values
+
+
+def expansions(word, variables, home):
+    """What a shell word can stand for, each as its text and whether that is all of it.
+
+    The text stops at a part that is only known when the script runs, such as $1 or
+    a $(...). HOME is the home being read, and a variable the script doesn't set
+    takes its default, as in ${XDG_CONFIG_HOME:-$HOME/.config}.
+    """
+    found = list(dict.fromkeys(value for part in braces(word) for value in expanded(part, variables, home)))
+    return found if len(found) <= MOST_EXPANSIONS else [("", False)]
+
+
+def substituted(words, variables, home):
+    """What a $(...) of this command stands for as a path, if it's one this can tell, or None.
+
+    mktemp makes its file by its template, or in the folder for temporary files,
+    which isn't yours, when it has none. realpath and readlink -f name the file
+    they're given.
+    """
+    name, arguments = words[0], operands(words[1:], "pt")
+    if name == "mktemp":
+        if any(word.startswith(("-p", "-t", "--tmpdir")) for word in words[1:]):
+            return [("", False)]
+        return expansions(arguments[0], variables, home) if arguments else []
+    if (name == "realpath" or (name == "readlink" and "-f" in words)) and len(arguments) == 1:
+        return expansions(arguments[0], variables, home)
+    return None
+
+
+def script_variables(commands, home):
+    """What each variable a script sets can hold, from every place that sets it, in order."""
+    variables, previous = {}, []
+
+    def assign(name, values):
+        held = variables.setdefault(name, [])
+        held.extend(value for value in values if value not in held)
+
+    for words in commands:
+        head = words[0]
+        if head in ("for", "select") and len(words) > 1 and NAME.fullmatch(words[1]):
+            listed = words[3:] if words[2:3] == ["in"] else None
+            assign(words[1], [("", False)] if listed is None else [
+                value for word in listed for value in expansions(word, variables, home)
+            ])
+        elif head in ("read", "mapfile", "readarray"):
+            for name in words[1:]:
+                if NAME.fullmatch(name):
+                    assign(name, [("", False)])
+        else:
+            declared = words[1:] if head in DECLARES else words
+            settings = [word for word in declared if ASSIGNMENT.match(word)]
+            # An assignment before a command is only for that command.
+            if head in DECLARES or len(settings) == len(words):
+                for setting in settings:
+                    name, value = setting.split("=", 1)
+                    if name.endswith("+"):
+                        assign(name[:-1], [("", False)])
+                    else:
+                        # A $(...) comes just before the command holding it.
+                        path = substituted(previous, variables, home) if value == "$" else None
+                        assign(name, expansions(value, variables, home) if path is None else path)
+        previous = words
+    return variables
+
+
+def operands(arguments, valued=""):
+    """The arguments that aren't options. A short option in valued takes the next word."""
+    found, words = [], iter(arguments)
+    for word in words:
+        if word == "--":
+            found += words
+        elif word.startswith("-") and len(word) > 1:
+            if not word.startswith("--") and word[-1] in valued:
+                next(words, None)
+        else:
+            found.append(word)
+    return found
+
+
+def sed_files(arguments):
+    """The files sed edits in place. Without -i it edits none."""
+    in_place, script, files, words = False, False, [], iter(arguments)
+    for word in words:
+        if word == "--":
+            files += words
+        elif word.startswith("--"):
+            in_place = in_place or word.startswith("--in-place")
+            script = script or word.startswith(("--expression", "--file"))
+            if word in ("--expression", "--file"):
+                next(words, None)
+        elif word.startswith("-") and len(word) > 1:
+            for index, letter in enumerate(word[1:], 2):
+                # What follows -i is a backup suffix, and what follows -e, -f or -l is its value.
+                if letter == "i":
+                    in_place = True
+                    break
+                if letter in "efl":
+                    script = script or letter != "l"
+                    if index == len(word):
+                        next(words, None)
+                    break
+        else:
+            files.append(word)
+    return (files if script else files[1:]) if in_place else []
+
+
+def written(words):
+    """The words a command writes to, and whether sudo runs it.
+
+    Each word comes with whether the command only removes it, and for a copy, the
+    words it copies, as a copy into a folder writes a file there of the same name.
+    """
+    targets = [(word, False, []) for word in words if isinstance(word, Redirect)]
+    words = [word for word in words if not isinstance(word, Redirect)]
+    sudo = False
+    while words and ASSIGNMENT.match(words[0]):
+        words = words[1:]
+    while words and words[0].rsplit("/", 1)[-1] in WRAPPERS:
+        sudo = sudo or words[0].rsplit("/", 1)[-1] == "sudo"
+        words = words[1:]
+        while words and (words[0].startswith("-") or ASSIGNMENT.match(words[0])):
+            words = words[1:]
+    if not words:
+        return targets, sudo
+    name, arguments = words[0].rsplit("/", 1)[-1], words[1:]
+    if name == "sed":
+        targets += [(word, False, []) for word in sed_files(arguments)]
+    elif name in ("rm", "tee"):
+        targets += [(word, name == "rm", []) for word in operands(arguments)]
+    elif name in ("mv", "cp") or (name == "install" and "-d" not in arguments):
+        copied = operands(arguments, "St" if name == "mv" else "gmoSt")
+        if name == "mv":
+            targets += [(word, True, []) for word in copied[:-1]]
+        targets += [(copied[-1], False, copied[:-1])] if copied else []
+    return targets, sudo
+
+
+def copied_into(place, word, sources, variables, home):
+    """What a copy to a place writes: the place, or the files of the same name in it when it's a folder."""
+    if not sources or not (word.endswith("/") or place.is_dir()):
+        return [(str(place), True)]
+    found = [(text, known) for source in sources for text, known in expansions(source, variables, home)]
+    return [(str(place / Path(text).name), True) if known else ("", False) for text, known in found]
+
+
+def your_path(value, home):
+    """Where a path a script writes leads: one of your files, False for anywhere else, or None if it can't tell."""
+    text, known = value
+    path = Path(text)
+    if not text.startswith("/"):
+        # Relative to wherever the migration runs, or wholly unknown.
+        return None
+    if any(path.is_relative_to(home / folder) for folder in NOT_YOURS):
+        return False
+    if path.is_relative_to(home):
+        return path if known else None
+    return None if not known and str(home).startswith(text) else False
+
+
+def wildcard(path, home):
+    return re.search(r"[*?[]", str(path)[len(str(home)) :]) is not None
+
+
+def existing(path, home):
+    """The files in your home a path names, with its wildcards matched as bash matches them."""
+    if wildcard(path, home):
+        return sorted(Path(found) for found in glob.glob(glob.escape(str(home)) + str(path)[len(str(home)) :]))
+    return [path] if path.exists() or path.is_symlink() else []
+
+
+def script_writes(text, home):
+    """The paths in your home a script writes, and the lines where it can't tell what they write.
+
+    Each path maps to the lines that write it, and whether those only remove it. It
+    can hold wildcards. A path only known when it runs is a line it can't tell
+    about, unless sudo runs the command: that is for system files.
+    """
+    commands = list(simple_commands(text))
+    variables = script_variables(commands, home)
+    paths, unclear = {}, set()
+    for words in commands:
+        targets, sudo = written(words)
+        line = text.count("\n", 0, words[0].at) + 1
+        for word, removes, sources in targets:
+            for value in expansions(word, variables, home):
+                folder = your_path(value, home)
+                for path in copied_into(folder, word, sources, variables, home) if folder else [value]:
+                    place = your_path(path, home)
+                    if place is None and not sudo:
+                        unclear.add(line)
+                    elif place:
+                        lines, only_removes = paths.get(place, (set(), True))
+                        paths[place] = (lines | {line}, only_removes and removes)
+    return paths, sorted(unclear)
+
+
+def same_bytes(path, other):
+    try:
+        return path.stat().st_size == other.stat().st_size and path.read_bytes() == other.read_bytes()
+    except OSError:
+        return False
+
+
+def omarchy_default(path, home, trees):
+    """Where in a tree Omarchy keeps the default of a file in your home, if it has one, and whether the file is that."""
+    for mine, shipped in DEFAULT_FOLDERS:
+        if path.is_relative_to(home / mine):
+            relative = Path(shipped) / path.relative_to(home / mine)
+            defaults = [tree / relative for tree in trees if (tree / relative).is_file()]
+            return (str(relative) if defaults else None), any(same_bytes(path, default) for default in defaults)
+    return None, False
+
+
+def listed(items):
+    items = list(map(str, items))
+    return " and ".join([", ".join(items[:-1]), items[-1]] if len(items) > 1 else items)
+
+
+def on_lines(numbers):
+    return f"{'line' if len(numbers) == 1 else 'lines'} {listed(numbers)}"
+
+
+def edit_finding(migration, place, lines, removes, changed, home):
+    """The note for the files of yours a migration looks like it writes at one path."""
+    shown = str(place).replace(str(home), "~", 1)
+    verb = "removes" if removes else "edits"
+    evidence = [f"{migration}:{line}" for line in sorted(lines)]
+    detail = "It is read, not run, so the result isn't known. omaforecast can show it by running the migration in a sandbox."
+    where = f"{migration}, {on_lines(sorted(lines))}, looks like it {verb}"
+    if wildcard(place, home):
+        folder = next(parent for parent in place.parents if not wildcard(parent, home))
+        names = listed(str(path.relative_to(folder)) for path, _ in changed)
+        title = (
+            f"{where} files that match {shown}, and {len(changed)} of them "
+            f"{'is' if len(changed) == 1 else 'are'}n't Omarchy's default."
+        )
+        shown_folder = str(folder).replace(str(home), "~", 1)
+        detail = f"{'It is' if len(changed) == 1 else 'They are'} {names}, in {shown_folder}. It may {verb[:-1]} only some. {detail}"
+    elif place.is_dir():
+        title = f"{where} the folder {shown}."
+    elif changed[0][1]:
+        title = f"{where} {shown}, which differs from Omarchy's default."
+    else:
+        title = f"{where} {shown}, which Omarchy has no default for."
+    for path, default in changed:
+        evidence += [str(path).replace(str(home), "~", 1), *([default] if default else [])]
+    return Finding("edits", NOTE, title, evidence, detail=detail)
+
+
+def compare_edits(current, target, home, checked):
+    """Your files that pending migrations look like they write, unless they are Omarchy's default."""
+    home = home.absolute()
+    already_run = migrations_run(home)
+    findings, unknown, read = [], [], 0
+    for path in sorted((target / "migrations").glob("*.sh")):
+        if path.name in already_run:
+            continue
+        migration = f"migrations/{path.name}"
+        try:
+            paths, unclear = script_writes(path.read_text(errors="replace"), home)
+        except ShellUnread:
+            title = f"Couldn't read which files {migration} writes, so check it by hand."
+            unknown.append(Finding("edits", UNKNOWN, title, [migration]))
+            continue
+        read += 1
+        for place, (lines, removes) in sorted(paths.items()):
+            changed = []
+            for file in existing(place, home):
+                default, unchanged = omarchy_default(file, home, (current, target))
+                if not unchanged:
+                    changed.append((file, default))
+            if changed:
+                findings.append(edit_finding(migration, place, lines, removes, changed, home))
+        if unclear:
+            unknown.append(Finding(
+                "edits",
+                UNKNOWN,
+                f"Couldn't tell which files {migration} writes on {on_lines(unclear)}, so check it by hand."
+                if len(unclear) <= 3 else
+                f"Couldn't tell which files {migration} writes on {len(unclear)} of its lines, so check it by hand.",
+                [f"{migration}:{line}" for line in unclear],
+                detail="The path is only known when it runs, and could be one of yours.",
+            ))
+    if read or not unknown:
+        checked["edits"] = {"pendingMigrations": read}
+    for finding in unknown:
+        finding.partial = read > 0
+    return [*findings, *unknown]
 
 
 def walked_files(root, seen):
@@ -1441,12 +1851,19 @@ def wrapped(text, first="", rest=""):
 
 def checked_line(checks):
     """The "Checked" line. A count of None wasn't looked at, so it isn't listed."""
-    bindings, packages, commands, plugins = (checks[check]["checked"] for check in CHECKS)
+    bindings, packages, commands, plugins, edits = (checks[check]["checked"] for check in CHECKS)
     parts = [counted(bindings["defaults"], "default binding")]
     if bindings["yours"] is not None:
         parts.append(f"{bindings['yours']} of yours")
-    if packages["pendingMigrations"] is not None:
-        parts.append(counted(packages["pendingMigrations"], "pending migration"))
+    removals, writes = packages["pendingMigrations"], edits["pendingMigrations"]
+    # Both checks read the pending migrations, and each counts those it could read.
+    if removals is not None and removals == writes:
+        parts.append(counted(removals, "pending migration"))
+    elif removals is not None and writes is not None:
+        parts.append(f"{counted(removals, 'pending migration')} for packages and {writes} for file edits")
+    elif removals is not None or writes is not None:
+        what = "packages" if writes is None else "file edits"
+        parts.append(f"{counted(removals if writes is None else writes, 'pending migration')} for {what}")
     if commands["deletedCommands"] == 0:
         parts.append("no deleted commands")
     elif commands["yourFiles"] is not None:
@@ -1565,6 +1982,7 @@ def run(options):
         *compare_packages(target, options.home, installed_packages(), checked),
         *compare_commands(options.root, target, options.home, checked),
         *compare_plugins(options.root, target, options.home, checked),
+        *compare_edits(options.root, target, options.home, checked),
     ]
     return compared(version, channel, tag or target.name, checked, findings)
 

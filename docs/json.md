@@ -45,8 +45,8 @@ change, so ignore keys you don't know.
 
 ### Checks
 
-`checks` has the same four keys every time: `bindings`, `packages`, `commands` and
-`plugins`.
+`checks` has the same five keys every time: `bindings`, `packages`, `commands`,
+`plugins` and `edits`.
 
 | `state` | Meaning |
 | --- | --- |
@@ -65,6 +65,7 @@ wasn't looked at, so it can never read as zero.
 | `commands` | `deletedCommands` | `omarchy-*` commands the release deletes. |
 | `commands` | `yourFiles` | Your files read for them. `0` when nothing is deleted. |
 | `plugins` | `linted` | Plugins linted. `0` when there are no plugins. |
+| `edits` | `pendingMigrations` | Migrations you haven't run, read for the files they write. |
 
 ### Findings
 
@@ -109,7 +110,7 @@ This report is from small fictional trees:
     "packages": {
       "state": "ranInPart",
       "checked": {
-        "pendingMigrations": 1
+        "pendingMigrations": 2
       }
     },
     "commands": {
@@ -123,6 +124,12 @@ This report is from small fictional trees:
       "state": "ran",
       "checked": {
         "linted": 0
+      }
+    },
+    "edits": {
+      "state": "ran",
+      "checked": {
+        "pendingMigrations": 3
       }
     }
   },
@@ -181,6 +188,18 @@ This report is from small fictional trees:
       ],
       "detail": "",
       "fix": "Change or remove line 2. This tool can't tell what replaces the command.",
+      "partial": false
+    },
+    {
+      "check": "edits",
+      "level": "note",
+      "title": "migrations/1700000003.sh, line 1, looks like it edits ~/.config/fictional-app/theme.conf, which Omarchy has no default for.",
+      "evidence": [
+        "migrations/1700000003.sh:1",
+        "~/.config/fictional-app/theme.conf"
+      ],
+      "detail": "It is read, not run, so the result isn't known. omaforecast can show it by running the migration in a sandbox.",
+      "fix": "",
       "partial": false
     }
   ]

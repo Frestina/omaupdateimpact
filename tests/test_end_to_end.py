@@ -207,7 +207,7 @@ class Report(RealCommand):
 
     def test_a_typical_report_fits_on_one_screen(self):
         self.assertLessEqual(len(self.result.stdout.splitlines()), 40)
-        self.assertIn("Worth knowing: 11 notes. Add --all to see them.", self.result.stdout)
+        self.assertIn("Worth knowing: 12 notes. Add --all to see them.", self.result.stdout)
         self.assertNotIn("Moved:", self.result.stdout)
 
     def test_all_shows_the_notes_and_keeps_the_rest(self):
@@ -249,8 +249,8 @@ class Report(RealCommand):
 
     def test_a_clean_result_and_this_one_show_what_was_checked(self):
         self.assertIn(
-            "Checked 207 default bindings, 3 of yours, 27 pending migrations, "
-            "7 of your files for 6 deleted commands, 1 plugin linted.",
+            "Checked 207 default bindings, 3 of yours, 27 pending migrations for packages and 28 for "
+            "file edits, 7 of your files for 6 deleted commands, 1 plugin linted.",
             flat(self.result.stdout),
         )
         clean = self.compare(self.clean_home).stdout.splitlines()
@@ -320,6 +320,19 @@ class Report(RealCommand):
         self.assertNotIn(title, self.attention())
         self.assertIn(f"{title} It's Omarchy's own file, unchanged, so there's nothing for you to fix.", self.output)
 
+    def test_a_migration_that_edits_a_file_you_changed_is_a_note(self):
+        self.assertIn(
+            "migrations/1788129995.sh, line 10, looks like it edits ~/.config/imv/config, which differs from "
+            "Omarchy's default.",
+            self.output,
+        )
+        self.assertNotIn("imv", self.result.stdout)
+
+    def test_a_migration_that_edits_a_file_you_left_as_it_was_says_nothing(self):
+        (self.clean_home / ".config/imv").mkdir(parents=True)
+        shutil.copy(OLD / "config/imv/config", self.clean_home / ".config/imv/config")
+        self.assertNotIn("imv", self.compare(self.clean_home, "--all").stdout)
+
     def test_a_new_lint_warning_is_a_note(self):
         self.assertNotIn("qmllint", self.attention())
         self.assertIn("demo: 2 new qmllint warnings, such as Demo.qml: Warnings occurred while importing module", self.output)
@@ -387,21 +400,22 @@ class JsonOutput(RealCommand):
             (document["installed"], document["target"], document["channel"]),
             ("4.0.6-1", {"name": "v4.5.0-rc2", "prerelease": True}, "stable"),
         )
-        # The report says: Checked 207 default bindings, 3 of yours, 27 pending migrations,
-        # 7 of your files for 6 deleted commands, 1 plugin linted.
+        # The report says: Checked 207 default bindings, 3 of yours, 27 pending migrations for
+        # packages and 28 for file edits, 7 of your files for 6 deleted commands, 1 plugin linted.
         self.assertEqual({check: value["checked"] for check, value in document["checks"].items()}, {
             "bindings": {"defaults": 207, "yours": 3},
             "packages": {"pendingMigrations": 27},
             "commands": {"deletedCommands": 6, "yourFiles": 7},
             "plugins": {"linted": 1},
+            "edits": {"pendingMigrations": 28},
         })
         # And ends: These checks ran in part: packages.
         self.assertEqual({check: value["state"] for check, value in document["checks"].items()}, {
-            "bindings": "ran", "packages": "ranInPart", "commands": "ran", "plugins": "ran",
+            "bindings": "ran", "packages": "ranInPart", "commands": "ran", "plugins": "ran", "edits": "ran",
         })
         shown = flat(report.stdout)
         levels = Counter(finding["level"] for finding in document["findings"])
-        self.assertEqual(levels, {"attention": 10, "note": 11, "unknown": 1})
+        self.assertEqual(levels, {"attention": 10, "note": 12, "unknown": 1})
         for finding in document["findings"]:
             with self.subTest(finding["title"]):
                 self.assertIn(flat(" ".join(part for part in (finding["title"], finding["detail"]) if part)), shown)

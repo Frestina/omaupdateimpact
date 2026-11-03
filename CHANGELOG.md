@@ -5,6 +5,9 @@
 - `--json` prints one document for scripts and the coming bar plugin: what was
   checked, each check's state, and every finding with its evidence. Every exit code
   has one. See [docs/json.md](docs/json.md).
+- A new check reads the migrations you haven't run for files of yours they look like
+  they edit or remove. A file that is still Omarchy's default says nothing. The rest
+  are notes, and a path it can't place is a limit.
 
 ## 0.1.0 (2026-11-02)
 

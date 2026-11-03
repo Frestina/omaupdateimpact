@@ -73,6 +73,7 @@ resolve target -> load both trees -> run checks -> findings -> render
                    release, home     packages                  JSON
                                      commands
                                      plugins
+                                     edits
 ```
 
 ### Choosing the release
@@ -158,6 +159,10 @@ Each check returns findings and says whether it could run.
   With no plugins there is nothing to lint, so a missing `qmllint` doesn't matter.
   When plugins were linted, a note says `qmllint` can't prove a plugin works. See
   [Linting plugins](#linting-plugins).
+- **Edits:** your files that migrations you haven't run yet look like they write,
+  unless a file is still Omarchy's default. These are notes, because reading a
+  migration can't say what the file will hold. A write it can't place is `unknown`.
+  See [Reading what migrations write](#reading-what-migrations-write).
 
 ### Linting plugins
 
@@ -263,6 +268,52 @@ loses its place, as with a quote that never closes. The same goes for a file it
 reaches, and the finding names that file too. What it can read from the same
 removal is still reported.
 
+### Reading what migrations write
+
+This finds likely edits by reading. omaforecast finds them by running migrations,
+which this never does, so a note names it.
+
+Pending migrations are split into shell tokens, as for packages. A write is `sed -i`,
+the file `cp` or `install` writes, both files of `mv`, `rm`, `tee`, and output sent
+to a file with `>`, `>>` or `&>`. `mv` and `rm` remove what they name. A copy or a
+move into a folder writes the file of the same name there. `install -d` only makes
+folders. Nothing else counts: what a release command such as
+`omarchy-bar` writes isn't seen, and other release files aren't read for writes.
+
+A path is read as bash would expand it, without running anything:
+
+- `~`, `$HOME` and the variables the migration sets are followed, wherever it sets
+  them. A variable set in more than one place holds each value, and a `for` loop's
+  variable holds each word of its list.
+- A variable the migration doesn't set takes its default, so
+  `${XDG_CONFIG_HOME:-$HOME/.config}` is `~/.config`. `$OMARCHY_PATH` is the release.
+- `{a,b}` lists are spelled out, and wildcards are matched in your home.
+- `mktemp` makes a file by its template, or one that isn't yours when it has none.
+  `realpath` and `readlink -f` name the file they're given.
+
+A path only known when the migration runs, such as `$1`, a `$(...)` or a variable
+from `read`, is `unknown`, once per migration, with its lines. The title lists up
+to three lines and counts more. So is a relative
+path, as it depends on where the migration runs. A path that is known as far as a
+folder outside your home, such as `/etc/$name`, isn't, and neither is one written
+under `sudo`, which is for system files. v4.5.0-rc2 removes files that `find` lists
+in `/etc` that way. A migration the reader loses its place in, as with a quote that
+never closes, is `unknown` too.
+
+Your files are those in your home, but for `~/.cache` and `~/.local/state`: they
+hold Omarchy's caches and state, not files you change. Omarchy's default of a file
+in `~/.config` is the file at the same place under `config` in a tree, and of a
+launcher in `~/.local/share/applications` the one under `applications`. A file
+byte-identical to its default in either tree is unchanged and says nothing, and so
+does a file you don't have.
+
+Any other file of yours a migration writes is a note. It says the migration "looks
+like it edits" or "removes" the file, with the lines, and whether the file differs
+from Omarchy's default or has none. The evidence names the lines, the file and the
+default. A path with wildcards is one note that names the files of yours it matches.
+Migrations often go through every launcher and change only some, so the note says
+that it may.
+
 ### Reading your files
 
 Commands are looked for in these places:
@@ -346,7 +397,9 @@ shows the notes in place of their count. Limits are never collapsed.
 The "Checked" line counts only what was really looked at, and leaves out a check
 that didn't run, so it can't read as clear. A migration, file or plugin that couldn't
 be read isn't counted. Your bindings are left out when the file can't be read. A file
-that is skipped as binary counts: it was looked at, and holds nothing to read.
+that is skipped as binary counts: it was looked at, and holds nothing to read. The
+packages and edits checks both read the pending migrations. When they read as many,
+the line counts them once, and otherwise it gives each.
 
 Every attention finding has a `Fix:` line, or says why it can't have an exact one.
 
@@ -452,7 +505,8 @@ scripts and packages with a coming release.
 | [Safe Update](https://github.com/Nejcc/omarchy-safe-update) | Checks plugins after an update | After, not before |
 
 omaforecast is a complement rather than a rival, and the README should say so:
-one reads the release and needs no sandbox, the other runs it and sees file edits.
+one reads the release and needs no sandbox, and can only say a migration looks like
+it edits a file. The other runs it and sees what the edit does.
 
 Omarchy has no pre-update hook. [PR #10398](https://github.com/omacom/omarchy/pull/10398)
 adds one before the dev checkout pull, and was open and quiet at the last check.

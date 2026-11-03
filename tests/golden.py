@@ -36,10 +36,12 @@ RELEASE = {
     "migrations/1700000000.sh": "true\n",
     "migrations/1700000001.sh": "omarchy-pkg-drop fictional-editor\n",
     "migrations/1700000002.sh": 'omarchy-pkg-drop "${targets[@]}"\n',
+    "migrations/1700000003.sh": "sed -i 's/dark/light/' ~/.config/fictional-app/theme.conf\n",
     "shell/Bar.qml": "Item {}\n",
 }
 HOME = {
     ".config/hypr/bindings.lua": 'o.bind("SUPER + M", "Music", "fictional-player")\n',
+    ".config/fictional-app/theme.conf": "style = dark\n",
     ".local/bin/sync-all": "#!/bin/sh\nomarchy-sync-notes\n",
     ".local/state/omarchy/migrations/1700000000.sh": "",
 }

@@ -21,6 +21,8 @@ What was kept:
   `omarchy-install-ai-t3-code` that a migration reaches.
 - `install/user/first-run/install-voxtype.hook`, which the fictional home holds a
   copy of.
+- `config/imv/config` in both: the default of a file a v4.5.0-rc2 migration edits,
+  which the fictional home holds a changed copy of.
 - One migration in v4.0.6 and `shell/README.md` in both, because a tree needs
   something in each folder.
 

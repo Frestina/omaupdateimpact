@@ -956,6 +956,277 @@ class ReachedFiles(unittest.TestCase):
         self.assertEqual(self.read("omarchy-tool\n")[0], {"a": (True, "1.sh", "bin/omarchy-tool")})
 
 
+class Edits(unittest.TestCase):
+    """Pending migrations that look like they write your files."""
+
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.base = Path(directory.name)
+        self.home = self.base / "home"
+        self.home.mkdir()
+        (self.base / "target/migrations").mkdir(parents=True)
+        self.ship("current", "config/app/app.conf", "colour = blue\n")
+        self.ship("target", "config/app/app.conf", "colour = green\n")
+
+    def ship(self, tree, name, text):
+        path = self.base / tree / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text)
+
+    def write(self, name, text="colour = red\n"):
+        path = self.home / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text)
+        return path
+
+    def findings(self, migration, checked=None):
+        (self.base / "target/migrations/1.sh").write_text(migration)
+        return impact.compare_edits(self.base / "current", self.base / "target", self.home, {} if checked is None else checked)
+
+    def notes(self, migration):
+        return titles(self.findings(migration), "note")
+
+    def unknown(self, migration):
+        return titles(self.findings(migration), "unknown")
+
+    def test_sed_on_a_file_you_changed_is_a_note_with_the_line(self):
+        self.write(".config/app/app.conf")
+        findings = self.findings("echo Recolour\nsed -i 's/blue/green/' ~/.config/app/app.conf\n")
+        self.assertEqual([(f.check, f.level) for f in findings], [("edits", "note")])
+        self.assertEqual(
+            findings[0].title,
+            "migrations/1.sh, line 2, looks like it edits ~/.config/app/app.conf, which differs from Omarchy's default.",
+        )
+        self.assertEqual(findings[0].evidence, ["migrations/1.sh:2", "~/.config/app/app.conf", "config/app/app.conf"])
+        self.assertIn("omaforecast", findings[0].detail)
+
+    def test_the_same_migration_on_an_unchanged_file_says_nothing(self):
+        self.write(".config/app/app.conf", "colour = blue\n")
+        self.assertEqual(self.findings("sed -i 's/blue/green/' ~/.config/app/app.conf\n"), [])
+
+    def test_a_file_like_the_releases_default_is_unchanged_too(self):
+        self.write(".config/app/app.conf", "colour = green\n")
+        self.assertEqual(self.findings("sed -i 's/blue/green/' ~/.config/app/app.conf\n"), [])
+
+    def test_a_file_you_dont_have_says_nothing(self):
+        self.assertEqual(self.findings("sed -i 's/blue/green/' ~/.config/app/app.conf\n"), [])
+
+    def test_a_migration_already_run_says_nothing(self):
+        self.write(".config/app/app.conf")
+        self.write(".local/state/omarchy/migrations/1.sh", "")
+        self.assertEqual(self.findings("sed -i 's/blue/green/' ~/.config/app/app.conf\n"), [])
+
+    def test_a_file_with_no_default_says_so(self):
+        self.write(".config/other.conf")
+        self.assertEqual(self.notes("sed -i s/a/b/ ~/.config/other.conf\n"), [
+            "migrations/1.sh, line 1, looks like it edits ~/.config/other.conf, which Omarchy has no default for.",
+        ])
+
+    def test_a_launcher_is_compared_with_omarchys_applications(self):
+        self.ship("current", "applications/Notes.desktop", "[Desktop Entry]\n")
+        self.write(".local/share/applications/Notes.desktop", "[Desktop Entry]\n")
+        self.assertEqual(self.findings("rm -f ~/.local/share/applications/Notes.desktop\n"), [])
+        self.write(".local/share/applications/Notes.desktop", "[Desktop Entry]\nName=Mine\n")
+        self.assertIn("which differs from Omarchy's default", self.notes("rm -f ~/.local/share/applications/Notes.desktop\n")[0])
+
+    def test_sed_without_in_place_writes_nothing(self):
+        self.write(".config/app/app.conf")
+        self.assertEqual(self.findings("sed -n p ~/.config/app/app.conf\nsed -E 's/a/b/' ~/.config/app/app.conf\n"), [])
+
+    def test_every_way_of_asking_sed_to_edit_in_place(self):
+        self.write(".config/app/app.conf")
+        for command in (
+            "sed -i.bak 's/a/b/' ~/.config/app/app.conf",
+            "sed -Ei 's/a/b/' ~/.config/app/app.conf",
+            "sed --in-place -E 's/a/b/' ~/.config/app/app.conf",
+            "sed -i --follow-symlinks -e 's/a/b/' -e 's/c/d/' ~/.config/app/app.conf",
+            "sed -i -f fix.sed ~/.config/app/app.conf",
+            "sudo sed -i --expression=s/a/b/ \"$HOME/.config/app/app.conf\"",
+        ):
+            with self.subTest(command):
+                self.assertEqual(len(self.notes(command + "\n")), 1)
+
+    def test_the_script_given_to_sed_isnt_a_file(self):
+        self.write(".config/app/app.conf")
+        self.assertEqual(self.findings("sed -i ~/.config/app/app.conf /dev/null\n"), [])
+
+    def test_every_writer_counts(self):
+        self.write(".config/app/app.conf")
+        for command in (
+            "printf 'a\\n' >~/.config/app/app.conf",
+            "echo a >> ~/.config/app/app.conf",
+            "cat >>\"$HOME/.config/app/app.conf\" <<'EOF'\nmore\nEOF",
+            "jq . x &>~/.config/app/app.conf",
+            "cp -f /usr/share/x ~/.config/app/app.conf",
+            "install -Dm644 /usr/share/x ~/.config/app/app.conf",
+            "install -m 0644 /usr/share/x ~/.config/app/app.conf",
+            "mv /tmp/x ~/.config/app/app.conf",
+            "echo a | tee -a ~/.config/app/app.conf",
+        ):
+            with self.subTest(command):
+                self.assertEqual(self.notes(command + "\n"), [
+                    "migrations/1.sh, line 1, looks like it edits ~/.config/app/app.conf, which differs from Omarchy's default.",
+                ])
+
+    def test_removing_and_moving_away_remove(self):
+        self.write(".config/app/app.conf")
+        for command in ("rm -f -- ~/.config/app/app.conf", "mv ~/.config/app/app.conf /tmp/old"):
+            with self.subTest(command):
+                self.assertIn("looks like it removes ~/.config/app/app.conf", self.notes(command + "\n")[0])
+
+    def test_what_a_command_only_reads_isnt_written(self):
+        self.write(".config/app/app.conf")
+        text = (
+            "cp ~/.config/app/app.conf /tmp/backup\ngrep -q x ~/.config/app/app.conf\n"
+            "install -d ~/.config/app/app.conf\nwc <~/.config/app/app.conf\nx 2>&1 >&2\n"
+        )
+        self.assertEqual(self.findings(text), [])
+
+    def test_comments_strings_and_heredocs_arent_writes(self):
+        self.write(".config/app/app.conf")
+        text = (
+            "# rm ~/.config/app/app.conf\necho 'rm ~/.config/app/app.conf'\n"
+            "cat <<EOF\nrm ~/.config/app/app.conf\nEOF\n"
+        )
+        self.assertEqual(self.findings(text), [])
+
+    def test_a_variable_set_in_the_migration_is_followed(self):
+        self.write(".config/app/app.conf")
+        text = 'dir="$HOME/.config/app"\nconfig=$dir/app.conf\nif [[ -f $config ]]; then\n  sed -i s/a/b/ "$config"\nfi\n'
+        self.assertEqual(self.findings(text)[0].evidence[0], "migrations/1.sh:4")
+
+    def test_a_variable_set_in_a_function_is_followed(self):
+        self.write(".config/app/app.conf")
+        text = 'fix() {\n  local config="${XDG_CONFIG_HOME:-$HOME/.config}/app/app.conf"\n  sed -i s/a/b/ "$config"\n}\nfix\n'
+        self.assertEqual(len(self.notes(text)), 1)
+
+    def test_an_xdg_folder_takes_its_default(self):
+        self.write(".config/app/app.conf")
+        self.assertEqual(len(self.notes('sed -i s/a/b/ "${XDG_CONFIG_HOME:-$HOME/.config}/app/app.conf"\n')), 1)
+
+    def test_a_loop_over_a_list_follows_each_file(self):
+        self.write(".config/app/app.conf")
+        self.write(".config/other.conf")
+        text = 'for file in "$HOME"/.config/{app/app,other}.conf; do\n  echo x >>"$file"\ndone\n'
+        self.assertEqual(len(self.notes(text)), 2)
+
+    def test_a_path_built_from_variables_is_unknown_not_skipped(self):
+        for text in (
+            'sed -i s/a/b/ "$1"\n',
+            'rm -f "$HOME/.config/app/$(name)"\n',
+            'file=$(find ~/.config -name app.conf)\nsed -i s/a/b/ "$file"\n',
+            'while read -r file; do rm -f "$file"; done <list\n',
+            'rm -f "$XDG_CONFIG_HOME/app/app.conf"\n',
+            'echo x >"${file%/*}/app.conf"\n',
+            "rm -f relative.conf\n",
+        ):
+            with self.subTest(text):
+                findings = self.findings(text)
+                self.assertEqual([(f.check, f.level) for f in findings], [("edits", "unknown")])
+                self.assertEqual(findings[0].evidence, [f"migrations/1.sh:{text.count(chr(10))}"])
+                self.assertIn("so check it by hand", findings[0].title)
+
+    def test_an_unknown_names_each_line_once(self):
+        findings = self.findings('rm -f "$1" "$2"\ntrue\nsed -i s/a/b/ "$1"\n')
+        self.assertEqual(titles(findings, "unknown"), [
+            "Couldn't tell which files migrations/1.sh writes on lines 1 and 3, so check it by hand.",
+        ])
+
+    def test_a_path_outside_your_home_is_not_yours(self):
+        text = (
+            "sed -i s/a/b/ /etc/app.conf\npolkit=/etc/pam.d/polkit-1\ncp \"$polkit\" \"$polkit.bak.$(date +%s)\"\n"
+            'rm -f "/usr/share/applications/$name.desktop"\necho x >/dev/null\n'
+        )
+        self.assertEqual(self.findings(text), [])
+
+    def test_sudo_with_a_path_only_known_when_it_runs_is_for_system_files(self):
+        self.assertEqual(self.findings('sudo rm -f "$grant"\n'), [])
+
+    def test_omarchys_state_and_caches_arent_yours(self):
+        self.write(".local/state/omarchy/toggles/x.lua")
+        self.write(".cache/app/x")
+        text = 'rm -f ~/.local/state/omarchy/toggles/x.lua "$HOME/.local/state/omarchy/$1" ~/.cache/app/x\n'
+        self.assertEqual(self.findings(text), [])
+
+    def test_a_temporary_file_isnt_yours(self):
+        self.write(".config/app/app.conf")
+        text = 'tmp=$(mktemp)\njq . ~/.config/app/app.conf >"$tmp"\nmv "$tmp" ~/.config/app/app.conf\n'
+        self.assertEqual(self.notes(text), [
+            "migrations/1.sh, line 3, looks like it edits ~/.config/app/app.conf, which differs from Omarchy's default.",
+        ])
+        self.assertEqual(self.findings('staged=$(mktemp "$HOME/.config/app/app.conf.XXXXXX")\necho x >"$staged"\n'), [])
+
+    def test_realpath_names_the_file_its_given(self):
+        self.write(".config/app/app.conf")
+        text = 'target=$(realpath ~/.config/app/app.conf)\nawk 1 "$target" >"$target.new" && cat "$target.new" >"$target"\n'
+        self.assertEqual(len(self.notes(text)), 1)
+
+    def test_a_wildcard_is_one_note_naming_the_files_you_changed(self):
+        self.ship("current", "applications/Notes.desktop", "[Desktop Entry]\n")
+        self.write(".local/share/applications/Notes.desktop", "[Desktop Entry]\n")
+        self.write(".local/share/applications/Mine.desktop")
+        self.write(".local/share/applications/Yours.desktop")
+        text = 'for desktop in ~/.local/share/applications/*.desktop; do\n  echo x >>"$desktop"\ndone\n'
+        findings = self.findings(text)
+        self.assertEqual(titles(findings, "note"), [
+            "migrations/1.sh, line 2, looks like it edits files that match ~/.local/share/applications/*.desktop, "
+            "and 2 of them aren't Omarchy's default.",
+        ])
+        self.assertTrue(findings[0].detail.startswith("They are Mine.desktop and Yours.desktop, in ~/.local/share/applications."))
+        self.assertEqual(findings[0].evidence, [
+            "migrations/1.sh:2", "~/.local/share/applications/Mine.desktop", "~/.local/share/applications/Yours.desktop",
+        ])
+
+    def test_a_copy_into_a_folder_writes_the_file_of_that_name(self):
+        self.write(".config/app/app.conf")
+        for command in (
+            'cp -f "$OMARCHY_PATH/config/app/app.conf" ~/.config/app/',
+            'cp -f "$OMARCHY_PATH/config/app/app.conf" ~/.config/app',
+            'source=/usr/share/x/app.conf\nmv "$source" "$HOME/.config/app"',
+        ):
+            with self.subTest(command):
+                self.assertEqual(self.notes(command + "\n"), [
+                    f"migrations/1.sh, line {command.count(chr(10)) + 1}, looks like it edits ~/.config/app/app.conf, "
+                    "which differs from Omarchy's default.",
+                ])
+
+    def test_a_copy_into_a_folder_of_a_file_only_known_when_it_runs_is_unknown(self):
+        self.write(".config/app/app.conf")
+        self.assertEqual(len(self.unknown('cp "$1" ~/.config/app/\n')), 1)
+
+    def test_many_lines_it_cant_tell_about_are_counted(self):
+        findings = self.findings('rm "$1"\nrm "$2"\nrm "$3"\nrm "$4"\n')
+        self.assertEqual(titles(findings, "unknown"), [
+            "Couldn't tell which files migrations/1.sh writes on 4 of its lines, so check it by hand.",
+        ])
+        self.assertEqual(len(findings[0].evidence), 4)
+
+    def test_a_folder_says_so(self):
+        self.write(".config/app/app.conf")
+        self.assertEqual(self.notes("rm -rf ~/.config/app\n"), ["migrations/1.sh, line 1, looks like it removes the folder ~/.config/app."])
+
+    def test_a_migration_it_cant_read_is_unknown(self):
+        self.assertEqual(self.unknown("echo 'never closed\n"), ["Couldn't read which files migrations/1.sh writes, so check it by hand."])
+
+    def test_it_counts_the_migrations_it_read(self):
+        (self.base / "target/migrations/2.sh").write_text('rm -f "$1"\n')
+        (self.base / "target/migrations/3.sh").write_text("echo 'never closed\n")
+        checked = {}
+        findings = self.findings("true\n", checked)
+        self.assertEqual(checked, {"edits": {"pendingMigrations": 2}})
+        self.assertEqual([finding.partial for finding in findings], [True, True])
+
+    def test_with_every_migration_unreadable_nothing_is_counted(self):
+        checked = {}
+        findings = self.findings("echo 'never closed\n", checked)
+        self.assertEqual(checked, {})
+        self.assertFalse(findings[0].partial)
+
+    def test_a_redirect_is_not_a_package(self):
+        self.assertEqual(impact.package_commands("omarchy-pkg-drop a >~/log 2>&1\n"), [("drop", ["a"], False)])
+
+
 class Commands(unittest.TestCase):
     def setUp(self):
         directory = tempfile.TemporaryDirectory()
@@ -1760,6 +2031,22 @@ class Program(ProgramCase):
         self.assertIn("These checks didn't run: packages.", out)
         self.assertNotIn("Nothing found", out)
 
+    def test_an_edit_to_a_file_you_changed_is_a_note_and_exits_0(self):
+        (self.home / ".config/app").mkdir(parents=True)
+        (self.home / ".config/app/app.conf").write_text("mine\n")
+        (self.base / "target/migrations/1.sh").write_text("sed -i s/a/b/ ~/.config/app/app.conf\n")
+        code, out, _ = self.check("--all")
+        self.assertEqual(code, 0)
+        self.assertIn("migrations/1.sh, line 1, looks like it edits ~/.config/app/app.conf", " ".join(out.split()))
+        self.assertIn("Nothing found", out)
+
+    def test_a_write_it_cant_place_exits_3_and_names_the_line(self):
+        (self.base / "target/migrations/1.sh").write_text('true\nrm -f "$1"\n')
+        code, out, _ = self.check()
+        self.assertEqual(code, 3)
+        self.assertIn("migrations/1.sh writes on line 2", out)
+        self.assertIn("These checks ran in part: edits.", out)
+
     def test_a_missing_pacman_exits_3_and_never_says_nothing_found(self):
         empty = self.base / "empty"
         empty.mkdir()
@@ -1835,17 +2122,26 @@ class Program(ProgramCase):
         self.assertIn("1 pending migration,", self.check()[1])
 
     def test_a_check_that_didnt_run_isnt_listed_as_checked(self):
-        out = self.check(packages=None)[1]
-        self.assertNotIn("migration", out.splitlines()[1])
+        out = " ".join(self.check(packages=None)[1].split())
+        self.assertIn("0 pending migrations for file edits,", out)
+        self.assertNotIn("for packages", out)
 
     def test_unreadable_migrations_arent_counted(self):
         (self.base / "target/migrations/1.sh").write_text('omarchy-pkg-drop "$a"\n')
         (self.base / "target/migrations/2.sh").write_text("true\n")
-        self.assertIn("1 pending migration,", self.check(packages={"a"})[1])
+        out = " ".join(self.check(packages={"a"})[1].split())
+        self.assertIn("1 pending migration for packages and 2 for file edits,", out)
 
     def test_a_removal_with_every_migration_unreadable_isnt_listed(self):
         (self.base / "target/migrations/1.sh").write_text('omarchy-pkg-drop "$a"\n')
-        self.assertNotIn("pending migration", self.check(packages={"a"})[1])
+        out = " ".join(self.check(packages={"a"})[1].split())
+        self.assertIn("1 pending migration for file edits,", out)
+        self.assertNotIn("for packages", out)
+
+    def test_migrations_both_checks_read_are_counted_once(self):
+        (self.base / "target/migrations/1.sh").write_text("omarchy-pkg-drop a\n")
+        out = " ".join(self.check()[1].split())
+        self.assertIn(", 1 pending migration, ", out)
 
     def test_a_migration_it_cant_read_beside_one_it_can_ran_in_part(self):
         (self.base / "target/migrations/1.sh").write_text('omarchy-pkg-drop "$a"\n')
