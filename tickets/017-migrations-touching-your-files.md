@@ -30,7 +30,8 @@ This finds likely ones by reading them, and says that's what it's doing.
 - Review follow-ups: read writes behind a wrapper function, as the packages check
   does, and `ln -f` and `find -delete`, and name what is still not read. Round 2:
   a writer counts only behind a command that runs its arguments, not behind any
-  command, and `find -exec` only when what it runs writes.
+  command, and `find -exec` only when what it runs writes. Round 3: CI's ruff
+  failed on two ISC004 errors in the tests.
 
 ## Not in this ticket
 
@@ -53,4 +54,6 @@ This finds likely ones by reading them, and says that's what it's doing.
       With tests.
 - [x] `find -exec grep` in your files gives nothing, and `find -exec rm` is
       `unknown`. With a test.
+- [ ] `ruff check bin/omaupdateimpact tests` passes with ruff 0.17.3, and CI is
+      green on all three jobs.
 - [x] `tests/run` passes.

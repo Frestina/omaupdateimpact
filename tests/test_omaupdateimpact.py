@@ -1169,10 +1169,10 @@ class Edits(unittest.TestCase):
         self.write(".local/share/applications/Yours.desktop")
         text = 'for desktop in ~/.local/share/applications/*.desktop; do\n  echo x >>"$desktop"\ndone\n'
         findings = self.findings(text)
-        self.assertEqual(titles(findings, "note"), [
+        self.assertEqual(titles(findings, "note"), [(
             "migrations/1.sh, line 2, looks like it edits files that match ~/.local/share/applications/*.desktop, "
-            "and 2 of them aren't Omarchy's default.",
-        ])
+            "and 2 of them aren't Omarchy's default."
+        )])
         self.assertTrue(findings[0].detail.startswith("They are Mine.desktop and Yours.desktop, in ~/.local/share/applications."))
         self.assertEqual(findings[0].evidence, [
             "migrations/1.sh:2", "~/.local/share/applications/Mine.desktop", "~/.local/share/applications/Yours.desktop",
@@ -1186,10 +1186,10 @@ class Edits(unittest.TestCase):
             'source=/usr/share/x/app.conf\nmv "$source" "$HOME/.config/app"',
         ):
             with self.subTest(command):
-                self.assertEqual(self.notes(command + "\n"), [
+                self.assertEqual(self.notes(command + "\n"), [(
                     f"migrations/1.sh, line {command.count(chr(10)) + 1}, looks like it edits ~/.config/app/app.conf, "
-                    "which differs from Omarchy's default.",
-                ])
+                    "which differs from Omarchy's default."
+                )])
 
     def test_a_copy_into_a_folder_of_a_file_only_known_when_it_runs_is_unknown(self):
         self.write(".config/app/app.conf")
