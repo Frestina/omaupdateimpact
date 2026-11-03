@@ -35,6 +35,7 @@ jobs:
           /usr/lib/qt6/bin/qmllint --version
           shellcheck --version
           ruff --version
+          node --version
       - run: tests/run
 
   arch:
@@ -46,12 +47,24 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: Install the tools
-        run: pacman -Syu --noconfirm --needed python qt6-declarative
+        run: pacman -Syu --noconfirm --needed python qt6-declarative quickshell nodejs
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Check qmllint is there
-        run: /usr/lib/qt6/bin/qmllint --version
+      - name: Check the tools are there
+        run: |
+          /usr/lib/qt6/bin/qmllint --version
+          node --version
+      # The command leaves its own plugin out, so its QML is linted here, against the
+      # shell of both releases it was checked with. Any warning fails.
+      - name: Lint the plugin's QML
+        run: |
+          for tag in v4.0.6 v4.5.0-rc2; do
+            mkdir -p "/tmp/omarchy/$tag"
+            curl -fsSL "https://github.com/omacom/omarchy/archive/refs/tags/$tag.tar.gz" \
+              | tar -xz --strip-components=1 -C "/tmp/omarchy/$tag"
+          done
+          tests/lint-plugin /tmp/omarchy/v4.0.6 /tmp/omarchy/v4.5.0-rc2
       # Root reads everything, so the tests of unreadable folders need a normal user.
       - name: Run the tests as a normal user
         run: |

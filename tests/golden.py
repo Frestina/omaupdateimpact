@@ -3,6 +3,9 @@
 Run it from the repo with python3 -m tests.golden to write the golden files again,
 then copy them into docs/json.md. The command runs on small fictional trees, with
 stubs for this machine and for GitHub, so each example is what it prints.
+
+The plugin's tests read every golden file, so there is one for each result. Only
+the three in DOCUMENTED are shown in docs/json.md.
 """
 
 import contextlib
@@ -40,12 +43,15 @@ RELEASE = {
     "shell/Bar.qml": "Item {}\n",
     impact.NOTES: "## Deprecations\n\n- Replace Fictional Editor with Fictional Writer by @fictional-dev in #101\n",
 }
+# What the release adds that can't be read: nothing needs attention, and it is incomplete.
+UNREADABLE = {**INSTALLED, "migrations/1700000002.sh": RELEASE["migrations/1700000002.sh"]}
 HOME = {
     ".config/hypr/bindings.lua": 'o.bind("SUPER + M", "Music", "fictional-player")\n',
     ".config/fictional-app/theme.conf": "style = dark\n",
     ".local/bin/sync-all": "#!/bin/sh\nomarchy-sync-notes\n",
     ".local/state/omarchy/migrations/1700000000.sh": "",
 }
+DOCUMENTED = ("report", "no-update", "failed")
 RELEASES = [{"tag_name": "v1.4.0-rc1"}, {"tag_name": "v1.3.0"}, {"tag_name": "v1.2.3"}]
 
 
@@ -95,11 +101,20 @@ def documents():
         base = Path(directory)
         installed, release = write(base / "v1.2.3", INSTALLED), write(base / "v1.3.0", RELEASE)
         write(base / "home", HOME)
-        return {
-            "report": printed(base, "1.2.3-1", "--root", str(installed), "--target", str(release)),
+        compare = ("--root", str(installed), "--target")
+        found = {
+            "report": printed(base, "1.2.3-1", *compare, str(release)),
             "no-update": printed(base, "1.3.0-1"),
             "failed": printed(base, "1.2.3-1", "--root", str(installed), "--channel", "edge"),
         }
+        # Each is v1.3.0 to the command, so it is compared as the release.
+        found["clear"] = printed(base, "1.2.3-1", *compare, str(write(base / "clear/v1.3.0", INSTALLED)))
+        unreadable = write(base / "incomplete/v1.3.0", UNREADABLE)
+        found["incomplete"] = printed(base, "1.2.3-1", *compare, str(unreadable))
+        clash = next(f["id"] for f in json.loads(found["report"])["findings"] if f["check"] == "bindings")
+        printed(base, "1.2.3-1", *compare, str(release), "--ack", clash)
+        found["reviewed"] = printed(base, "1.2.3-1", *compare, str(release))
+        return found
 
 
 def main():

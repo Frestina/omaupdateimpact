@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "id": "io.github.frestina.omaupdateimpact",
+  "name": "omaupdateimpact",
+  "version": "0.1.0",
+  "author": "Frestina",
+  "license": "MIT",
+  "description": "What an Omarchy release would do to your machine, before you update: shortcuts that clash, packages it removes, commands your scripts call that it deletes. It reads the release and changes nothing.",
+  "kinds": [
+    "service",
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "service": "plugin/Service.qml",
+    "barWidget": "plugin/Widget.qml"
+  },
+  "barWidget": {
+    "displayName": "Omarchy Impact",
+    "description": "Marks the icon when the next Omarchy release needs your attention. Click for what to do.",
+    "category": "System",
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {
+      "checkEveryHours": 6
+    },
+    "schema": [
+      {
+        "key": "checkEveryHours",
+        "type": "integer",
+        "label": "Check every (hours, 0 only when asked)",
+        "min": 0,
+        "max": 168,
+        "step": 1,
+        "defaultValue": 6
+      }
+    ]
+  }
+}

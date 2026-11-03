@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# Lints plugin/*.qml with a Qt 6 qmllint against each Omarchy tree given, and fails on
+# any warning. The command leaves its own plugin out, so this is where its QML is linted.
+#
+#   tests/lint-plugin ~/.cache/omaupdateimpact/v4.0.6 ~/.cache/omaupdateimpact/v4.5.0-rc2
+#
+# The trees' shell/ folders give qs.Commons and qs.Ui. Quickshell's own modules come
+# from the quickshell package.
+set -uo pipefail
+
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+qmllint="${QMLLINT:-/usr/lib/qt6/bin/qmllint}"
+
+if [[ $# -eq 0 ]]; then
+  echo "Usage: tests/lint-plugin OMARCHY_TREE..." >&2
+  exit 2
+fi
+version="$("$qmllint" --version 2>/dev/null)"
+if [[ ! $version =~ ^qmllint\ ([0-9]+)\. ]] || ((BASH_REMATCH[1] < 6)); then
+  echo "No qmllint from Qt 6 or newer at $qmllint." >&2
+  exit 2
+fi
+
+status=0
+for tree in "$@"; do
+  if [[ ! -d $tree/shell/Commons ]]; then
+    echo "$tree has no shell/Commons, so it isn't an Omarchy tree." >&2
+    exit 2
+  fi
+  imports="$(mktemp -d)"
+  ln -s "$(cd "$tree/shell" && pwd -P)" "$imports/qs"
+  echo "Linting plugin/*.qml against $tree with $version"
+  "$qmllint" --max-warnings 0 -I "$imports" "$root"/plugin/*.qml || status=1
+  rm -rf "$imports"
+done
+exit "$status"

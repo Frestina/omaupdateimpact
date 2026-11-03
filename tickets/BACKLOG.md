@@ -200,3 +200,17 @@ Paths already ruled out are not here; they are under
   Waits for the plugin (021) to need it.
 - **`TERM=dumb`.** Colour goes to any terminal, so a dumb one gets the codes.
   `NO_COLOR` covers it. Waits for a real report.
+- **A check that never ends.** The service starts no new check while one runs, and
+  sets no deadline on it. The command has timeouts on its requests, so a hang is
+  unlikely, but one would leave the bar on its last state until the shell restarts.
+  Stopping it mid-download leaves scratch in the cache (see above). Waits for a real
+  report.
+- **The plugin reads all of stdout.** The command is the plugin's own, so its output
+  is trusted and isn't cut while it is read, only the stderr line it shows. Marketplace
+  reviewers ask for limits while receiving. Revisit in 023 if review asks.
+- **Advisory findings for the listing (023).** `validate_plugin.py --security` flags
+  the README's clone-and-run install, a ticket's words about `curl | bash`, and
+  `AGENTS.md`, `CLAUDE.md` and `.claude/` in the installed tree. The demo preflight
+  wants a bash harness and a `demo/fixtures` folder: `demo/run` is Python, cleans up
+  in `finally`, replaces no config, and reads the golden documents. Settle each with
+  the release and publish skills.

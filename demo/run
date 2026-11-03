@@ -1,0 +1,224 @@
+#!/usr/bin/env python3
+"""Show the plugin in a throwaway Omarchy shell with a fictional home, and capture it.
+
+    demo/run                               # preview.png, from the tokyo-night theme
+    demo/run --theme catppuccin-latte --theme gruvbox --out /tmp/themes
+
+Nothing of yours is touched or shown. A second shell starts with HOME set to a new
+folder in XDG_RUNTIME_DIR, so it reads none of your config, plugins or files. That
+home holds a copy of the plugin whose bin/omaupdateimpact only prints one of the
+golden documents in tests/fixtures/json, which are the command's own output on small
+fictional trees. Its bar sits at the bottom, and Omarchy's own services are off but
+for the wallpaper, which shows the demo theme's own over yours. So your bar,
+notifications and lock screen carry on.
+
+It moves to an empty workspace while it captures, and goes back after. On any exit,
+the second shell is stopped, your workspace comes back, and the folder is deleted.
+Check every image before committing it.
+"""
+
+import argparse
+import base64
+import json
+import os
+import shutil
+import signal
+import subprocess
+import sys
+import tempfile
+import time
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+GOLDEN = ROOT / "tests/fixtures/json"
+EXIT_CODES = {"clear": 0, "noUpdate": 0, "attention": 1, "failed": 2, "incomplete": 3}
+PREFIX = "omaupdateimpact-demo."
+# Logical pixels from the bottom right of the focused monitor: the bar and the panel.
+WIDTH, HEIGHT = 560, 760
+
+
+def manifest():
+    return json.loads((ROOT / "manifest.json").read_text())
+
+
+def run(*args, **kwargs):
+    return subprocess.run(args, capture_output=True, text=True, check=True, timeout=30, **kwargs).stdout
+
+
+def hypr(*args):
+    return json.loads(run("hyprctl", "-j", *args))
+
+
+def first_party_services(omarchy):
+    """Omarchy's own plugins that run without a bar entry, which the demo shell turns off."""
+    found = []
+    for path in (omarchy / "shell/plugins").rglob("*manifest.json"):
+        data = json.loads(path.read_text())
+        kinds = data.get("kinds", [])
+        # The demo theme's own wallpaper covers yours, so it stays on.
+        keep = {"omarchy.bar", "omarchy.background"}
+        if data.get("id") and data["id"] not in keep and (kinds != ["bar-widget"] or data.get("keepLoaded")):
+            found.append(data["id"])
+    return sorted(found)
+
+
+def theme(home, omarchy, name):
+    """Make the named theme current in the fictional home, as omarchy-theme-set would."""
+    source = omarchy / "themes" / name
+    if not (source / "colors.toml").is_file():
+        sys.exit(f"demo: no theme {name} in {omarchy / 'themes'}")
+    current = home / ".local/state/omarchy/current"
+    shutil.rmtree(current, ignore_errors=True)
+    (current / "next-theme").mkdir(parents=True)
+    shutil.copy(source / "colors.toml", current / "next-theme/colors.toml")
+    environment = dict(os.environ, HOME=str(home), OMARCHY_PATH=str(omarchy))
+    subprocess.run(["omarchy-theme-set-templates"], env=environment, check=True, capture_output=True, timeout=60)
+    (current / "next-theme").rename(current / "theme")
+    backgrounds = sorted((source / "backgrounds").glob("*")) if (source / "backgrounds").is_dir() else []
+    if backgrounds:
+        (current / "background").symlink_to(backgrounds[0])
+    return current / "theme"
+
+
+def fictional_home(home, omarchy, result):
+    """The fictional home: a shell.json with the widget, and the plugin with a fixture command."""
+    plugin_id = manifest()["id"]
+    config = home / ".config/omarchy"
+    config.mkdir(parents=True)
+    shell = {
+        "version": 1,
+        "bar": {
+            "position": "bottom",
+            "transparent": False,
+            "layout": {"left": [], "center": [{"id": "omarchy.clock"}], "right": [{"id": plugin_id}]},
+        },
+        "plugins": [],
+        "disabledPlugins": first_party_services(omarchy),
+    }
+    (config / "shell.json").write_text(json.dumps(shell, indent=2) + "\n")
+
+    plugin = config / "plugins" / plugin_id
+    (plugin / "bin").mkdir(parents=True)
+    shutil.copy(ROOT / "manifest.json", plugin)
+    shutil.copytree(ROOT / "plugin", plugin / "plugin")
+    document = GOLDEN / f"{result}.json"
+    shutil.copy(document, plugin / "bin/document.json")
+    code = EXIT_CODES[json.loads(document.read_text())["result"]]
+    fixture = plugin / "bin/omaupdateimpact"
+    fixture.write_text(f'#!/bin/sh\n# A fixture: one golden document.\ncat "$(dirname "$0")/document.json"\nexit {code}\n')
+    fixture.chmod(0o755)
+
+
+def go_to(workspace):
+    """Hyprland 0.56 takes Lua; older ones the plain dispatcher."""
+    lua = f'hl.dsp.focus({{ workspace = "{workspace}" }})'
+    if subprocess.run(["hyprctl", "dispatch", lua], capture_output=True, check=False).returncode:
+        run("hyprctl", "dispatch", "workspace", str(workspace))
+
+
+def ipc(pid, *args):
+    return run("qs", "ipc", "--pid", str(pid), *args)
+
+
+def wait_for(pid, target, seconds=30):
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        try:
+            if f"target {target}" in ipc(pid, "show"):
+                return
+        except subprocess.CalledProcessError:
+            pass
+        time.sleep(0.25)
+    sys.exit(f"demo: the demo shell didn't offer {target} within {seconds} seconds")
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--theme", action="append", help="a theme in $OMARCHY_PATH/themes (repeatable)")
+    parser.add_argument("--result", default="report", help="a golden document in tests/fixtures/json")
+    parser.add_argument("--out", type=Path, help="a folder for one PNG per theme, in place of preview.png")
+    args = parser.parse_args()
+    themes = args.theme or ["tokyo-night"]
+
+    for command in ("quickshell", "qs", "grim", "hyprctl", "omarchy-theme-set-templates"):
+        if not shutil.which(command):
+            sys.exit(f"demo: {command} isn't installed")
+    omarchy = Path(os.environ.get("OMARCHY_PATH") or "/usr/share/omarchy")
+    runtime = Path(os.environ["XDG_RUNTIME_DIR"])
+    stale = sorted(runtime.glob(PREFIX + "*"))
+    if stale:
+        sys.exit(f"demo: an earlier run left {stale[0]}. Stop any quickshell started from it, then delete it.")
+    if not (GOLDEN / f"{args.result}.json").is_file():
+        sys.exit(f"demo: no golden document {args.result}")
+
+    state = Path(tempfile.mkdtemp(prefix=PREFIX, dir=runtime))
+    home = state / "home"
+    shell = None
+    workspace = hypr("activeworkspace")["id"]
+    try:
+        fictional_home(home, omarchy, args.result)
+        theme(home, omarchy, themes[0])
+        used = {w["id"] for w in hypr("workspaces")}
+        empty = next(n for n in range(9, 100) if n not in used)
+        go_to(empty)
+
+        environment = dict(
+            os.environ, HOME=str(home), XDG_CONFIG_HOME=str(home / ".config"),
+            XDG_STATE_HOME=str(home / ".local/state"), XDG_CACHE_HOME=str(home / ".cache"),
+            XDG_DATA_HOME=str(home / ".local/share"), QS_DISABLE_FILE_WATCHER="1", QS_NO_RELOAD_POPUP="1",
+        )
+        log = (state / "shell.log").open("w")
+        shell = subprocess.Popen(
+            ["quickshell", "-p", str(omarchy / "shell")], env=environment, stdout=log, stderr=log,
+            start_new_session=True,
+        )
+        plugin_id = manifest()["id"]
+        wait_for(shell.pid, plugin_id)
+
+        monitor = next(m for m in hypr("monitors") if m["focused"])
+        width, height = monitor["width"] / monitor["scale"], monitor["height"] / monitor["scale"]
+        w, h = min(WIDTH, width), min(HEIGHT, height)
+        region = f"{monitor['x'] + width - w:.0f},{monitor['y'] + height - h:.0f} {w:.0f}x{h:.0f}"
+
+        for index, name in enumerate(themes):
+            current = theme(home, omarchy, name) if index else home / ".local/state/omarchy/current/theme"
+            payload = [base64.b64encode((current / file).read_bytes()).decode() for file in ("colors.toml", "shell.toml")]
+            ipc(shell.pid, "call", "shell", "applyTheme", *payload)
+            ipc(shell.pid, "call", plugin_id, "check")
+            time.sleep(1.5)
+            ipc(shell.pid, "call", "shell", "summon", plugin_id, "{}")
+            time.sleep(1.5)
+            target = args.out / f"{name}.png" if args.out else ROOT / "preview.png"
+            target.parent.mkdir(parents=True, exist_ok=True)
+            run("grim", "-g", region, str(target))
+            ipc(shell.pid, "call", "shell", "hide", plugin_id)
+            time.sleep(0.5)
+            print(f"demo: wrote {target}")
+    except BaseException:
+        log_file = state / "shell.log"
+        if log_file.exists():
+            print("demo: the demo shell's log ends:", *log_file.read_text().splitlines()[-40:], sep="\n", file=sys.stderr)
+        raise
+    finally:
+        if shell:
+            os.killpg(shell.pid, signal.SIGTERM)
+            try:
+                shell.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                os.killpg(shell.pid, signal.SIGKILL)
+                shell.wait()
+        try:
+            go_to(workspace)
+            print(f"demo: back on workspace {workspace}")
+        except subprocess.CalledProcessError:
+            print(f"demo: couldn't go back to workspace {workspace}", file=sys.stderr)
+        if shell is None or shell.poll() is not None:
+            shutil.rmtree(state)
+        else:
+            print(f"demo: the demo shell is still running; {state} was kept", file=sys.stderr)
+
+
+if __name__ == "__main__":
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(1))
+    signal.signal(signal.SIGHUP, lambda *_: sys.exit(1))
+    main()

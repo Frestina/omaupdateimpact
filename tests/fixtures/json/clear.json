@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "result": "clear",
+  "installed": "1.2.3-1",
+  "channel": "stable",
+  "target": {
+    "name": "v1.3.0",
+    "prerelease": false
+  },
+  "checks": {
+    "bindings": {
+      "state": "ran",
+      "checked": {
+        "defaults": 1,
+        "yours": 1
+      }
+    },
+    "packages": {
+      "state": "ran",
+      "checked": {
+        "pendingMigrations": 0
+      }
+    },
+    "commands": {
+      "state": "ran",
+      "checked": {
+        "deletedCommands": 0,
+        "yourFiles": 0
+      }
+    },
+    "plugins": {
+      "state": "ran",
+      "checked": {
+        "linted": 0
+      }
+    },
+    "edits": {
+      "state": "ran",
+      "checked": {
+        "pendingMigrations": 0
+      }
+    }
+  },
+  "findings": []
+}

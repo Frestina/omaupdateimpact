@@ -587,7 +587,9 @@ included, so its error can answer in JSON. So is an old Python. `--help` and
 
 The schema is in `docs/json.md`. Its examples are the command's output on small
 fictional trees, kept as golden files in `tests/fixtures/json`, and a test fails
-when either stops matching. `python3 -m tests.golden` writes them again.
+when either stops matching. `python3 -m tests.golden` writes them again. There is one
+for every result, and one with a reviewed finding, for the plugin's tests. The doc
+shows three of them.
 
 ## Files
 
@@ -684,13 +686,16 @@ disagree. It was checked against the shell in v4.0.6 and v4.5.0-rc2.
 - **The id is `io.github.frestina.omaupdateimpact`.** It can't change once
   published, as it names the plugin's folder and its entry in `shell.json`. It
   follows the other Frestina plugins and stays out of the reserved `omarchy.*`.
-  The command holds it as `PLUGIN_ID`, and `manifest.json` must hold the same.
+  The command holds it as `PLUGIN_ID`, and `manifest.json` must hold the same. Its
+  `version` is the command's `__version__`. A test holds each pair together, and
+  every id in the QML to `PLUGIN_ID`.
 - **No links in the repository.** `omarchy plugin validate` refuses a plugin that
   holds one. There are none now, and a fixture that needs one makes it in the test.
 
 ### Kinds
 
-`kinds` is `service` and `bar-widget`. The QML is in `plugin/`.
+`kinds` is `service` and `bar-widget`. The QML is in `plugin/`: `Service.qml`,
+`Widget.qml`, and `State.js`, which they import.
 
 - The **service** is the only thing that runs the command. The shell loads one,
   however many monitors there are, so a check runs once and not once per monitor.
@@ -747,6 +752,16 @@ that is shown as "couldn't check", with the last line of stderr.
   lists the limits.
 - While a check runs, the last state stays, and the tooltip adds "Checking…".
 - Colours are theme tokens, by role: muted text, text, and the warning colour.
+  Muted is the text colour faded, as the shell fades its own quiet widgets. The
+  theme's `muted` colour was too dark to read on some popups, such as nord's and
+  matte-black's. The warning colour is the bar's `urgent`. In a theme where that is
+  near the text colour, such as `white`, the count still tells the states apart.
+- A document that doesn't add up is "couldn't check" too, as the plugin can't tell
+  which part is wrong. That is `clear` with a check that didn't run in full or an
+  `unknown` finding, `attention` with nothing unreviewed that needs it, any other
+  result with something that does, `incomplete` where every check ran, or a check,
+  finding or release that can't be read. So a check that didn't run can never show
+  as quiet, whatever the document says.
 
 ### The panel
 
@@ -765,9 +780,10 @@ anything out:
 With `noUpdate`, it says Omarchy is up to date and names any newer release on
 another channel, from `newer`, or `newerProblem`. With `failed`, it shows `reason`.
 
-It has two buttons. "Check again" checks now. "Open report" runs the same bundled
-command in `omarchy-launch-floating-terminal-with-presentation`, as the menu row
-does. No button changes the system. Marking a finding reviewed stays in the
+A left click opens it. It has two buttons. "Check again" checks now, as `r` does
+while it is open. "Open report" runs the same bundled command in
+`omarchy-launch-floating-terminal-with-presentation`, as the menu row does. No
+button changes the system. Marking a finding reviewed stays in the
 terminal, with `--ack`, for now.
 
 ### What it runs and touches
@@ -790,7 +806,15 @@ terminal, with `--ack`, for now.
 - CI lints `plugin/*.qml` with a Qt 6 `qmllint` on the Arch job, and fails on a
   warning. The command leaves its own plugin out, so this is where its QML is
   linted.
+- CI fetches the shell from both release tags on GitHub to lint against, and takes
+  Quickshell's own modules from Arch's `quickshell` package. `tests/lint-plugin`
+  does the same with any Omarchy tree, such as one in the cache.
 - The demo and preview use fixture JSON from a fictional run, never a real one.
+  `demo/run` starts a second shell with `HOME` set to a new folder, so it reads
+  none of the user's files. Its copy of the plugin has a `bin/omaupdateimpact` that
+  prints a golden document. Omarchy's own services are off in it but for the
+  wallpaper, which shows the demo theme's own. It writes `preview.png`, or one image
+  per theme with `--out`, and stops that shell, whatever happens.
 
 ## Docs
 

@@ -84,6 +84,33 @@ To update, run `git pull` in the clone. To remove it, run this there:
 That removes the link, and the menu row if you added it. It tells you where the
 cache and your reviewed findings are, and leaves them for you to delete.
 
+### In the bar
+
+The same repository is an Omarchy shell plugin. It puts an icon in the bar that
+shows the result, for when you'd rather not open a terminal:
+
+```
+omarchy plugin add https://github.com/Frestina/omaupdateimpact.git --enable
+```
+
+![The panel with three things that need attention](preview.png)
+
+- The icon is faded when nothing needs attention, has a count in the warning colour
+  when something does, and a `?` when it couldn't check. It never hides, and it is
+  never shown as clear for a check that didn't run.
+- Click it for the panel: what needs attention, with each fix to copy, then what
+  couldn't be checked, then the notes. "Check again" checks now. "Open report"
+  shows the full report in a terminal. No button changes anything.
+- It runs the command in its own folder with `--json`, never one on your `PATH`, and
+  holds no rules of its own. It checks 2 minutes after login, then every 6 hours.
+  Set `checkEveryHours` on its entry in `~/.config/omarchy/shell.json` to change
+  that, or to 0 to check only when asked.
+- To mark a finding reviewed, use `--ack` in a terminal.
+
+`omarchy plugin remove io.github.frestina.omaupdateimpact` deletes the plugin's
+folder. The cache in `~/.cache/omaupdateimpact` and your reviewed findings in
+`~/.config/omaupdateimpact/reviewed` stay, for you to delete.
+
 ## Usage
 
 Run it before `omarchy update`. Omarchy has no pre-update hook, so it can't run by

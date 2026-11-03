@@ -694,7 +694,7 @@ class JsonDocs(unittest.TestCase):
                 self.assertEqual((golden.GOLDEN / f"{name}.json").read_text(), text, "Run python3 -m tests.golden.")
 
     def test_the_schema_doc_shows_the_golden_files(self):
-        for name in self.printed:
+        for name in golden.DOCUMENTED:
             with self.subTest(name):
                 text = (golden.GOLDEN / f"{name}.json").read_text()
                 self.assertIn(f"```json\n{text}```\n", self.doc, f"Copy tests/fixtures/json/{name}.json into the doc.")

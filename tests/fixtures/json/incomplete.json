@@ -1,0 +1,60 @@
+{
+  "schemaVersion": 1,
+  "result": "incomplete",
+  "installed": "1.2.3-1",
+  "channel": "stable",
+  "target": {
+    "name": "v1.3.0",
+    "prerelease": false
+  },
+  "checks": {
+    "bindings": {
+      "state": "ran",
+      "checked": {
+        "defaults": 1,
+        "yours": 1
+      }
+    },
+    "packages": {
+      "state": "didNotRun",
+      "checked": {
+        "pendingMigrations": null
+      }
+    },
+    "commands": {
+      "state": "ran",
+      "checked": {
+        "deletedCommands": 0,
+        "yourFiles": 0
+      }
+    },
+    "plugins": {
+      "state": "ran",
+      "checked": {
+        "linted": 0
+      }
+    },
+    "edits": {
+      "state": "ran",
+      "checked": {
+        "pendingMigrations": 1
+      }
+    }
+  },
+  "findings": [
+    {
+      "id": "e1c345b",
+      "check": "packages",
+      "level": "unknown",
+      "title": "Couldn't read what migrations/1700000002.sh removes, so check it by hand.",
+      "evidence": [
+        "migrations/1700000002.sh"
+      ],
+      "detail": "",
+      "fix": "",
+      "partial": false,
+      "reason": null,
+      "reviewed": false
+    }
+  ]
+}

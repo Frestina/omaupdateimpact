@@ -29,11 +29,11 @@ Show the result on the desktop, for people who would never run the CLI.
 
 ## Done when
 
-- [ ] Every exit code has a state in the panel, tested with fixture JSON.
-- [ ] The plugin passes `omarchy plugin validate` and the `omarchy-plugin-test`
+- [x] Every exit code has a state in the panel, tested with fixture JSON.
+- [x] The plugin passes `omarchy plugin validate` and the `omarchy-plugin-test`
       checks.
-- [ ] CI's Arch job lints `plugin/*.qml` with a Qt 6 `qmllint` and fails on a
+- [x] CI's Arch job lints `plugin/*.qml` with a Qt 6 `qmllint` and fails on a
       warning.
-- [ ] It works in every theme tried, using theme tokens only.
-- [ ] A test fails when `manifest.json`'s id isn't the command's `PLUGIN_ID`.
-- [ ] Nothing in the demo is real data.
+- [x] It works in every theme tried, using theme tokens only.
+- [x] A test fails when `manifest.json`'s id isn't the command's `PLUGIN_ID`.
+- [x] Nothing in the demo is real data.

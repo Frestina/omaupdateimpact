@@ -1,0 +1,136 @@
+{
+  "schemaVersion": 1,
+  "result": "attention",
+  "installed": "1.2.3-1",
+  "channel": "stable",
+  "target": {
+    "name": "v1.3.0",
+    "prerelease": false
+  },
+  "checks": {
+    "bindings": {
+      "state": "ran",
+      "checked": {
+        "defaults": 3,
+        "yours": 1
+      }
+    },
+    "packages": {
+      "state": "ranInPart",
+      "checked": {
+        "pendingMigrations": 2
+      }
+    },
+    "commands": {
+      "state": "ran",
+      "checked": {
+        "deletedCommands": 1,
+        "yourFiles": 2
+      }
+    },
+    "plugins": {
+      "state": "ran",
+      "checked": {
+        "linted": 0
+      }
+    },
+    "edits": {
+      "state": "ran",
+      "checked": {
+        "pendingMigrations": 3
+      }
+    }
+  },
+  "findings": [
+    {
+      "id": "9d67629",
+      "check": "bindings",
+      "level": "attention",
+      "title": "SUPER + M: your \"Music\" will clash with the new default \"Minimize window\".",
+      "evidence": [
+        "default/hypr/bindings.lua",
+        "~/.config/hypr/bindings.lua"
+      ],
+      "detail": "Both will fire.",
+      "fix": "Add hl.unbind(\"SUPER + M\") above your binding, or choose another key.",
+      "partial": false,
+      "reason": null,
+      "reviewed": true
+    },
+    {
+      "id": "60d484f",
+      "check": "bindings",
+      "level": "note",
+      "title": "New default shortcuts: SUPER + N (\"Notifications\").",
+      "evidence": [
+        "default/hypr/bindings.lua"
+      ],
+      "detail": "",
+      "fix": "",
+      "partial": false,
+      "reason": null,
+      "reviewed": false
+    },
+    {
+      "id": "1354b03",
+      "check": "packages",
+      "level": "attention",
+      "title": "The update will remove fictional-editor, which is installed here.",
+      "evidence": [
+        "migrations/1700000001.sh"
+      ],
+      "detail": "",
+      "fix": "After the update, run omarchy pkg add fictional-editor (aur-add for an AUR package).",
+      "partial": false,
+      "reason": {
+        "text": "Replace Fictional Editor with Fictional Writer",
+        "reference": "#101",
+        "evidence": ".omaupdateimpact-notes.md:3"
+      },
+      "reviewed": false
+    },
+    {
+      "id": "e1c345b",
+      "check": "packages",
+      "level": "unknown",
+      "title": "Couldn't read what migrations/1700000002.sh removes, so check it by hand.",
+      "evidence": [
+        "migrations/1700000002.sh"
+      ],
+      "detail": "",
+      "fix": "",
+      "partial": true,
+      "reason": null,
+      "reviewed": false
+    },
+    {
+      "id": "b2c1f5a",
+      "check": "commands",
+      "level": "attention",
+      "title": "~/.local/bin/sync-all calls omarchy-sync-notes, which the release deletes.",
+      "evidence": [
+        "~/.local/bin/sync-all:2"
+      ],
+      "detail": "",
+      "fix": "Change or remove line 2. This tool can't tell what replaces the command.",
+      "partial": false,
+      "reason": null,
+      "reviewed": false
+    },
+    {
+      "id": "e2e0746",
+      "check": "edits",
+      "level": "note",
+      "title": "migrations/1700000003.sh, line 1, looks like it edits ~/.config/fictional-app/theme.conf, which Omarchy has no default for.",
+      "evidence": [
+        "migrations/1700000003.sh:1",
+        "~/.config/fictional-app/theme.conf"
+      ],
+      "detail": "It is read, not run, so the result isn't known. omaforecast can show it by running the migration in a sandbox.",
+      "fix": "",
+      "partial": false,
+      "reason": null,
+      "reviewed": false
+    }
+  ]
+}
