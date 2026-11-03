@@ -39,10 +39,10 @@ itself.
 
 ## Done when
 
-- [ ] A clone of this repository in a fictional home's plugins folder adds no
+- [x] A clone of this repository in a fictional home's plugins folder adds no
       findings, and a test fails without the change.
-- [ ] A second clone, with this tool's id but not the running checkout, adds none
+- [x] A second clone, with this tool's id but not the running checkout, adds none
       either.
-- [ ] A plugin that isn't this tool, beside it, is still read and linted.
-- [ ] Running from a checkout that holds the fictional home leaves nothing out.
-- [ ] `tests/run` passes.
+- [x] A plugin that isn't this tool, beside it, is still read and linted.
+- [x] Running from a checkout that holds the fictional home leaves nothing out.
+- [x] `tests/run` passes.

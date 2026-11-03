@@ -139,6 +139,10 @@ MOST_PASSES = 16
 DEFAULT_FOLDERS = [(".config", "config"), (".local/share/applications", "applications")]
 # Omarchy's state and caches, which aren't files you change.
 NOT_YOURS = [".cache", ".local/state"]
+# The plugin's id. manifest.json must hold the same one, and it can't change once published.
+PLUGIN_ID = "io.github.frestina.omaupdateimpact"
+# The checkout the running command is in, by real path: the folder above bin/.
+CHECKOUT = Path(__file__).resolve().parent.parent
 SHELL_OPERATOR = re.compile(r"\(\s*\)|&>>|&>|<<<|<<-|<<|<&|<>|<|>>|>&|>\||>|&&|\|\||\|&|;;&|;;|;&|[;&|()\n]")
 TEST_END = re.compile(r"\s\]\]")
 # A line to copy stays on one line of the report.
@@ -1706,13 +1710,17 @@ def compare_edits(current, target, home, checked):
     return [*findings, *unknown]
 
 
-def walked_files(root, seen):
+def walked_files(root, seen, own=()):
     """A folder's files, and why for any folder in it that can't be read.
 
     Links are followed, but each real folder is read once, so a link loop ends.
+    A folder whose real path is in one of the own folders isn't gone into.
     """
     denied = []
     for directory, subdirs, names in os.walk(root, followlinks=True, onerror=denied.append):
+        if is_own(directory, own):
+            subdirs.clear()
+            continue
         status = os.stat(directory)
         if (status.st_dev, status.st_ino) in seen:
             subdirs.clear()
@@ -1724,12 +1732,48 @@ def walked_files(root, seen):
     yield from ((Path(error.filename), error.strerror) for error in denied)
 
 
+def is_own_plugin(folder):
+    """Whether a plugin's manifest.json has this tool's id. One that can't be read doesn't."""
+    try:
+        manifest = json.loads((folder / "manifest.json").read_bytes())
+    except (OSError, ValueError, RecursionError):
+        return False
+    return isinstance(manifest, dict) and manifest.get("id") == PLUGIN_ID
+
+
+def own_folders(home):
+    """The tool's own folders, by real path, so no check reads them as your setup.
+
+    The plugin is the whole repository, and its tests name deleted commands on purpose.
+    A folder that holds your home is never one, as that would leave out everything.
+    """
+    plugins, _ = plugin_folders(home / ".config/omarchy/plugins")
+    found = {CHECKOUT, *(real_path(p) for p in plugins if p.is_dir() and is_own_plugin(p))}
+    home = real_path(home)
+    return {folder for folder in found if not home.is_relative_to(folder)}
+
+
+def real_path(path):
+    """Where a path really is. realpath, unlike resolve, never raises on a link loop."""
+    return Path(os.path.realpath(path))
+
+
+def is_own(path, own):
+    """Whether a file or folder really sits in one of the tool's own folders."""
+    real = real_path(path)
+    return any(real.is_relative_to(folder) for folder in own)
+
+
 def user_files(home):
-    """Each file that can call a command, with why it can't be read, if it can't."""
+    """Each file that can call a command, with why it can't be read, if it can't.
+
+    The tool's own files are left out, wherever they are linked from.
+    """
     config = home / ".config"
     by_suffix = [config / "hypr", *(config / "omarchy" / name for name in ("hooks", "extensions", "plugins"))]
     # A script needs no suffix here, and a binary is told by its bytes.
     every_file = [home / ".local/bin", config / "systemd/user", home / ".local/share/applications"]
+    own = own_folders(home)
     seen = set()
     # These come first, so a folder linked from both is read in full.
     for root in [*every_file, *by_suffix]:
@@ -1737,7 +1781,9 @@ def user_files(home):
         if reason:
             yield root, reason
         elif root.exists():
-            for path, reason in walked_files(root, seen):
+            for path, reason in walked_files(root, seen, own):
+                if is_own(path, own):
+                    continue
                 if reason:
                     yield path, reason
                 elif ".bak" not in path.name and (root in every_file or path.suffix in TEXT_SUFFIXES):
@@ -1745,7 +1791,7 @@ def user_files(home):
     settings = [config / "omarchy/shell.json", config / "omarchy/shell.toml"]
     for path in [*settings, *(home / name for name in STARTUP_FILES)]:
         reason = blocked(path)
-        if reason or path.exists():
+        if (reason or path.exists()) and not is_own(path, own):
             yield path, reason
 
 
@@ -1918,6 +1964,9 @@ def compare_plugins(current, target, home, checked):
     if reason:
         title = f"{shown} couldn't be read, so plugins weren't linted."
         return [Finding("plugins", UNKNOWN, title, [shown], detail=f"{reason}.")]
+    # This tool's own plugin is linted in its CI, and isn't counted.
+    own = own_folders(home)
+    installed = [p for p in installed if not (p.exists() and is_own(p, own))]
     if not installed:
         checked["plugins"] = {"linted": 0}
         return []

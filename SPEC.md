@@ -381,8 +381,11 @@ checkout the running command is in, found by real path, and a plugin whose
 included, and its tests name deleted commands on purpose. A terminal install and
 the plugin can be two clones, so the id counts as well as the path. A folder of
 the tool's own is left out of the commands and plugins checks, and of the
-"Checked" counts. Its QML is linted in this project's CI. A checkout that holds
-your home is never left out, as that would leave out everything.
+"Checked" counts. Its QML is linted in this project's CI. A file or folder whose
+real path is in one of them is left out wherever it is linked from, such as the link
+`install.sh` puts in `~/.local/bin`. A checkout that holds your home is never left
+out, as that would leave out everything. A plugin whose `manifest.json` can't be
+read isn't known to be this tool, so it is read as yours.
 
 Links are followed, and each real folder is read once, so a link loop ends. A folder
 both ways of reading can reach is read in full. `.git` is skipped, and so are backups
@@ -672,6 +675,7 @@ disagree. It was checked against the shell in v4.0.6 and v4.5.0-rc2.
 - **The id is `io.github.frestina.omaupdateimpact`.** It can't change once
   published, as it names the plugin's folder and its entry in `shell.json`. It
   follows the other Frestina plugins and stays out of the reserved `omarchy.*`.
+  The command holds it as `PLUGIN_ID`, and `manifest.json` must hold the same.
 - **No links in the repository.** `omarchy plugin validate` refuses a plugin that
   holds one. There are none now, and a fixture that needs one makes it in the test.
 

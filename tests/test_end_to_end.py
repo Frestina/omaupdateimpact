@@ -20,7 +20,8 @@ from unittest import mock
 from tests import demo, drift_watch, golden
 from tests.test_omaupdateimpact import QMLLINT_OUTPUT, QT6_VERSION, ProgramCase, impact
 
-COMMAND = Path(__file__).parent.parent / "bin/omaupdateimpact"
+REPOSITORY = Path(__file__).parent.parent
+COMMAND = REPOSITORY / "bin/omaupdateimpact"
 FIXTURES = Path(__file__).parent / "fixtures"
 HOME = FIXTURES / "home"
 OLD = FIXTURES / "releases/v4.0.6"
@@ -380,6 +381,65 @@ class Report(RealCommand):
         self.assertNotIn("qmllint", self.attention())
         self.assertIn("demo: 2 new qmllint warnings, such as Demo.qml: Warnings occurred while importing module", self.output)
         self.assertIn("qmllint can't prove a plugin works.", self.output)
+
+
+class OwnFiles(RealCommand):
+    """The plugin is the whole repository, cloned into the plugins folder the command reads."""
+
+    def setUp(self):
+        super().setUp()
+        self.plugins = self.clean_home / ".config/omarchy/plugins"
+        self.plugins.mkdir(parents=True)
+
+    def clone(self, folder, plugin_id=None):
+        """A copy of this repository, with a manifest only when it has an id."""
+        shutil.copytree(REPOSITORY, folder, symlinks=True, ignore=shutil.ignore_patterns(".git", "__pycache__"))
+        (folder / "manifest.json").unlink(missing_ok=True)
+        if plugin_id:
+            (folder / "manifest.json").write_text(json.dumps({"schemaVersion": 1, "id": plugin_id}))
+        return folder
+
+    def document(self, home, command=COMMAND):
+        result = subprocess.run(
+            [command, "--json", "--root", OLD, "--target", NEW, "--home", home],
+            env=self.env(), capture_output=True, text=True, timeout=60, check=False,
+        )
+        return result.returncode, json.loads(result.stdout)
+
+    def test_a_clone_in_the_plugins_folder_adds_nothing(self):
+        alone = self.document(self.clean_home)
+        clone = self.clone(self.plugins / "omaupdateimpact")
+        self.assertEqual(self.document(self.clean_home, clone / "bin/omaupdateimpact"), alone)
+        self.assertEqual(alone[0], 0)
+        self.assertEqual(alone[1]["checks"]["plugins"]["checked"], {"linted": 0})
+
+    def test_a_second_clone_with_this_tools_id_adds_nothing(self):
+        alone = self.document(self.clean_home)
+        self.clone(self.plugins / "omaupdateimpact", impact.PLUGIN_ID)
+        running = self.clone(self.base / "terminal-install")
+        self.assertEqual(self.document(self.clean_home, running / "bin/omaupdateimpact"), alone)
+
+    def test_a_plugin_that_isnt_this_tool_beside_it_is_still_read_and_linted(self):
+        shutil.copytree(HOME / ".config/omarchy/plugins/demo", self.plugins / "demo")
+        (self.plugins / "demo/start.sh").write_text("omarchy-voxtype-install\n")
+        alone = self.document(self.clean_home)
+        clone = self.clone(self.plugins / "omaupdateimpact")
+        self.assertEqual(self.document(self.clean_home, clone / "bin/omaupdateimpact"), alone)
+        code, document = alone
+        self.assertEqual(code, 1)
+        self.assertEqual(document["checks"]["plugins"]["checked"], {"linted": 1})
+        evidence = [finding["evidence"][0] for finding in document["findings"]]
+        self.assertIn("~/.config/omarchy/plugins/demo/start.sh:1", evidence)
+        self.assertIn("~/.config/omarchy/plugins/demo/Demo.qml", evidence)
+
+    def test_a_checkout_that_holds_the_home_leaves_nothing_out(self):
+        checkout = self.clone(self.base / "checkout")
+        home = checkout / "tests/fixtures/home"
+        elsewhere = self.base / "home"
+        shutil.copytree(home, elsewhere, symlinks=True)
+        found = self.document(home, checkout / "bin/omaupdateimpact")
+        self.assertEqual(found, self.document(elsewhere))
+        self.assertEqual(found[0], 1)
 
 
 class JsonOutput(RealCommand):

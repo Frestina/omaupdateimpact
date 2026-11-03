@@ -25,6 +25,7 @@ Show the result on the desktop, for people who would never run the CLI.
 - A clear "couldn't check" state for exit 2 and 3. It must never look like clear.
 - A button that runs the check again. No button changes the system.
 - A fictional demo and preview image, using the `omarchy-plugin-demo` skill.
+- `manifest.json`'s id is the command's `PLUGIN_ID`, and a test checks they match.
 
 ## Done when
 
@@ -34,4 +35,5 @@ Show the result on the desktop, for people who would never run the CLI.
 - [ ] CI's Arch job lints `plugin/*.qml` with a Qt 6 `qmllint` and fails on a
       warning.
 - [ ] It works in every theme tried, using theme tokens only.
+- [ ] A test fails when `manifest.json`'s id isn't the command's `PLUGIN_ID`.
 - [ ] Nothing in the demo is real data.

@@ -22,6 +22,8 @@
   Update. It opens the report in a terminal. The row is a marked block in
   `~/.config/omarchy/extensions/omarchy-menu.jsonc`, and `--uninstall` removes only
   that block.
+- The command leaves its own files out: the checkout it runs from, and a plugin with
+  its id. So a clone in the plugins folder, tests included, isn't reported as yours.
 
 ## 0.1.0 (2026-11-02)
 

@@ -1655,6 +1655,104 @@ class Commands(unittest.TestCase):
         self.assertEqual(self.findings(), [])
 
 
+class OwnFiles(unittest.TestCase):
+    """The plugin is the whole repository, and its tests name deleted commands on purpose."""
+
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.base = Path(directory.name)
+        self.home = self.base / "home"
+        self.plugins = self.home / ".config/omarchy/plugins"
+        self.plugins.mkdir(parents=True)
+        (self.base / "current/bin").mkdir(parents=True)
+        (self.base / "target/bin").mkdir(parents=True)
+        (self.base / "current/bin/omarchy-gone").touch()
+        # A checkout of the tool somewhere else, so the real one plays no part.
+        self.running = self.base / "running-checkout"
+        patcher = mock.patch.object(impact, "CHECKOUT", self.running)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def plugin(self, folder, plugin_id=None):
+        """A plugin that calls the deleted command, with a manifest when it has an id."""
+        (folder / "tests").mkdir(parents=True)
+        (folder / "tests/test_calls.sh").write_text("omarchy-gone\n")
+        (folder / "Panel.qml").write_text("Item {}\n")
+        if plugin_id:
+            (folder / "manifest.json").write_text(json.dumps({"schemaVersion": 1, "id": plugin_id}))
+        return folder
+
+    def commands(self):
+        checked = {}
+        findings = impact.compare_commands(self.base / "current", self.base / "target", self.home, checked)
+        return [finding.evidence[0] for finding in findings], checked["commands"]["yourFiles"]
+
+    def linted(self):
+        checked = {}
+        with mock.patch.object(impact, "lint", return_value=impact.Counter()) as lint, \
+                mock.patch.object(impact, "find_qmllint", return_value=("/bin/true", [])):
+            findings = impact.compare_plugins(Path("current"), Path("target"), self.home, checked)
+        plugins = sorted({call.args[0].name for call in lint.call_args_list})
+        return plugins, checked["plugins"]["linted"], findings
+
+    def test_a_plugin_with_this_tools_id_isnt_read_or_linted(self):
+        self.plugin(self.plugins / "ours", impact.PLUGIN_ID)
+        self.assertEqual(self.commands(), ([], 0))
+        self.assertEqual(self.linted(), ([], 0, []))
+
+    def test_a_plugin_that_isnt_this_tool_beside_it_still_is(self):
+        self.plugin(self.plugins / "ours", impact.PLUGIN_ID)
+        self.plugin(self.plugins / "weather", "io.github.example.weather")
+        self.assertEqual(self.commands(), (["~/.config/omarchy/plugins/weather/tests/test_calls.sh:1"], 3))
+        plugins, linted, _ = self.linted()
+        self.assertEqual((plugins, linted), (["weather"], 1))
+
+    def test_this_tools_plugin_is_left_out_wherever_it_is_linked_from(self):
+        (self.plugins / "ours").symlink_to(self.plugin(self.base / "elsewhere", impact.PLUGIN_ID))
+        self.assertEqual(self.commands(), ([], 0))
+        self.assertEqual(self.linted(), ([], 0, []))
+
+    def test_the_running_checkout_is_left_out_with_no_manifest(self):
+        (self.plugins / "dev").symlink_to(self.plugin(self.running))
+        self.assertEqual(self.commands(), ([], 0))
+        self.assertEqual(self.linted(), ([], 0, []))
+
+    def test_the_tools_own_files_are_left_out_wherever_they_are_linked_from(self):
+        ours = self.plugin(self.plugins / "ours", impact.PLUGIN_ID)
+        (self.running / "bin").mkdir(parents=True)
+        (self.running / "bin/omaupdateimpact").write_text("omarchy-gone\n")
+        (self.home / ".local/bin").mkdir(parents=True)
+        # As install.sh links it, and a folder of the plugin's linked in from your config.
+        (self.home / ".local/bin/omaupdateimpact").symlink_to(self.running / "bin/omaupdateimpact")
+        (self.home / ".config/hypr").mkdir()
+        (self.home / ".config/hypr/scripts").symlink_to(ours / "tests")
+        (self.home / ".bashrc").symlink_to(ours / "tests/test_calls.sh")
+        self.assertEqual(self.commands(), ([], 0))
+
+    def test_a_manifest_it_cant_read_leaves_nothing_out(self):
+        for name, manifest in [("broken", "{"), ("list", "[]"), ("deep", "[" * 100000), ("other", '{"id": 1}')]:
+            self.plugin(self.plugins / name)
+            (self.plugins / name / "manifest.json").write_text(manifest)
+        evidence, read = self.commands()
+        self.assertEqual((len(evidence), read), (4, 12))
+        self.assertEqual(self.linted()[:2], (["broken", "deep", "list", "other"], 4))
+
+    def test_a_checkout_that_holds_your_home_leaves_nothing_out(self):
+        self.plugin(self.plugins / "weather")
+        with mock.patch.object(impact, "CHECKOUT", self.base):
+            self.assertEqual(self.commands(), (["~/.config/omarchy/plugins/weather/tests/test_calls.sh:1"], 2))
+            self.assertEqual(self.linted()[:2], (["weather"], 1))
+
+    def test_a_plugin_with_this_tools_id_that_holds_your_home_leaves_nothing_out(self):
+        (self.home / "manifest.json").write_text(json.dumps({"id": impact.PLUGIN_ID}))
+        (self.plugins / "home").symlink_to(self.home)
+        (self.home / ".config/hypr").mkdir()
+        (self.home / ".config/hypr/autostart.lua").write_text('o.exec("omarchy-gone")\n')
+        evidence, _ = self.commands()
+        self.assertEqual(evidence, ["~/.config/hypr/autostart.lua:1"])
+
+
 class Plugins(unittest.TestCase):
     def test_reports_only_new_warnings(self):
         with tempfile.TemporaryDirectory() as directory:
