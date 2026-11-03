@@ -274,11 +274,26 @@ This finds likely edits by reading. omaforecast finds them by running migrations
 which this never does, so a note names it.
 
 Pending migrations are split into shell tokens, as for packages. A write is `sed -i`,
-the file `cp` or `install` writes, both files of `mv`, `rm`, `tee`, and output sent
-to a file with `>`, `>>` or `&>`. `mv` and `rm` remove what they name. A copy or a
-move into a folder writes the file of the same name there. `install -d` only makes
-folders. Nothing else counts: what a release command such as
-`omarchy-bar` writes isn't seen, and other release files aren't read for writes.
+the file `cp`, `install` or `ln -f` writes, both files of `mv`, `rm`, `tee`, and output
+sent to a file with `>`, `>>` or `&>`. `mv` and `rm` remove what they name. A copy, a
+move or a link into a folder writes the file of the same name there, and `ln -n` or
+`-T` replaces a link to a folder rather than going into it. A link that already
+points where the new one would says nothing. `ln` without `-f` and `install -d`
+write no file.
+
+As for packages, a writer behind any command counts, such as `sudo` or a function
+of the migration's own, unless that command only prints or looks up, such as `echo`.
+A function the migration defines that runs `sudo "$@"`, as v4.5.0-rc2's `as_root`
+does, counts as `sudo`.
+
+`find` with `-delete`, `-exec`, `-execdir`, `-ok` or `-okdir` changes files whose
+names are only known when it runs. In your files that is `unknown`, and elsewhere,
+or in a folder you don't have, it says nothing.
+
+Nothing else is read as a write. That leaves out `xargs`, `awk -i inplace`,
+`perl -i`, `rsync`, `truncate`, `dd`, a `bash -c` or `eval` string and any other
+command. What a release command such as `omarchy-bar` writes isn't seen, and other
+release files aren't read for writes.
 
 A path is read as bash would expand it, without running anything:
 

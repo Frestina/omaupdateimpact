@@ -1202,6 +1202,74 @@ class Edits(unittest.TestCase):
         ])
         self.assertEqual(len(findings[0].evidence), 4)
 
+    def test_a_write_behind_a_wrapper_function_is_read(self):
+        self.write(".config/app/app.conf")
+        wrapper = 'as_root() {\n  if (( EUID == 0 )); then\n    "$@"\n  else\n    sudo "$@"\n  fi\n}\n'
+        self.assertEqual(self.notes(wrapper + "as_root rm -f ~/.config/app/app.conf\n"), [
+            "migrations/1.sh, line 8, looks like it removes ~/.config/app/app.conf, which differs from Omarchy's default.",
+        ])
+        self.assertEqual(self.notes("retry 3 rm -f ~/.config/app/app.conf\n"), [
+            "migrations/1.sh, line 1, looks like it removes ~/.config/app/app.conf, which differs from Omarchy's default.",
+        ])
+
+    def test_a_function_that_runs_sudo_counts_as_sudo(self):
+        wrapper = 'as_root() {\n  sudo "$@"\n}\nfunction quietly { as_root "$@" >/dev/null; }\n'
+        self.assertEqual(self.findings(wrapper + 'as_root rm -f "$1"\nquietly cp x "$2"\n'), [])
+
+    def test_a_function_that_runs_its_arguments_without_sudo_isnt_sudo(self):
+        self.assertEqual(len(self.unknown('run() { "$@"; }\nrun rm -f "$1"\n')), 1)
+
+    def test_a_command_that_only_prints_writes_nothing(self):
+        self.write(".config/app/app.conf")
+        self.assertEqual(self.findings("echo rm -f ~/.config/app/app.conf\ncommand -v rm\n"), [])
+
+    def test_a_forced_link_onto_a_file_of_yours_is_a_note(self):
+        self.write(".config/app/app.conf")
+        for command in (
+            'ln -sfn "$OMARCHY_PATH/config/app/app.conf" ~/.config/app/app.conf',
+            'ln --force -s /usr/share/x/app.conf ~/.config/app/',
+            'ln -sf /usr/share/x/app.conf ~/.config/app',
+        ):
+            with self.subTest(command):
+                self.assertEqual(self.notes(command + "\n"), [
+                    "migrations/1.sh, line 1, looks like it edits ~/.config/app/app.conf, which differs from Omarchy's default.",
+                ])
+
+    def test_a_link_without_force_writes_nothing(self):
+        self.write(".config/app/app.conf")
+        self.assertEqual(self.findings("ln -s /usr/share/x/app.conf ~/.config/app/app.conf\n"), [])
+
+    def test_a_link_that_already_points_there_says_nothing(self):
+        (self.home / ".claude/skills").mkdir(parents=True)
+        (self.home / ".claude/skills/omarchy").symlink_to("/usr/share/omarchy/default/agents/skills/omarchy")
+        text = 'ln -sfn "$OMARCHY_PATH/default/agents/skills/omarchy" ~/.claude/skills/omarchy\n'
+        self.assertEqual(self.findings(text), [])
+        self.assertEqual(len(self.notes(text.replace("agents/skills", "other"))), 1)
+
+    def test_a_link_with_n_replaces_a_link_to_a_folder(self):
+        (self.home / "skills").mkdir()
+        (self.home / "current").symlink_to(self.home / "skills")
+        self.assertEqual(self.notes("ln -sfn /usr/share/x ~/current\n"), [
+            "migrations/1.sh, line 1, looks like it edits the folder ~/current.",
+        ])
+
+    def test_find_that_changes_what_it_finds_in_your_files_is_unknown(self):
+        self.write(".config/app/app.conf")
+        for command in ("find ~/.config/app -name '*.conf' -delete", "find ~/.config/app -type f -exec sed -i s/a/b/ {} +"):
+            with self.subTest(command):
+                self.assertEqual(self.unknown(command + "\n"), [
+                    "Couldn't tell which files migrations/1.sh writes on line 1, so check it by hand.",
+                ])
+
+    def test_find_elsewhere_or_only_listing_says_nothing(self):
+        self.write(".config/app/app.conf")
+        self.write(".local/state/omarchy/x.json")
+        text = (
+            "find ~/.config/app -name '*.conf'\nfind /etc/app -delete\nfind ~/.local/state/omarchy -delete\n"
+            "find ~/.config/missing -delete\nsudo find \"$dir\" -delete\n"
+        )
+        self.assertEqual(self.findings(text), [])
+
     def test_a_folder_says_so(self):
         self.write(".config/app/app.conf")
         self.assertEqual(self.notes("rm -rf ~/.config/app\n"), ["migrations/1.sh, line 1, looks like it removes the folder ~/.config/app."])

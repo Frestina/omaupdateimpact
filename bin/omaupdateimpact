@@ -47,6 +47,7 @@ import dataclasses
 import glob
 import gzip
 import http.client
+import itertools
 import json
 import os
 import re
@@ -119,7 +120,7 @@ OUTPUT_REDIRECTS = {">", ">>", ">|", "&>", "&>>", "<>", ">&"}
 # Words that open or close a block, and so come before or stand apart from a command.
 BLOCK_WORDS = {"if", "then", "else", "elif", "fi", "while", "until", "do", "done", "case", "esac", "{", "}", "!", "time", "function"}
 DECLARES = {"local", "declare", "typeset", "export", "readonly"}
-WRAPPERS = {"sudo", "command", "builtin", "exec", "env", "nohup"}
+WRITERS = {"sed", "rm", "tee", "mv", "cp", "install", "ln", "find"}
 ASSIGNMENT = re.compile(r"[A-Za-z_]\w*\+?=")
 NAME = re.compile(r"[A-Za-z_]\w*")
 PARAMETER = re.compile(r"([A-Za-z_]\w*)(?::?([-=])(.*))?", re.DOTALL)
@@ -1008,10 +1009,10 @@ def compare_packages(target, home, installed, checked):
     return findings
 
 
-def simple_commands(text):
-    """Each simple command in a script, as its words, without the words that open or close a block."""
+def simple_commands(tokens):
+    """Each simple command in shell tokens, as its words, without the words that open or close a block."""
     words = []
-    for token in [*shell_tokens(text)[0], Op("\n")]:
+    for token in [*tokens, Op("\n")]:
         if not isinstance(token, Op):
             words.append(token)
             continue
@@ -1193,43 +1194,95 @@ def sed_files(arguments):
     return (files if script else files[1:]) if in_place else []
 
 
-def written(words):
-    """The words a command writes to, and whether sudo runs it.
+def braced(token, brace):
+    return type(token) is Word and token == brace
 
-    Each word comes with whether the command only removes it, and for a copy, the
-    words it copies, as a copy into a folder writes a file there of the same name.
+
+def wrapper_functions(tokens):
+    """The functions a script defines that run the command they're given, and whether they run it with sudo."""
+    found, index = {}, 0
+    while index < len(tokens):
+        token, name = tokens[index], None
+        if isinstance(token, Op) and token == "()" and index and type(tokens[index - 1]) is Word:
+            name = tokens[index - 1]
+        elif type(token) is Word and token == "function" and index + 1 < len(tokens) and type(tokens[index + 1]) is Word:
+            name = tokens[index + 1]
+        start = next((i for i in range(index + 1, len(tokens)) if braced(tokens[i], "{")), None) if name else None
+        if start is None:
+            index += 1
+            continue
+        depth, end = 0, start
+        for end in range(start, len(tokens)):
+            depth += braced(tokens[end], "{") - braced(tokens[end], "}")
+            if not depth:
+                break
+        runs = [words for words in simple_commands(tokens[start + 1 : end]) if "$@" in words or "${@}" in words]
+        if runs:
+            found[name] = any(word == "sudo" or found.get(word) for words in runs for word in words)
+        index = end + 1
+    return found
+
+
+def written(words, wrappers):
+    """The words a command writes to, the folders it searches to change what it finds, and whether sudo runs it.
+
+    The writer can sit behind any command, such as sudo or a function of the
+    script's own, but not behind one that only prints or looks up. Each word comes
+    with whether the command only removes it, the words it copies or links, as one
+    copied into a folder keeps its name there, and for a link, ln's -T or -n, or
+    "" for neither. That is None for anything but a link.
     """
-    targets = [(word, False, []) for word in words if isinstance(word, Redirect)]
+    targets = [(word, False, [], None) for word in words if isinstance(word, Redirect)]
     words = [word for word in words if not isinstance(word, Redirect)]
-    sudo = False
     while words and ASSIGNMENT.match(words[0]):
         words = words[1:]
-    while words and words[0].rsplit("/", 1)[-1] in WRAPPERS:
-        sudo = sudo or words[0].rsplit("/", 1)[-1] == "sudo"
-        words = words[1:]
-        while words and (words[0].startswith("-") or ASSIGNMENT.match(words[0])):
-            words = words[1:]
-    if not words:
-        return targets, sudo
-    name, arguments = words[0].rsplit("/", 1)[-1], words[1:]
+    if not words or not_run(words):
+        return targets, [], False
+    found = next((i for i, word in enumerate(words) if word.rsplit("/", 1)[-1] in WRITERS), None)
+    sudo = any(word.rsplit("/", 1)[-1] == "sudo" or wrappers.get(word) for word in words[:found])
+    if found is None:
+        return targets, [], sudo
+    name, arguments = words[found].rsplit("/", 1)[-1], words[found + 1 :]
+    options = [word for word in arguments if word.startswith("-")]
     if name == "sed":
-        targets += [(word, False, []) for word in sed_files(arguments)]
+        targets += [(word, False, [], None) for word in sed_files(arguments)]
     elif name in ("rm", "tee"):
-        targets += [(word, name == "rm", []) for word in operands(arguments)]
+        targets += [(word, name == "rm", [], None) for word in operands(arguments)]
+    elif name == "find":
+        starts = list(itertools.takewhile(lambda word: not word.startswith(("-", "(", "!")), arguments)) or ["."]
+        changes = any(word in ("-delete", "-exec", "-execdir", "-ok", "-okdir") for word in arguments)
+        return targets, starts if changes else [], sudo
+    elif name == "ln":
+        linked = operands(arguments, "St")
+        short = "".join(word[1:] for word in options if not word.startswith("--"))
+        # -T never links into a folder, and -n not into one a link names.
+        stays = "T" if "T" in short or "--no-target-directory" in options else ""
+        stays = stays or ("n" if "n" in short or "--no-dereference" in options else "")
+        if "f" in short or "--force" in options:
+            targets += [(linked[-1] if len(linked) > 1 else ".", False, linked[:1], stays)]
     elif name in ("mv", "cp") or (name == "install" and "-d" not in arguments):
         copied = operands(arguments, "St" if name == "mv" else "gmoSt")
         if name == "mv":
-            targets += [(word, True, []) for word in copied[:-1]]
-        targets += [(copied[-1], False, copied[:-1])] if copied else []
-    return targets, sudo
+            targets += [(word, True, [], None) for word in copied[:-1]]
+        targets += [(copied[-1], False, copied[:-1], None)] if copied else []
+    return targets, [], sudo
 
 
-def copied_into(place, word, sources, variables, home):
-    """What a copy to a place writes: the place, or the files of the same name in it when it's a folder."""
-    if not sources or not (word.endswith("/") or place.is_dir()):
+def copied_into(place, word, sources, stays, variables, home):
+    """What a copy or link to a place writes: the place, or the files of the same name in it when it's a folder."""
+    folder = word.endswith("/") or (place.is_dir() and stays != "T" and not (stays == "n" and place.is_symlink()))
+    if not sources or not folder:
         return [(str(place), True)]
     found = [(text, known) for source in sources for text, known in expansions(source, variables, home)]
     return [(str(place / Path(text).name), True) if known else ("", False) for text, known in found]
+
+
+def linked_already(place, sources, variables, home):
+    """Whether a link is already there and points where the new one would."""
+    if not place.is_symlink():
+        return False
+    pointed = os.readlink(place)
+    return any(known and text == pointed for source in sources for text, known in expansions(source, variables, home))
 
 
 def your_path(value, home):
@@ -1264,22 +1317,29 @@ def script_writes(text, home):
     can hold wildcards. A path only known when it runs is a line it can't tell
     about, unless sudo runs the command: that is for system files.
     """
-    commands = list(simple_commands(text))
-    variables = script_variables(commands, home)
+    tokens = shell_tokens(text)[0]
+    commands = list(simple_commands(tokens))
+    variables, wrappers = script_variables(commands, home), wrapper_functions(tokens)
     paths, unclear = {}, set()
     for words in commands:
-        targets, sudo = written(words)
+        targets, searched, sudo = written(words, wrappers)
         line = text.count("\n", 0, words[0].at) + 1
-        for word, removes, sources in targets:
+        for word, removes, sources, stays in targets:
             for value in expansions(word, variables, home):
                 folder = your_path(value, home)
-                for path in copied_into(folder, word, sources, variables, home) if folder else [value]:
+                for path in copied_into(folder, word, sources, stays, variables, home) if folder else [value]:
                     place = your_path(path, home)
                     if place is None and not sudo:
                         unclear.add(line)
-                    elif place:
+                    elif place and not (stays is not None and linked_already(place, sources, variables, home)):
                         lines, only_removes = paths.get(place, (set(), True))
                         paths[place] = (lines | {line}, only_removes and removes)
+        # What find changes is only known when it runs.
+        for word in searched:
+            for value in expansions(word, variables, home):
+                place = your_path(value, home)
+                if (place is None and not sudo) or (place and existing(place, home)):
+                    unclear.add(line)
     return paths, sorted(unclear)
 
 

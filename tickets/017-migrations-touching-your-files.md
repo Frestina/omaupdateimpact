@@ -27,6 +27,8 @@ This finds likely ones by reading them, and says that's what it's doing.
 - A match is a note saying the migration "looks like it edits" the file, with the
   line. It can't say what the result will be, and suggests omaforecast if the user
   wants that.
+- Review follow-ups: read writes behind a wrapper function, as the packages check
+  does, and `ln -f` and `find -delete`, and name what is still not read.
 
 ## Not in this ticket
 
@@ -38,4 +40,10 @@ This finds likely ones by reading them, and says that's what it's doing.
 - [x] The same migration on an unchanged file says nothing, with a test.
 - [x] Paths built from variables are reported as unknown, not skipped.
 - [x] Run over v4.5.0-rc2's migrations, the output has been read for false alarms.
+- [x] A write behind a wrapper function, such as `as_root rm`, is read. A function
+      that runs `sudo "$@"` counts as `sudo`. With a test.
+- [x] `ln -f` onto a file of yours gives a note, and `find -delete` or `-exec` in
+      your files is `unknown`. With tests.
+- [x] The spec and the README's limits name the writers that still aren't read, and
+      the README doesn't say "and the like".
 - [x] `tests/run` passes.

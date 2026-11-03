@@ -113,7 +113,8 @@ Colour shows on a terminal only, and `NO_COLOR` turns it off.
   zsh or fish startup files. A file Omarchy put there, unchanged, is a note.
 - **Plugins:** `qmllint` warnings that are new with the release's shell.
 - **Edits:** files of yours that the migrations you haven't run look like they edit
-  or remove, with `sed -i`, `cp`, `mv`, `rm`, `>` and the like. A file that is still
+  or remove, with `sed -i`, `cp`, `mv`, `install`, `ln -f`, `rm`, `tee`, `>` or `>>`.
+  A file that is still
   Omarchy's default says nothing. The rest are notes, because a migration that is
   read and not run can't say what the file will hold.
 
@@ -153,7 +154,10 @@ With `--json`, every exit code comes with a document. See [docs/json.md](docs/js
   `x || exit 0`, still says "will remove".
 - A migration's writes are read as text too. A path only known when it runs, such
   as `"$1"`, is reported as a limit, unless `sudo` writes it, which is taken to be a
-  system file. A write made by a release command, such as `omarchy-bar`, isn't seen.
+  system file. So is `find` with `-delete` or `-exec` in your files. Other writers,
+  such as `xargs`, `awk -i inplace`, `perl -i`, `rsync`, `truncate` or a `bash -c`
+  string, aren't read, and neither is a write made by a release command, such as
+  `omarchy-bar`.
   A loop over files may change only some of them, and the note can't tell which.
   `~/.cache` and `~/.local/state` aren't counted as your files.
 - Your files are read as text. A command called from a binary isn't seen. A file
