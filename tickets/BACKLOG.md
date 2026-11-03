@@ -142,6 +142,9 @@ Paths already ruled out are not here; they are under
 - **Scratch left by a killed run.** A run killed mid-download leaves its `tmp*`
   folder in the cache. Pruning skips those, since one may belong to a live run.
   Waits for a real report.
+- **A cache where `flock` doesn't work.** Some network and FUSE file systems refuse
+  `flock`. A run there fails with exit 2, where it used to work without the lock.
+  Exit 2 is honest, so this waits for a real report.
 - **A relative `XDG_CACHE_HOME`.** The XDG spec says to ignore it, and it's used as
   given. Waits for a real report.
 - **Control characters in text from a release.** A description in a binding, or a
