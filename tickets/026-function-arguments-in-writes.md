@@ -15,6 +15,10 @@ check runs in part and the exit is 3. Most of those writes go to a function's `"
 and the function is called with a literal path. Reading the call gives the path, so
 the write becomes a note or nothing.
 
+Exit 0 stays out of reach from v4.0.6. 1791470456 copies to a path it works out
+from your current background as it runs, which no reading can place. That is the
+honest answer, so 026 stops at the writes the text can place.
+
 ## Spec
 
 - [Reading what migrations write](../SPEC.md#reading-what-migrations-write)
@@ -47,8 +51,9 @@ the write becomes a note or nothing.
 - [x] A call with an argument only known when it runs is still `unknown`, with a
       test.
 - [x] `${name##*/}` and its three neighbours are read, with tests.
-- [ ] Run over v4.5.0-rc2's and v4.5.0-rc3's migrations, the unknowns left have
-      been read, and each is a path that is only known when the migration runs.
+- [x] Run over v4.5.0-rc2's and v4.5.0-rc3's migrations, the unknowns left have
+      been read. Each is a path that is only known when the migration runs, or a
+      literal array, which waits in the backlog.
 - [x] A line that writes several files of yours through a loop or a function's
       calls gives one note that names them and says it may change only some. With
       a test.

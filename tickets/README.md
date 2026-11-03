@@ -61,7 +61,7 @@ when.
 | 019 | [Reviewed findings stay quiet](019-reviewed-findings.md) | 002 | todo |
 | 020 | [An entry in the Omarchy menu](020-omarchy-menu-entry.md) | 015 | todo |
 | 025 | [The install tests don't use the developer's PATH](025-install-tests-own-path.md) | 013 | done |
-| 026 | [Follow function arguments into migration writes](026-function-arguments-in-writes.md) | 017 | in progress |
+| 026 | [Follow function arguments into migration writes](026-function-arguments-in-writes.md) | 017 | done |
 
 ### M4 Plugin: on the desktop and in the marketplace
 

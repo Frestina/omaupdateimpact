@@ -55,6 +55,8 @@ Paths already ruled out are not here; they are under
   `${files[1]}` through a function. With 1791470456, whose path comes from a
   `$(...)`, it keeps v4.5.0 at exit 3 wherever it is pending. Reading a literal array
   means changing the tokenizer the packages check shares, so it needs its own ticket.
+  It waits because 1791470456 is pending wherever this one is, so reading arrays
+  wouldn't bring anyone on v4.0.6 to exit 0.
 - **Wildcards in the release.** v4.5.0-rc2's 1786719479 and 1787843905 link each
   folder in `$OMARCHY_PATH/default/agents/skills`. The wildcard is matched in your
   home, so the note names every file in your skills folder, not only Omarchy's
