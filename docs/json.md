@@ -251,11 +251,14 @@ or findings.
 
 | Key | Value |
 | --- | --- |
-| `newer` | Newer releases on other channels, each with its `tag` and `channel`. `[]` when there are none. |
+| `newer` | Newer releases on other channels, each with its `tag`, `channel` and `cached`. `[]` when there are none. |
 | `newerProblem` | Why `newer` is `null`, or `null`. |
 
 `newer` is `null` when the list of releases couldn't be fetched. That still exits 0,
 as there is no update.
+
+`cached` is `true` when the release is already in the cache, so checking it would
+download nothing. A cache that can't be read counts as `false`.
 
 ```json
 {
@@ -270,7 +273,8 @@ as there is no update.
   "newer": [
     {
       "tag": "v1.4.0-rc1",
-      "channel": "rc"
+      "channel": "rc",
+      "cached": false
     }
   ],
   "newerProblem": null

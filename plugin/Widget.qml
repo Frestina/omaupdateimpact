@@ -8,8 +8,9 @@ import "State.js" as State
 // The bar icon and its panel. It runs nothing itself: the service checks, and this
 // shows the service's view. Each monitor has its own copy; they share the service.
 //
-// Left click opens the panel. Its two buttons check again and open the report in a
-// terminal. No button changes the system.
+// Left click opens the panel. Its buttons check again, and open a report in a
+// terminal: the user's own release, or a newer one on another channel. The one thing
+// it changes is its own setting, how often it checks, when one is chosen.
 Panel {
   id: root
   moduleName: "io.github.frestina.omaupdateimpact"
@@ -25,7 +26,7 @@ Panel {
   // Without a service nothing runs the command, and that is shown, never hidden.
   readonly property var view: root.service && root.service.view ? root.service.view : State.noService()
   readonly property bool running: !!root.service && root.service.running === true
-  readonly property int checkEveryHours: Number(root.setting("checkEveryHours", 6))
+  readonly property int checkEveryHours: State.hoursFrom(root.setting("checkEveryHours", State.DEFAULT_HOURS))
 
   // Theme roles: text, muted text and the warning colour. Muted text is the text
   // colour faded, as the shell fades its own quiet widgets: the theme's muted
@@ -55,13 +56,27 @@ Panel {
     if (root.service && typeof root.service.check === "function") root.service.check()
   }
 
-  // The same bundled command, as text, in the launcher Omarchy's update row uses.
-  function openReport() {
+  // The same bundled command, in the launcher Omarchy's update row uses. With a tag,
+  // the report on that release. It only opens a terminal: the service's state, and so
+  // the bar, stay on the user's own channel.
+  function openReport(args) {
     if (!root.host) return
     var command = root.service ? root.service.command : ""
     if (command === "") return
     root.close()
-    root.host.run("omarchy-launch-floating-terminal-with-presentation " + Util.shellQuote(command))
+    root.host.run(State.terminalLine(command, args || []))
+  }
+
+  // Saves the choice on the widget's own entry in shell.json, as the clock panel saves
+  // its own. Applied here first so the choice shows on the click; the write comes back
+  // through the bar as the same value, and every copy hands it to the service.
+  function setCheckEvery(value) {
+    var hours = State.hoursFrom(value)
+    if (hours === root.checkEveryHours) return
+    var entry = State.withSetting(root.settings, root.moduleName, "checkEveryHours", hours)
+    root.settings = entry
+    var shell = root.host ? root.host.shell : null
+    if (shell && typeof shell.updateEntryInline === "function") shell.updateEntryInline(root.moduleName, entry)
   }
 
   function checkedText() {
@@ -257,10 +272,41 @@ Panel {
           // ---------- Up to date, and newer releases elsewhere ----------
           Repeater {
             model: root.view.newer
-            delegate: Selectable {
+            delegate: Column {
+              id: newer
               required property var modelData
-              text: "Newer on the " + modelData.channel + " channel: " + modelData.tag
-              color: root.muted
+              width: body.width
+              spacing: Style.space(3)
+
+              Row {
+                width: parent.width
+                spacing: Style.space(8)
+
+                Button {
+                  id: checkNewer
+                  anchors.verticalCenter: parent.verticalCenter
+                  iconText: "󰆍"
+                  text: "Check"
+                  tooltipText: "The report on " + newer.modelData.tag + " in a terminal"
+                  enabled: !!root.service && !!root.bar
+                  foreground: root.foreground
+                  fontFamily: root.fontFamily
+                  fontSize: root.fonts.bodySmall
+                  onClicked: root.openReport([newer.modelData.tag])
+                }
+
+                Selectable {
+                  anchors.verticalCenter: parent.verticalCenter
+                  width: parent.width - checkNewer.width - parent.spacing
+                  text: newer.modelData.line
+                }
+              }
+
+              Selectable {
+                text: newer.modelData.download
+                color: root.muted
+                font.pixelSize: root.fonts.caption
+              }
             }
           }
 
@@ -387,6 +433,27 @@ Panel {
             color: root.muted
             font.family: root.fontFamily
             font.pixelSize: root.fonts.caption
+          }
+
+          // ---------- How often it checks, the one setting ----------
+          PanelSeparator { foreground: root.foreground }
+          Text {
+            width: parent.width
+            textFormat: Text.PlainText
+            text: "Check every"
+            color: root.muted
+            font.family: root.fontFamily
+            font.pixelSize: root.fonts.caption
+          }
+          ButtonGroup {
+            options: State.intervalChoices(root.checkEveryHours)
+            value: String(root.checkEveryHours)
+            focusable: false
+            spacing: Style.space(4)
+            foreground: root.foreground
+            fontFamily: root.fontFamily
+            fontSize: root.fonts.bodySmall
+            onChanged: function(value) { root.setCheckEvery(value) }
           }
         }
       }

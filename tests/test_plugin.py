@@ -11,6 +11,7 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -159,8 +160,36 @@ class States(unittest.TestCase):
 
     def test_no_update_names_newer_releases(self):
         found = view(*golden("no-update"))
-        self.assertEqual(found["newer"], [{"tag": "v1.4.0-rc1", "channel": "rc"}])
+        self.assertEqual(found["newer"], [{
+            "tag": "v1.4.0-rc1",
+            "channel": "rc",
+            "cached": False,
+            "line": "Newer on the rc channel: v1.4.0-rc1",
+            "download": "Checking it downloads it first, about 200 MB.",
+        }])
         self.assertEqual(found["attention"], [])
+
+    def test_a_newer_release_in_the_cache_downloads_nothing(self):
+        doc = json.loads(golden("no-update")[0])
+        doc["newer"] = [{"tag": "v1.4.0-rc1", "channel": "rc", "cached": True},
+                        {"tag": "v1.3.1", "channel": "stable", "cached": "yes"}]
+        found = view(json.dumps(doc), 0)
+        self.assertEqual([(n["cached"], n["download"]) for n in found["newer"]], [
+            (True, "It is in the cache, so nothing downloads."),
+            # Only true counts: anything else says it downloads, which is the safe side.
+            (False, "Checking it downloads it first, about 200 MB."),
+        ])
+
+    def test_newer_releases_leave_the_bar_on_your_channel(self):
+        # A newer release is only offered for checking in a terminal. The bar still
+        # says your own release is up to date, whether or not one is in the cache.
+        doc = json.loads(golden("no-update")[0])
+        without = dict(copy.deepcopy(doc), newer=[])
+        cached = copy.deepcopy(doc)
+        cached["newer"][0]["cached"] = True
+        found = views(*(run(json.dumps(d), 0) for d in (without, doc, cached)))
+        bar = {(f["state"], f["mark"], f["colour"], f["tooltip"], f["release"], f["channel"]) for f in found}
+        self.assertEqual(bar, {("quiet", "", "muted", "Omarchy v1.3.0 is up to date", "v1.3.0", "stable")})
 
     def test_newer_releases_that_couldnt_be_fetched(self):
         doc = json.loads(golden("no-update")[0])
@@ -244,6 +273,124 @@ class States(unittest.TestCase):
     def test_a_long_stderr_line_is_cut(self):
         found = view("", 1, "x" * 5000)
         self.assertLess(len(found["problem"]), 600)
+
+
+def call(name, *args):
+    return {"call": name, "args": list(args)}
+
+
+@unittest.skipUnless(NODE, "node isn't installed")
+class CheckEvery(unittest.TestCase):
+    """The panel's "Check every" choice, and when the service checks next."""
+
+    def test_the_setting_as_the_service_uses_it(self):
+        # Pairs, not a dict: True and 1 would be one key.
+        cases = [(6, 6), (0, 0), (1, 1), (168, 168), (2.4, 2), ("12", 12), (" 3 ", 3),
+                 (169, 6), (-1, 6), ("", 6), ("often", 6), (None, 6), (True, 6), ([3], 6)]
+        found = views(*(call("hoursFrom", value) for value, _ in cases))
+        self.assertEqual(list(zip((value for value, _ in cases), found)), cases)
+
+    def test_the_offered_choices(self):
+        [found] = views(call("intervalChoices", 6))
+        self.assertEqual([(c["value"], c["label"]) for c in found],
+                         [("0", "Only when asked"), ("1", "1 h"), ("6", "6 h"), ("12", "12 h"), ("24", "24 h")])
+
+    def test_a_value_set_by_hand_is_kept_and_shown(self):
+        three, week = views(call("intervalChoices", 3), call("intervalChoices", 168))
+        self.assertEqual([c["value"] for c in three], ["0", "1", "3", "6", "12", "24"])
+        self.assertEqual([c["value"] for c in week], ["0", "1", "6", "12", "24", "168"])
+        self.assertEqual(week[-1]["tooltip"], "Check every 168 hours")
+
+    def test_the_entry_keeps_its_other_settings(self):
+        moved = {"id": impact.PLUGIN_ID, "checkEveryHours": 3, "fictional": "kept"}
+        found, fresh, odd = views(
+            call("withSetting", moved, impact.PLUGIN_ID, "checkEveryHours", 1),
+            call("withSetting", {}, impact.PLUGIN_ID, "checkEveryHours", 0),
+            call("withSetting", {"id": "another"}, impact.PLUGIN_ID, "checkEveryHours", 24),
+        )
+        self.assertEqual(found, {"id": impact.PLUGIN_ID, "checkEveryHours": 1, "fictional": "kept"})
+        self.assertEqual(fresh, {"id": impact.PLUGIN_ID, "checkEveryHours": 0})
+        self.assertEqual(odd, {"id": impact.PLUGIN_ID, "checkEveryHours": 24})
+
+    def test_the_next_check_follows_the_setting(self):
+        hour, loaded = 3600 * 1000, 1_000_000
+        started = loaded + 10 * hour
+        first, six, one, asked, before = views(
+            call("nextCheckAt", 6, 0, loaded),
+            call("nextCheckAt", 6, started, loaded),
+            # Changed to 1 hour, it is due 1 hour after the last check began.
+            call("nextCheckAt", 1, started, loaded),
+            call("nextCheckAt", 0, started, loaded),
+            call("nextCheckAt", 0, 0, loaded),
+        )
+        self.assertEqual(first, loaded + 2 * 60 * 1000)
+        self.assertEqual((six, one), (started + 6 * hour, started + hour))
+        self.assertEqual((asked, before), (None, None))
+
+    def test_the_service_and_the_widget_read_it_alike(self):
+        service, widget = ((PLUGIN / name).read_text() for name in ("Service.qml", "Widget.qml"))
+        self.assertIn("State.hoursFrom(value)", service)
+        self.assertIn("State.nextCheckAt(checkEveryHours, lastStartedAt, loadedAt)", service)
+        self.assertIn('State.hoursFrom(root.setting("checkEveryHours", State.DEFAULT_HOURS))', widget)
+        self.assertEqual(MANIFEST["barWidget"]["defaults"]["checkEveryHours"], views(call("hoursFrom", None))[0])
+
+    def test_a_choice_is_saved_through_the_shell(self):
+        widget = (PLUGIN / "Widget.qml").read_text()
+        self.assertIn('State.withSetting(root.settings, root.moduleName, "checkEveryHours", hours)', widget)
+        self.assertIn("shell.updateEntryInline(root.moduleName, entry)", widget)
+        self.assertIn("options: State.intervalChoices(root.checkEveryHours)", widget)
+        self.assertIn("onChanged: function(value) { root.setCheckEvery(value) }", widget)
+
+
+@unittest.skipUnless(NODE, "node isn't installed")
+class Terminal(unittest.TestCase):
+    """What "Open report" and "Check" hand to the bar's run(), through two shells."""
+
+    # The launcher in v4.0.6 and v4.5.0-rc2 joins its arguments with "$*" and runs
+    # them in bash -c, between the logo and the done prompt. This one does only that.
+    LAUNCHER = '#!/bin/bash\ncmd="$*"\nexec bash -c "$cmd"\n'
+    REPORTER = "#!/usr/bin/env python3\nimport json, sys\nprint(json.dumps(sys.argv))\n"
+
+    def reached(self, folder, *args):
+        """The argv the command gets, after the bar's bash -lc and the launcher's bash -c."""
+        base = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        stubs = base / "stubs"
+        stubs.mkdir()
+        launcher = stubs / "omarchy-launch-floating-terminal-with-presentation"
+        launcher.write_text(self.LAUNCHER)
+        launcher.chmod(0o755)
+        command = base / folder / "bin/omaupdateimpact"
+        command.parent.mkdir(parents=True)
+        command.write_text(self.REPORTER)
+        command.chmod(0o755)
+        [line] = views(call("terminalLine", str(command), list(args)))
+        environment = dict(os.environ, PATH=f"{stubs}:{os.environ['PATH']}")
+        # The shell runs it with bash -lc. -c is the same parse, without a profile that could change PATH.
+        result = subprocess.run(["bash", "-c", line], capture_output=True, text=True, timeout=30, env=environment,
+                                check=True)
+        return command, json.loads(result.stdout)
+
+    def test_a_tag_and_a_path_with_a_space_arrive_intact(self):
+        command, argv = self.reached("a home with spaces/plugins/omaupdateimpact", "v1.4.0-rc1")
+        self.assertEqual(argv, [str(command), "v1.4.0-rc1"])
+
+    def test_open_report_has_no_arguments(self):
+        command, argv = self.reached("a home with spaces")
+        self.assertEqual(argv, [str(command)])
+
+    def test_quotes_and_shell_words_stay_text(self):
+        command, argv = self.reached("it's $HOME; `true`", "two words", "$(false)")
+        self.assertEqual(argv, [str(command), "two words", "$(false)"])
+
+    def test_both_buttons_go_through_it(self):
+        widget = (PLUGIN / "Widget.qml").read_text()
+        self.assertIn("root.host.run(State.terminalLine(command, args || []))", widget)
+        self.assertIn("onClicked: root.openReport([newer.modelData.tag])", widget)
+        self.assertIn("onClicked: root.openReport()", widget)
+        # The run only opens a terminal: nothing in it checks, or sets what the bar shows.
+        body = widget.split("function openReport(args) {", 1)[1].split("\n  }\n", 1)[0]
+        self.assertNotIn("check(", body)
+        self.assertNotIn("view", body)
 
 
 if __name__ == "__main__":

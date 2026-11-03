@@ -43,10 +43,10 @@ changed by hand in `shell.json`, since Omarchy has no screen for widget settings
 
 ## Done when
 
-- [ ] Each newer release has a button that opens its report, tested with fixture
+- [x] Each newer release has a button that opens its report, tested with fixture
       JSON, and the bar's state doesn't change.
-- [ ] The interval choice is saved in `shell.json` through `updateEntryInline`, and
+- [x] The interval choice is saved in `shell.json` through `updateEntryInline`, and
       the next check follows it.
-- [ ] A tag and a path with a space reach the terminal intact.
-- [ ] The plugin still passes `omarchy plugin validate` and CI's QML lint.
-- [ ] `tests/run` passes.
+- [x] A tag and a path with a space reach the terminal intact.
+- [x] The plugin still passes `omarchy plugin validate` and CI's QML lint.
+- [x] `tests/run` passes.

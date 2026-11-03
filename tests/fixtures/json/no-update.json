@@ -10,7 +10,8 @@
   "newer": [
     {
       "tag": "v1.4.0-rc1",
-      "channel": "rc"
+      "channel": "rc",
+      "cached": false
     }
   ],
   "newerProblem": null

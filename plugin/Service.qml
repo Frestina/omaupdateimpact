@@ -27,9 +27,7 @@ Item {
   property var checkedAt: null
 
   // Hours between checks, handed over by the widget. 0 checks only when asked.
-  property int checkEveryHours: 6
-  // The first check waits this long, so the network is up after login.
-  readonly property int firstCheckMs: 2 * 60 * 1000
+  property int checkEveryHours: State.DEFAULT_HOURS
   readonly property real loadedAt: Date.now()
   // When the last check started, in ms, or 0 before the first.
   property real lastStartedAt: 0
@@ -39,9 +37,9 @@ Item {
   property int procExitCode: -1
 
   // The widget's setting, kept to 0 or 1 to 168 hours. Anything else is the default.
+  // A new value applies at once: the next check is due that long after the last began.
   function setCheckEveryHours(value) {
-    var hours = Math.round(Number(value))
-    if (!isFinite(hours) || hours < 0 || hours > 168) hours = 6
+    var hours = State.hoursFrom(value)
     if (hours === checkEveryHours) return
     checkEveryHours = hours
     if (!running && !checkedAt) view = State.notChecked(hours === 0)
@@ -75,13 +73,11 @@ Item {
   // The next check: two minutes after loading, then every checkEveryHours after
   // the last one started. "Check again" starts the wait over.
   function schedule() {
-    if (checkEveryHours === 0) {
+    var due = State.nextCheckAt(checkEveryHours, lastStartedAt, loadedAt)
+    if (due === null) {
       timer.stop()
       return
     }
-    var due = lastStartedAt > 0
-      ? lastStartedAt + checkEveryHours * 3600 * 1000
-      : loadedAt + firstCheckMs
     timer.interval = Math.max(1000, due - Date.now())
     timer.restart()
   }

@@ -27,6 +27,8 @@
 - Two runs at once share the cache. The second waits for the first to download,
   then reads the same release, instead of downloading it again and failing. A
   release one run is reading isn't pruned by the other.
+- With no update, `--json` says whether each newer release is already in the cache,
+  as `cached`.
 
 ## 0.1.0 (2026-11-02)
 

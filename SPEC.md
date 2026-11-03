@@ -585,7 +585,8 @@ ran in part or didn't run, as the closing line does. Each finding has every fiel
 its evidence included, its `id`, and whether it was `reviewed`.
 
 When there is no update, the document says so and names any newer release on
-another channel. A failure that ends in exit 2 is a document too, with the reason.
+another channel, with whether it is already in the cache. A failure that ends in
+exit 2 is a document too, with the reason.
 
 `result` names the kind of document and maps to one exit code: `clear`, `noUpdate`,
 `attention`, `failed` or `incomplete`. A count of something that wasn't looked at is
@@ -742,7 +743,10 @@ the download, about 200 MB, happens once, when a new release appears.
   offers only when asked, 1, 6, 12 and 24 hours. A choice is saved on the widget's
   own entry in `shell.json` through the shell's `updateEntryInline`, as Omarchy's
   clock and weather panels save theirs. A value set by hand in the file is kept and
-  shown, even when the panel doesn't offer it.
+  shown, even when the panel doesn't offer it. A value outside 0 to 168, or not a
+  number, counts as 6, and the panel shows 6. A new choice applies at once: the next
+  check is due that long after the last one started, so a shorter one can check
+  within seconds.
 - "Check again" checks now and starts the wait over. A check already running isn't
   started twice. A run from a terminal or the menu at the same time shares the
   cache, and the release still downloads once. See [Downloads](#downloads).
@@ -801,8 +805,11 @@ With `noUpdate`, it says Omarchy is up to date and names any newer release on
 another channel, from `newer`, or `newerProblem`. Each newer release has a "Check"
 button that opens the report for that tag in the terminal, as "Open report" does. It
 says the release downloads first, about 200 MB, unless it is already in the cache.
-The bar keeps showing the user's own channel: a release chosen by hand is only in
-that report, as an update wouldn't deliver it. With `failed`, it shows `reason`.
+The command says which: each entry in `newer` has `cached`, as a run would find the
+release there. The plugin doesn't look in the cache itself, so the two can't
+disagree on where it is. The bar keeps showing the user's own channel: a release
+chosen by hand is only in that report, as an update wouldn't deliver it. With
+`failed`, it shows `reason`.
 
 A left click opens it. "Check again" checks now, as `r` does while it is open.
 "Open report" runs the same bundled command in
@@ -815,6 +822,9 @@ anything. Marking a finding reviewed stays in the terminal, with `--ack`, for no
 - It runs only the bundled command with `--json`, and the terminal launcher for
   "Open report" and for checking a newer release by its tag. It reads stdout as the
   document.
+- The launcher joins its arguments and runs them in a second `bash -c`, so the
+  command and the tag are quoted for that shell, and the whole of it again for the
+  bar's own. A path with a space or a quote reaches the command intact.
 - It asks nothing over the network. The command makes its GET requests to GitHub,
   as from a terminal.
 - It writes only its own setting, through the shell, when the user picks one. The

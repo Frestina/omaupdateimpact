@@ -4042,9 +4042,30 @@ class Channels(ProgramCase):
             "installed": "1.2.2-1",
             "channel": "stable",
             "target": {"name": "v1.2.2", "prerelease": False},
-            "newer": [{"tag": "v2.0.0-rc2", "channel": "rc"}, {"tag": "v1.2.3", "channel": "stable"}],
+            "newer": [
+                {"tag": "v2.0.0-rc2", "channel": "rc", "cached": False},
+                {"tag": "v1.2.3", "channel": "stable", "cached": False},
+            ],
             "newerProblem": None,
         })
+
+    def test_up_to_date_says_which_newer_release_is_in_the_cache(self):
+        # The plugin's Check button says a release downloads first, unless it is here.
+        self.on_channel("stable", version="1.2.2-1")
+        (self.cache / "omaupdateimpact/v1.2.3").mkdir(parents=True)
+        document = json.loads(self.fetch("v1.2.2", "--json", own_tree=True)[1])
+        self.assertEqual([(n["tag"], n["cached"]) for n in document["newer"]], [("v2.0.0-rc2", False), ("v1.2.3", True)])
+        self.assertFalse(any("/archive/" in url for url in self.urls))
+
+    @unittest.skipIf(os.geteuid() == 0, "root reads any folder")
+    def test_a_cache_it_cant_look_in_counts_as_not_there(self):
+        self.on_channel("stable", version="1.2.2-1")
+        (self.cache / "omaupdateimpact/v1.2.3").mkdir(parents=True)
+        self.cache.chmod(0)
+        self.addCleanup(self.cache.chmod, 0o755)
+        code, out, _ = self.fetch("v1.2.2", "--json", own_tree=True)
+        self.assertEqual(code, 0)
+        self.assertEqual([n["cached"] for n in json.loads(out)["newer"]], [False, False])
 
     def test_up_to_date_on_the_newest_release_names_no_newer_one(self):
         self.on_channel("rc", version="2.0.0rc2-1")

@@ -2388,10 +2388,24 @@ def document(result, version, channel, name, **rest):
     }
 
 
-def no_update(version, tag, channel):
-    """The release is already installed. Any newer one is on another channel."""
+def in_cache(cache, tag):
+    """Whether a run would read the release from the cache. One it can't look at counts as not there."""
     try:
-        newer = [{"tag": t, "channel": "rc" if is_prerelease(t) else "stable"} for t in newer_releases(version)]
+        return (cache / tag).is_dir()
+    except OSError:
+        return False
+
+
+def no_update(version, tag, channel, cache):
+    """The release is already installed. Any newer one is on another channel.
+
+    Each says whether it is in the cache, so the plugin can say a check of it downloads it first.
+    """
+    try:
+        newer = [
+            {"tag": t, "channel": "rc" if is_prerelease(t) else "stable", "cached": in_cache(cache, t)}
+            for t in newer_releases(version)
+        ]
     except DOWNLOAD_ERRORS as error:
         reason = f" {error}" if isinstance(error, (RateLimited, TokenRejected)) else ""
         problem = f"Couldn't check for newer releases on other channels.{reason}"
@@ -2574,7 +2588,7 @@ def check(options, held):
             if own_tree and installed and installed == wanted:
                 if options.ack:
                     raise NotReviewable("there is no update, so there is nothing to review.")
-                return no_update(version, tag, channel)
+                return no_update(version, tag, channel, cache)
             target = fetch_release(tag, cache, held)
             fetch_notes(tag, target)
         except DOWNLOAD_ERRORS as error:

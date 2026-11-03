@@ -100,11 +100,17 @@ omarchy plugin add https://github.com/Frestina/omaupdateimpact.git --enable
   never shown as clear for a check that didn't run.
 - Click it for the panel: what needs attention, with each fix to copy, then what
   couldn't be checked, then the notes. "Check again" checks now. "Open report"
-  shows the full report in a terminal. No button changes anything.
+  shows the full report in a terminal.
+- When you are up to date and another channel has a newer release, "Check" beside
+  it shows that release's report in a terminal. It downloads the release first,
+  about 200 MB, unless it is already in the cache. The icon stays on your own
+  channel.
 - It runs the command in its own folder with `--json`, never one on your `PATH`, and
   holds no rules of its own. It checks 2 minutes after login, then every 6 hours.
-  Set `checkEveryHours` on its entry in `~/.config/omarchy/shell.json` to change
-  that, or to 0 to check only when asked.
+  "Check every" in the panel changes that: only when asked, 1, 6, 12 or 24 hours.
+  It saves `checkEveryHours` on the widget's entry in `~/.config/omarchy/shell.json`,
+  the only thing the panel changes. Another value set there by hand, up to 168, is
+  kept.
 - To mark a finding reviewed, use `--ack` in a terminal.
 
 `omarchy plugin remove io.github.frestina.omaupdateimpact` deletes the plugin's
