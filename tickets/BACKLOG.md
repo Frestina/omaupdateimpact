@@ -46,11 +46,6 @@ Paths already ruled out are not here; they are under
 
 ## Limits to keep watching
 
-- **Function arguments in migration writes.** A write to `"$1"` inside a function is
-  `unknown`. Across v4.5.0-rc2's 211 migrations, 5 of the 9 that the edits check can't
-  place are this, such as `replace_with_packaged_config` in 1781485962, which copies
-  over a Hyprland config. Following literal call arguments into the function would
-  make most of them notes.
 - **Writes made by release commands.** The edits check reads only the migration, so
   `omarchy-bar put`, `omarchy-mise-install` or `mise settings unset` editing your
   files isn't seen. The packages check already follows `bin` commands; the same walk
