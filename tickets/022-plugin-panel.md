@@ -31,5 +31,7 @@ Show the result on the desktop, for people who would never run the CLI.
 - [ ] Every exit code has a state in the panel, tested with fixture JSON.
 - [ ] The plugin passes `omarchy plugin validate` and the `omarchy-plugin-test`
       checks.
+- [ ] CI's Arch job lints `plugin/*.qml` with a Qt 6 `qmllint` and fails on a
+      warning.
 - [ ] It works in every theme tried, using theme tokens only.
 - [ ] Nothing in the demo is real data.

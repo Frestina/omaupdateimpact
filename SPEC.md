@@ -774,6 +774,9 @@ terminal, with `--ack`, for now.
   `tests/fixtures/json` and a document for every result. They skip when `node`
   isn't installed, as the `qmllint` ones do.
 - The plugin passes `omarchy plugin validate`.
+- CI lints `plugin/*.qml` with a Qt 6 `qmllint` on the Arch job, and fails on a
+  warning. The command leaves its own plugin out, so this is where its QML is
+  linted.
 - The demo and preview use fixture JSON from a fictional run, never a real one.
 
 ## Docs
