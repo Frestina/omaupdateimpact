@@ -120,6 +120,10 @@ When a ticket is ready, finish it without asking:
    path, with messages like `tickets: ...`.
 2. Run `tests/run`.
 3. Push `main`.
+4. Watch the CI run for that push (`gh run watch`, with the token `CLAUDE.md`
+   names) until every job ends. CI runs Python versions and an Arch job that
+   `tests/run` here doesn't. A failure reopens the ticket that caused it, as a
+   finding, and the user hears about it with the update.
 
 Wait, and tell the user why, when:
 
