@@ -28,8 +28,11 @@ Decide and record in the spec:
 - The bar's states: quiet when clean, a mark when something needs attention.
 - The plugin holds no rules. It only renders `--json`.
 - The permanent plugin id, which can't change later.
+- Review follow-ups: the clone sits where the command looks, so the command leaves
+  its own files out. The user chose this, the spec records it, and 028 builds it.
 
 ## Done when
 
 - [x] Each decision above is in the spec, with the reason.
 - [x] 022 can be built without another design decision.
+- [x] `tickets/BACKLOG.md` no longer lists "Two runs at once", which is 027 now.

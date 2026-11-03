@@ -375,6 +375,15 @@ Commands are looked for in these places:
   every file. A script needs no suffix there.
 - `shell.json`, `shell.toml` and the startup files of bash, zsh and fish.
 
+The tool's own files aren't your setup, so no check reads them. They are the
+checkout the running command is in, found by real path, and a plugin whose
+`manifest.json` has this tool's id. The plugin is the whole repository, tests
+included, and its tests name deleted commands on purpose. A terminal install and
+the plugin can be two clones, so the id counts as well as the path. A folder of
+the tool's own is left out of the commands and plugins checks, and of the
+"Checked" counts. Its QML is linted in this project's CI. A checkout that holds
+your home is never left out, as that would leave out everything.
+
 Links are followed, and each real folder is read once, so a link loop ends. A folder
 both ways of reading can reach is read in full. `.git` is skipped, and so are backups
 and systemd's `.wants` and `.requires` folders: those only hold links, and mostly to
@@ -647,12 +656,14 @@ and doesn't use `install.sh`.
 
 The plugin shows the result in the bar, for people who never open a terminal. It
 holds no rules. It runs the command and renders its `--json`, so the two can't
-disagree. Decided in 021, against the shell in v4.0.6 and v4.5.0-rc2.
+disagree. It was checked against the shell in v4.0.6 and v4.5.0-rc2.
 
 - **One repository.** `manifest.json` sits at the root of this one, beside the
   command, as in Frestina's other plugins. `omarchy plugin add` clones the whole
   repository, so the plugin and the command it runs are always the same version. A
-  second repository would have to keep a copy of the command in step.
+  second repository would have to keep a copy of the command in step. The clone
+  sits in a folder the command checks, so the command leaves its own files out.
+  See [Reading your files](#reading-your-files).
 - **The command comes with the plugin.** The plugin runs its own
   `bin/omaupdateimpact`, found from its QML's own path, and never one on `PATH`.
   One on `PATH` could be another version, with another `schemaVersion`. Nothing is

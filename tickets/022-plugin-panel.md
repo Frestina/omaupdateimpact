@@ -2,7 +2,7 @@
 id: "022"
 title: Bar widget and panel
 milestone: M4 Plugin
-depends_on: ["021"]
+depends_on: ["021", "028"]
 ---
 
 # 022 Bar widget and panel

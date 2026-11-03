@@ -16,7 +16,8 @@ the menu row can start while it downloads. Today both runs see no release in the
 cache and both download it. The first to finish moves it into place. The second
 can't, as the folder is there now (`Directory not empty`), so it ends as `failed`,
 after downloading 200 MB for nothing. A run's prune can also move away an older
-release that the other run is reading.
+release that the other run is reading. A tree that vanishes mid-run reads as no
+package removals, which looks clean, so that half breaks the first rule.
 
 ## Spec
 

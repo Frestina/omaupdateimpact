@@ -142,10 +142,6 @@ Paths already ruled out are not here; they are under
 - **Scratch left by a killed run.** A run killed mid-download leaves its `tmp*`
   folder in the cache. Pruning skips those, since one may belong to a live run.
   Waits for a real report.
-- **Two runs at once.** One run can prune the release another is reading. A tree
-  that vanishes mid-run reads as no package removals, which looks clean. Rare from
-  a terminal, more likely once the plugin (022) runs it in the background, so fix
-  it before then.
 - **A relative `XDG_CACHE_HOME`.** The XDG spec says to ignore it, and it's used as
   given. Waits for a real report.
 - **Control characters in text from a release.** A description in a binding, or a
