@@ -15,8 +15,15 @@ List the plugin where Omarchy users look for tools.
 
 - Prepare the version with the `omarchy-plugin-release` skill. It is the next
   version after 0.1.0, as the changelog's Unreleased holds `--json`, the edits
-  check, reasons, `--ack`, the menu row and the plugin. `__version__`, the AUR
-  package and `manifest.json` all say it, and the tag is made from it.
+  check, reasons, `--ack`, the menu row and the plugin. `__version__` and
+  `manifest.json` both say it, and the tag is made from it.
+- Remove the AUR package. It was never published, and publishing needs an AUR
+  account, which the owner doesn't have. The plugin and the clone with
+  `install.sh` are the two ways to install. Delete `packaging/aur` and its version
+  test, and take it out of the spec's Install section. Replace the backlog's "The
+  AUR package" with a line saying it was removed and can come back from git
+  history if someone gets an account. 028's rule for a command in `/usr/bin` stays,
+  as it guards any packaged install.
 - Prepare the listing with the `omarchy-plugin-publish` skill. The owner confirms
   the attestations before the issue is created.
 - Answer review comments until it's listed.
@@ -35,6 +42,7 @@ List the plugin where Omarchy users look for tools.
 - [ ] The owner has confirmed the attestations.
 - [ ] `--version` and `manifest.json` give the new version, and the tag matches.
 - [ ] The README tells a plugin-only user how to run `--ack`.
+- [ ] `packaging/aur` is gone, and nothing in the spec, README or tests names it.
 - [ ] The README's Install section puts the plugin first, and says the plugin and
       the terminal install each work on their own.
 - [ ] `preview.png` shows the icon in the top bar, left of the fleetlog icon, and
