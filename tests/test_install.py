@@ -143,6 +143,21 @@ class Install(unittest.TestCase):
         result = self.run_script("--uninstall", XDG_CACHE_HOME="")
         self.assertIn(f"The cache is still at {self.cache}.", result.stdout)
 
+    def test_uninstall_leaves_the_reviewed_findings_and_says_so(self):
+        self.assert_exit(self.run_script(), 0)
+        config = self.home / ".config/omaupdateimpact"
+        config.mkdir(parents=True)
+        (config / "reviewed").write_text("v4.5.0 3344d3a A finding\n")
+        result = self.run_script("--uninstall")
+        self.assert_exit(result, 0)
+        self.assertIn(f"Your reviewed findings are still at {config}/reviewed.", result.stdout)
+        self.assertNotIn("Nothing is left behind.", result.stdout)
+        self.assertEqual((config / "reviewed").read_text(), "v4.5.0 3344d3a A finding\n")
+        elsewhere = self.base / "elsewhere/omaupdateimpact"
+        elsewhere.mkdir(parents=True)
+        result = self.run_script("--uninstall", XDG_CONFIG_HOME=str(elsewhere.parent))
+        self.assertIn(f"Your reviewed findings are still at {elsewhere}/reviewed.", result.stdout)
+
     def test_uninstall_says_when_nothing_is_left(self):
         self.assert_exit(self.run_script(), 0)
         result = self.run_script("--uninstall")

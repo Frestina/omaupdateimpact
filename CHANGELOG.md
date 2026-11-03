@@ -13,6 +13,11 @@
   its package, command or keys, or the change its migration describes. The notes are
   kept with the release in the cache. Without them findings give no reason, and
   nothing else changes.
+- Each finding that needs attention has an id. `--ack <id>` marks one you've seen
+  and accepted, for that release only. It no longer counts for the exit code, and the
+  report counts it at the end. Reviews are kept in
+  `~/.config/omaupdateimpact/reviewed`, a file you can edit. `install.sh
+  --uninstall` names it and leaves it.
 
 ## 0.1.0 (2026-11-02)
 

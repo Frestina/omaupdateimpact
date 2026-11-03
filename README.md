@@ -13,33 +13,34 @@ Omarchy 4.0.6-1 -> v4.5.0-rc2 (rc channel, prerelease). Nothing was changed.
 Checked 207 default bindings, 3 of yours, 27 pending migrations for packages and 28 for
 file edits, 7 of your files for 6 deleted commands, 1 plugin linted.
 
-Needs attention
+Needs attention. Seen one, and it's fine? Run this again with --ack and its id.
   - ALT + ALT_R: your "Scratchpad" will clash with the new default "Start dictation
-    (push-to-talk) / Stop dictation (push-to-talk)". Both will fire.
+    (push-to-talk) / Stop dictation (push-to-talk)". Both will fire. [3344d3a]
     Fix: Add hl.unbind("ALT + Alt_R") above your binding, or choose another key.
   - SUPER + M: your "Music" will clash with the new default "Minimize window to the
-    dock". Both will fire.
+    dock". Both will fire. [a9f00c7]
     Fix: Add hl.unbind("SUPER + M") above your binding, or choose another key.
   - SUPER + CTRL + T: you turned off "Activity" here, but it moves to SUPER + SHIFT + T,
-    so it comes back.
+    so it comes back. [372d010]
     Fix: Add hl.unbind("SUPER + SHIFT + T") too.
-  - The update will remove dua-cli, which is installed here.
+  - The update will remove dua-cli, which is installed here. [d09d6a6]
     Why: Replace the Disk Usage TUI with Disktree (#14426).
     Fix: After the update, run omarchy pkg add dua-cli (aur-add for an AUR package).
-  - The update may remove t3code-bin, which is installed here.
+  - The update may remove t3code-bin, which is installed here. [8a98386]
     Fix: If it goes, run omarchy pkg add t3code-bin (aur-add for an AUR package).
-  - The update will remove tensaku, which is installed here.
+  - The update will remove tensaku, which is installed here. [2787bde]
     Why: Replace Tensaku with Omasnap for screenshots (#9446).
     Fix: After the update, run omarchy pkg add tensaku (aur-add for an AUR package).
-  - ~/.bashrc calls omarchy-voxtype-remove, which the release deletes.
+  - ~/.bashrc calls omarchy-voxtype-remove, which the release deletes. [a8db01f]
     Fix: Change or remove line 1. This tool can't tell what replaces the command.
   - ~/.config/omarchy/hooks/post-update calls omarchy-voxtype-status, which the release
-    deletes.
+    deletes. [6735a5a]
     Fix: Change or remove line 4. This tool can't tell what replaces the command.
   - ~/.config/systemd/user/nightly-backup.service calls omarchy-system-shutdown, which
-    the release deletes.
+    the release deletes. [a44914f]
     Fix: Change or remove line 7. This tool can't tell what replaces the command.
   - ~/.local/bin/end-of-day calls omarchy-system-reboot, which the release deletes.
+    [fd9adc7]
     Fix: Change or remove line 4. This tool can't tell what replaces the command.
 
 Worth knowing: 12 notes. Add --all to see them.
@@ -74,8 +75,8 @@ To update, run `git pull` in the clone. To remove it, run this there:
 ./install.sh --uninstall
 ```
 
-That removes the link and tells you where the cache is, which it leaves for you to
-delete.
+That removes the link. It tells you where the cache and your reviewed findings are,
+and leaves them for you to delete.
 
 ## Usage
 
@@ -87,6 +88,7 @@ omaupdateimpact               # the release your update channel would deliver
 omaupdateimpact --channel rc  # the release another channel would deliver
 omaupdateimpact v4.5.0-rc2    # a specific release
 omaupdateimpact --all         # every note, not only how many there are
+omaupdateimpact --ack 3344d3a # you've seen that finding and it's fine
 omaupdateimpact --json        # one JSON document, for scripts: see docs/json.md
 ```
 
@@ -100,6 +102,14 @@ The release and its notes are downloaded to `~/.cache/omaupdateimpact`. Two rele
 stay there and older ones are removed. Without the notes, as when you are offline
 with a release already there, findings just don't say why. If GitHub's rate limit gets in the way, set `GITHUB_TOKEN`.
 Colour shows on a terminal only, and `NO_COLOR` turns it off.
+
+Each finding that needs attention ends with an id in brackets. If you've seen one
+and it's fine, run the same command again with `--ack` and that id. It no longer
+counts for that release: the report only counts it at the end, and it doesn't make
+the exit code 1. A new release asks again. Reviews are kept in
+`~/.config/omaupdateimpact/reviewed`, one per line, and deleting a line brings that
+finding back. A note can't be reviewed, as it doesn't count anyway, and neither can a
+limit, as a check that didn't run is never clear.
 
 ## What it checks
 
@@ -131,7 +141,7 @@ none.
 | Exit | Meaning |
 | --- | --- |
 | 0 | Every check ran and nothing needs attention, or there is no update |
-| 1 | Something needs attention |
+| 1 | Something needs attention, that you haven't reviewed |
 | 2 | No verdict: bad usage, a failed download, an unusable tree or a crash |
 | 3 | Nothing needs attention, but at least one check couldn't run |
 
@@ -184,8 +194,9 @@ With `--json`, every exit code comes with a document. See [docs/json.md](docs/js
 
 It reads your config, so here is what it does with it.
 
-- **It changes nothing.** The only thing it writes is its cache. `./install.sh` adds
-  one link, and only when you run it.
+- **It changes nothing.** The only thing it writes is its cache. `--ack` adds a line
+  to `~/.config/omaupdateimpact/reviewed`, and `./install.sh` adds one link, each
+  only when you run it.
 - **Nothing from a release runs.** Release files are read as text. A migration is
   split into shell tokens, never run. Key bindings are read without running Lua.
 - **Nothing about you leaves the machine.** It makes GET requests to GitHub for the

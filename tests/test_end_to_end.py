@@ -4,6 +4,7 @@ import dataclasses
 import io
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -220,7 +221,9 @@ class Report(RealCommand):
         self.output = flat(self.everything.stdout)
 
     def attention(self):
-        return flat(self.result.stdout.partition("Needs attention")[2].partition("Worth knowing")[0])
+        """The findings that need attention, without their ids."""
+        section = self.result.stdout.partition("Needs attention")[2].partition("Worth knowing")[0]
+        return re.sub(r" \[[0-9a-f]{7}\]", "", flat(section))
 
     def test_it_exits_1_and_still_names_what_it_couldnt_read(self):
         self.assert_exit(self.result, 1)
@@ -463,6 +466,124 @@ class JsonOutput(RealCommand):
                     self.assertIn(f"Fix: {flat(finding['fix'])}", shown)
                 self.assertTrue(finding["evidence"])
                 self.assertEqual(finding["partial"], finding["level"] == "unknown")
+
+
+class Reviewed(RealCommand):
+    """--ack on a copy of the fictional home, against v4.5.0-rc2."""
+
+    def setUp(self):
+        super().setUp()
+        self.home = self.base / "home"
+        shutil.copytree(HOME, self.home, symlinks=True)
+        self.reviews = self.home / ".config/omaupdateimpact/reviewed"
+
+    def findings(self, *args):
+        return json.loads(self.compare(self.home, "--json", *args).stdout)["findings"]
+
+    def ids(self, level="attention"):
+        return [finding["id"] for finding in self.findings() if finding["level"] == level]
+
+    def ack(self, *ids, home=None):
+        return self.compare(home or self.home, *(arg for given in ids for arg in ("--ack", given)))
+
+    def test_a_reviewed_finding_doesnt_count(self):
+        first, *rest = self.ids()
+        result = self.ack(first)
+        self.assert_exit(result, 1)
+        self.assertIn(f"Marked 1 finding reviewed for v4.5.0-rc2, in {self.reviews}.", result.stderr)
+        self.assertNotIn(first, result.stdout.partition("Worth knowing")[0])
+        self.assertIn("Reviewed: 1 finding. Add --all to see them.", result.stdout)
+        result = self.ack(*rest)
+        # What is left is the migration it can't read, which can't be reviewed.
+        self.assert_exit(result, 3)
+        self.assertNotIn("Needs attention", result.stdout)
+        self.assertIn(f"Reviewed: {len(rest) + 1} findings.", result.stdout)
+        self.assertEqual(result.stdout.splitlines()[-1], "These checks ran in part: packages.")
+        findings = self.findings()
+        self.assertTrue(all(finding["reviewed"] == (finding["level"] == "attention") for finding in findings))
+        everything = self.compare(self.home, "--all")
+        self.assert_exit(everything, 3)
+        self.assertIn("Reviewed. These don't count for v4.5.0-rc2.", everything.stdout)
+        self.assertIn(f"[{first}]", everything.stdout.partition("Reviewed.")[2])
+
+    def test_nothing_else_needing_attention_is_said_as_such(self):
+        (self.home / ".local/state/omarchy/migrations").mkdir(parents=True, exist_ok=True)
+        (self.home / ".local/state/omarchy/migrations" / UNREADABLE_MIGRATION).touch()
+        self.assert_exit(self.ack(*self.ids()), 0)
+        result = self.compare(self.home)
+        self.assert_exit(result, 0)
+        self.assertEqual(result.stdout.splitlines()[-1], "Nothing else needs attention.")
+
+    def test_a_new_release_asks_again(self):
+        ids = self.ids()
+        self.assert_exit(self.ack(*ids), 3)
+        newer = self.base / "v4.5.0-rc3"
+        shutil.copytree(NEW, newer)
+        result = self.command("--root", OLD, "--target", newer, "--home", self.home)
+        self.assert_exit(result, 1)
+        for given in ids:
+            self.assertIn(f"[{given}]", result.stdout)
+        self.assertNotIn("Reviewed", result.stdout)
+
+    def test_an_id_it_doesnt_know_writes_nothing(self):
+        known, note, limit = self.ids()[0], self.ids("note")[0], self.ids("unknown")[0]
+        for ids, message in (
+            (["0000000"], "no finding in this report has the id 0000000."),
+            ([known, "0000000"], "no finding in this report has the id 0000000."),
+            ([note], f"{note} is a note, and only a finding that needs attention can be reviewed."),
+            ([limit], f"{limit} is a limit, and only a finding that needs attention can be reviewed."),
+        ):
+            with self.subTest(ids):
+                self.assert_no_verdict(self.ack(*ids), f"Can't mark it reviewed: {message}")
+                self.assertFalse((self.home / ".config/omaupdateimpact").exists())
+
+    def test_no_update_has_nothing_to_review(self):
+        self.stub("omarchy-version", "echo 4.5.0rc2-1")
+        result = self.command("v4.5.0-rc2", "--ack", "0000000", OMARCHY_PATH=NEW, HOME=self.home)
+        self.assert_no_verdict(result, "there is no update, so there is nothing to review.")
+        self.assertFalse((self.home / ".config/omaupdateimpact").exists())
+
+    def test_the_file_is_one_a_person_can_edit(self):
+        first, second = self.ids()[:2]
+        self.assert_exit(self.ack(first), 1)
+        lines = self.reviews.read_text().splitlines()
+        self.assertTrue(lines[0].startswith("# "))
+        self.assertTrue(lines[-1].startswith(f"v4.5.0-rc2 {first} "))
+        # Without its newline, as an editor can leave it, and with its id in capitals.
+        self.reviews.write_text(f"# mine\n  # v4.5.0-rc2 {second}\nv4.5.0-rc2 {first.upper()}")
+        self.assertEqual([f["reviewed"] for f in self.findings() if f["id"] in (first, second)], [True, False])
+        self.assert_exit(self.ack(second, second), 1)
+        # Marking one again adds no line.
+        self.assert_exit(self.ack(second), 1)
+        lines = self.reviews.read_text().splitlines()
+        self.assertEqual(lines[:3], ["# mine", f"  # v4.5.0-rc2 {second}", f"v4.5.0-rc2 {first.upper()}"])
+        self.assertTrue(lines[3].startswith(f"v4.5.0-rc2 {second} "))
+        self.assertEqual(len(lines), 4)
+        self.reviews.write_text("")
+        self.assertEqual(self.compare(self.home).stdout, self.compare(HOME).stdout)
+
+    def test_the_file_follows_xdg_config_home(self):
+        config = self.base / "config"
+        given = self.ids()[0]
+        result = self.command("--root", OLD, "--target", NEW, "--home", self.home, "--ack", given, XDG_CONFIG_HOME=str(config))
+        self.assert_exit(result, 1)
+        self.assertTrue((config / "omaupdateimpact/reviewed").is_file())
+        self.assertFalse(self.reviews.parent.exists())
+
+    def test_a_file_it_cant_read_leaves_nothing_out(self):
+        self.reviews.mkdir(parents=True)
+        result = self.compare(self.home)
+        self.assert_exit(result, 1)
+        self.assertIn("Couldn't read the findings you reviewed, so they all count", result.stderr)
+        self.assertEqual(result.stdout, self.compare(HOME).stdout)
+        self.assert_no_verdict(self.ack(self.ids()[0]), "Can't mark it reviewed: couldn't write")
+
+    def test_an_id_stays_while_the_finding_does(self):
+        newer = self.base / "v4.5.0-rc3"
+        shutil.copytree(NEW, newer)
+        later = json.loads(self.command("--root", OLD, "--target", newer, "--home", self.home, "--json").stdout)
+        self.assertEqual([f["id"] for f in later["findings"] if f["level"] == "attention"], self.ids())
+        self.assertEqual(len(set(self.ids())), len(self.ids()))
 
 
 class JsonDocs(unittest.TestCase):

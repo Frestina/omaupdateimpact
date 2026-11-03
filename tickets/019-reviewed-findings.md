@@ -32,7 +32,7 @@ user who has decided to let a package go.
 
 ## Done when
 
-- [ ] A reviewed finding doesn't affect the exit code, with a test.
-- [ ] A new release raises it again, with a test.
-- [ ] `--ack` with an unknown id fails and writes nothing, with a test.
-- [ ] `tests/run` passes.
+- [x] A reviewed finding doesn't affect the exit code, with a test.
+- [x] A new release raises it again, with a test.
+- [x] `--ack` with an unknown id fails and writes nothing, with a test.
+- [x] `tests/run` passes.

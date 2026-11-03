@@ -52,8 +52,8 @@ These come from [What must never happen](SPEC.md#what-must-never-happen):
 
 - A check that didn't run is never shown as clear. When unsure, report `unknown`.
 - Nothing from a release is ever run. Its files are only read as text.
-- Nothing changes outside the tool's own cache, unless the user asked for an
-  optional install step.
+- Nothing changes outside the tool's own cache, unless the user asked for it: an
+  optional install step, or `--ack`.
 - Nothing leaves the machine except GET requests to GitHub.
 - Every finding can name the line or file behind it.
 

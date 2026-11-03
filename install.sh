@@ -45,9 +45,18 @@ uninstall() {
     echo "$link isn't there, so there was nothing to remove."
   fi
   local cache="${XDG_CACHE_HOME:-$HOME/.cache}/omaupdateimpact"
+  local config="${XDG_CONFIG_HOME:-$HOME/.config}/omaupdateimpact"
+  local left=""
   if [[ -e "$cache" ]]; then
     echo "The cache is still at $cache. To delete it: rm -rf \"$cache\""
-  else
+    left=yes
+  fi
+  # Only --ack writes here, so the folder holds the reviewed file, or once did.
+  if [[ -e "$config" ]]; then
+    echo "Your reviewed findings are still at $config/reviewed. To delete them: rm -rf \"$config\""
+    left=yes
+  fi
+  if [[ -z "$left" ]]; then
     echo "Nothing is left behind."
   fi
 }

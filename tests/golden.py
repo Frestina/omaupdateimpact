@@ -75,7 +75,12 @@ def printed(base, version, *args):
     stub(stubs, "omarchy-version", f"echo {version}")
     stub(stubs, "omarchy-version-channel", "echo stable")
     stub(stubs, "pacman", "printf '%s\\n' fictional-editor fictional-player")
-    environment = {"PATH": str(stubs), "XDG_CACHE_HOME": str(base / "cache"), "OMARCHY_PATH": str(base / "v1.3.0")}
+    environment = {
+        "PATH": str(stubs),
+        "XDG_CACHE_HOME": str(base / "cache"),
+        "XDG_CONFIG_HOME": str(base / "config"),
+        "OMARCHY_PATH": str(base / "v1.3.0"),
+    }
     argv = ["omaupdateimpact", "--json", "--home", str(base / "home"), *args]
     with mock.patch.dict(os.environ, environment), mock.patch("sys.argv", argv), \
             mock.patch.object(impact.urllib.request, "urlopen", github), \

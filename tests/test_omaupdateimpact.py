@@ -2183,6 +2183,8 @@ class ProgramCase(unittest.TestCase):
         self.addCleanup(patcher.stop)
         os.environ.pop("GITHUB_TOKEN", None)
         os.environ.pop("NO_COLOR", None)
+        # Reviewed findings come from the made-up home, not the developer's own config.
+        os.environ.pop("XDG_CONFIG_HOME", None)
         self.terminal = False
 
     def tree(self, name, bindings):
@@ -2451,6 +2453,7 @@ class Json(ProgramCase):
         code, document, _ = self.document(packages={"a"})
         self.assertEqual((code, document["result"]), (1, "attention"))
         self.assertEqual(document["findings"], [{
+            "id": impact.Finding("packages", "attention", "The update will remove a, which is installed here.", []).id,
             "check": "packages",
             "level": "attention",
             "title": "The update will remove a, which is installed here.",
@@ -2459,6 +2462,7 @@ class Json(ProgramCase):
             "fix": "After the update, run omarchy pkg add a (aur-add for an AUR package).",
             "partial": False,
             "reason": None,
+            "reviewed": False,
         }])
 
     def test_a_package_named_as_the_migration_spells_it_still_prints(self):
@@ -2566,7 +2570,7 @@ class Reasons(ProgramCase):
         }])
         out = " ".join(self.check(packages={"fictional-editor"})[1].split())
         self.assertIn(
-            "The update will remove fictional-editor, which is installed here. "
+            "The update will remove fictional-editor, which is installed here. [1354b03] "
             "Why: Replace Fictional Editor with Quill (#101). Fix: After the update", out
         )
 

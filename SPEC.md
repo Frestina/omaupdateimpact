@@ -45,8 +45,9 @@ answers one question: what will this update do to my machine?
    unless every check really looked at real input.
 2. **Release code running.** Release files are read as text. `qmllint` reads QML,
    it doesn't run it.
-3. **Changes outside its own cache**, unless the user asked for an optional
-   install step, such as the menu entry.
+3. **Changes outside its own cache**, unless the user asked for it: an optional
+   install step, such as the menu entry, or `--ack`, which records a reviewed
+   finding.
 4. **Anything leaving the machine.** It only makes GET requests to GitHub, with no
    telemetry. Findings stay local.
 5. **A finding without evidence.** Each one can name the line or file behind it.
@@ -398,9 +399,37 @@ nothing is read, so nothing is unknown.
 
 ## Findings and exit codes
 
-A finding has a check, a level, a title, a detail, a fix when there is one, a
+A finding has an id, a check, a level, a title, a detail, a fix when there is one, a
 reason when the release notes give one, and evidence. Levels are `attention`, `note`
 and `unknown`. An `unknown` also says whether the rest of its check still stood.
+
+### Reviewed findings
+
+Someone who has seen a finding and accepted it can say so, so it doesn't hide a new
+one. `--ack <id>` marks it reviewed, for the release compared with only, so a new
+release asks again.
+
+The id is the first 7 hex digits of a SHA-256 of the check and what the finding
+says, its title and detail. It stays the same while those do, in any release, and
+changes when they do. A line number isn't part of it, so editing another line of a
+file doesn't ask again.
+
+Only an `attention` finding can be reviewed. A note doesn't count anyway, and a limit
+can't be: a check that didn't run is never clear. `--ack` runs the same comparison
+first. If any id it is given isn't an `attention` finding in that comparison, or
+there is no update, it is exit 2 and nothing is written. It takes more than one
+id, and an id in capitals.
+
+Reviews are kept in `~/.config/omaupdateimpact/reviewed`, one per line: the
+release's name, as `target.name` gives it, the id, and the title then, for a person
+to read. `#` starts a comment line. A person can edit it, and deleting a line asks
+again. `--ack` appends, so a file kept as a link stays one. A file that can't be
+read leaves nothing out and says so on stderr, as more findings is the safe side.
+
+A reviewed finding doesn't count for the exit code or `result`, and the report
+leaves it out of "Needs attention". It is counted at the end, before the closing
+line, and `--all` lists it. When it was all that needed attention, the closing line
+says "Nothing else needs attention."
 
 ### Reasons
 
@@ -445,7 +474,7 @@ Its evidence is the line in the notes.
 | Exit | Meaning |
 | --- | --- |
 | 0 | Every check ran and nothing needs attention, or there is no update |
-| 1 | Something needs attention |
+| 1 | Something needs attention, that you haven't reviewed |
 | 2 | No verdict: bad usage, a failed download, an unusable tree or a crash |
 | 3 | Nothing needs attention, but at least one check couldn't run in full |
 
@@ -490,6 +519,9 @@ packages and edits checks both read the pending migrations. When they read as ma
 the line counts them once, and otherwise it gives each.
 
 Every attention finding has a `Fix:` line, or says why it can't have an exact one.
+It ends with its id in brackets, and the section's title says how to review one.
+The id goes on the finding's own line rather than one of its own, so the report
+still fits a screen.
 
 - A clash: the `hl.unbind` line, with the default's own spelling, above your binding.
   Below it, the unbind would turn yours off too, as text is all it goes by.
@@ -516,7 +548,7 @@ finding's reason has its text, its reference and its evidence, or is `null`.
 The plugin holds no rules, so the document carries what the report works out. What
 was checked is data, not the "Checked" line's text. Each check says whether it ran,
 ran in part or didn't run, as the closing line does. Each finding has every field,
-its evidence included.
+its evidence included, its `id`, and whether it was `reviewed`.
 
 When there is no update, the document says so and names any newer release on
 another channel. A failure that ends in exit 2 is a document too, with the reason.
@@ -542,7 +574,9 @@ when either stops matching. `python3 -m tests.golden` writes them again.
   replaces `~/.cache` unless it's empty. After a download, the release it fetched and the
   newest other one by version stay, and the rest go. So an older release someone
   asks for is not removed before it's read. Nothing else in the cache is touched.
-- Reviewed findings, once they exist, in `~/.config/omaupdateimpact/`.
+- `~/.config/omaupdateimpact/reviewed`: [reviewed findings](#reviewed-findings),
+  written only by `--ack`. `XDG_CONFIG_HOME` replaces `~/.config` unless it's empty,
+  and `--home` moves `~/.config` with it, as it does `~/.cache`.
 
 Nothing else is written.
 
@@ -562,7 +596,8 @@ else there, including a link to another checkout or a broken one, is left alone 
 is exit 1. Finding its own link already there is exit 0.
 
 `install.sh --uninstall` removes that link and nothing else. It names the cache
-when there is one, and leaves it for the user to delete. `~/.local/bin` stays, even
+and the reviewed findings when they are there, and leaves them for the user to
+delete. It says nothing is left behind only when neither is. `~/.local/bin` stays, even
 if the install created it, because other tools share it.
 
 The AUR package is in `packaging/aur`, and isn't published. It installs to `/usr/bin`

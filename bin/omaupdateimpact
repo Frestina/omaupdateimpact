@@ -47,6 +47,7 @@ import dataclasses
 import fnmatch
 import glob
 import gzip
+import hashlib
 import http.client
 import itertools
 import json
@@ -154,6 +155,12 @@ NOTE_KEYS = re.compile(
     r"(?<![\w+])(?:(?:" + "|".join([*MODIFIERS, *MODIFIER_SPELLINGS]) + r")\s*\+\s*)+\w+", re.IGNORECASE
 )
 GREEN, RED, YELLOW, BOLD = "1;32", "1;31", "1;33", "1"
+# A finding's id is this many hex digits, enough to tell a release's findings apart.
+ID_LENGTH = 7
+REVIEWED_HEADER = (
+    "# Findings you reviewed: the release, the finding's id, and what it was.\n"
+    "# Each is left out of the report and the exit code for that release only. Delete a line to see it again.\n"
+)
 
 
 @dataclass
@@ -203,17 +210,25 @@ class Finding:
     # An unknown that leaves the rest of its check standing.
     partial: bool = False
     reason: Reason | None = None
+    # Seen by the user for this release, so it no longer counts. Only attention can be.
+    reviewed: bool = False
     # What it is about, as (kind, name) pairs, for finding its reason. It isn't in the document.
     about: tuple = field(default=(), compare=False, repr=False)
 
     def text(self):
         return " ".join(part for part in (self.title, self.detail) if part)
 
+    @property
+    def id(self):
+        """An id that stays the same while what the finding says does, in any release."""
+        said = f"{self.check}\0{self.text()}".encode(errors="surrogateescape")
+        return hashlib.sha256(said).hexdigest()[:ID_LENGTH]
+
     def data(self):
         """The finding as the --json document holds it. What it is about isn't copied, as a Word can't be."""
         data = dataclasses.asdict(dataclasses.replace(self, about=()))
         del data["about"]
-        return data
+        return {"id": self.id, **data}
 
 
 class UnusableTree(Exception):
@@ -234,6 +249,10 @@ class NoRelease(Exception):
 
 class ShellUnread(Exception):
     """A script this reader lost its place in."""
+
+
+class NotReviewable(Exception):
+    """An --ack that can't be recorded. Nothing is written."""
 
 
 class LintFailed(Exception):
@@ -2011,6 +2030,55 @@ def give_reasons(findings, tree):
             finding.reason = Reason(text, reference, f"{NOTES}:{number}")
 
 
+def reviews_file(home):
+    """Where reviewed findings are kept. XDG_CONFIG_HOME replaces ~/.config unless it's empty."""
+    return Path(os.environ.get("XDG_CONFIG_HOME") or home / ".config") / "omaupdateimpact/reviewed"
+
+
+def read_reviews(path, name):
+    """The ids reviewed for this release. A file that can't be read leaves nothing out, and says so."""
+    try:
+        text = path.read_text(errors="replace")
+    except FileNotFoundError:
+        return set()
+    except OSError as error:
+        print(f"Couldn't read the findings you reviewed, so they all count: {error}", file=sys.stderr)
+        return set()
+    lines = (line.split() for line in text.split("\n") if not line.lstrip().startswith("#"))
+    return {words[1].lower() for words in lines if len(words) >= 2 and words[0] == name}
+
+
+def record_reviews(path, name, findings, ids, seen):
+    """Add the findings with these ids to the reviewed file, for this release, and give their ids.
+
+    Each must need attention in this run, or nothing is written. A limit can't be
+    reviewed, as a check that didn't run is never clear. One seen already adds no line.
+    """
+    by_id = {finding.id: finding for finding in findings}
+    wanted = list(dict.fromkeys(given.lower() for given in ids))
+    for given in wanted:
+        if given not in by_id:
+            raise NotReviewable(f"no finding in this report has the id {given}.")
+        if by_id[given].level != ATTENTION:
+            kind = "a note" if by_id[given].level == NOTE else "a limit"
+            raise NotReviewable(f"{given} is {kind}, and only a finding that needs attention can be reviewed.")
+    if not TOKEN.fullmatch(name):
+        raise NotReviewable(f"the release's name, {name!r}, can't go on a line of {path}.")
+    lines = [f"{name} {given} {' '.join(by_id[given].title.split())}\n" for given in wanted if given not in seen]
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a+", encoding="utf-8", errors="surrogateescape") as out:
+            # Appended, so a file someone keeps as a link stays one. Its last line may have no newline.
+            out.seek(0)
+            before = out.read()
+            out.write(REVIEWED_HEADER if not before else "" if before.endswith("\n") else "\n")
+            out.writelines(lines)
+    except (OSError, UnicodeError) as error:
+        raise NotReviewable(f"couldn't write {path}: {error}") from error
+    print(f"Marked {counted(len(wanted), 'finding')} reviewed for {name}, in {path}.", file=sys.stderr)
+    return set(wanted)
+
+
 def version_key(text):
     """A sort key for a tag or a package version, or None for anything else.
 
@@ -2221,7 +2289,8 @@ def check_states(findings):
 
 def compared(version, channel, name, checked, findings):
     """The document for a comparison. A count that wasn't looked at is None, so it can't read as zero."""
-    levels = {finding.level for finding in findings}
+    # A reviewed finding no longer counts.
+    levels = {finding.level for finding in findings if not finding.reviewed}
     result = "attention" if ATTENTION in levels else "incomplete" if UNKNOWN in levels else "clear"
     states = check_states(findings)
     checks = {
@@ -2278,12 +2347,13 @@ def checked_line(checks):
     return wrapped(f"Checked {', '.join(parts)}.")
 
 
-def print_section(title, findings, level, colour):
-    found = [finding for finding in findings if finding.level == level]
+def print_section(title, found, colour, hint=""):
+    """A section of findings. One that can be reviewed shows its id."""
     if found:
-        print(f"\n{painted(title, colour)}")
+        print(f"\n{painted(title, colour)}{hint}")
         for finding in found:
-            print(wrapped(finding.text(), "  - ", "    "))
+            text = f"{finding.text()} [{finding.id}]" if finding.level == ATTENTION else finding.text()
+            print(wrapped(text, "  - ", "    "))
             if finding.reason:
                 why = f"{finding.reason.text.rstrip('.')} ({finding.reason.reference})."
                 print(wrapped(why, "    Why: ", " " * 9))
@@ -2303,6 +2373,8 @@ def print_closing(document):
         lines.append(f"These checks ran in part: {', '.join(in_part)}.")
     if lines:
         print(f"\n{painted(' '.join(lines), YELLOW)}")
+    elif document["result"] == "clear" and any(finding.reviewed for finding in document["findings"]):
+        print(f"\n{painted('Nothing else needs attention.', GREEN)}")
     elif document["result"] == "clear":
         print(f"\n{painted('Nothing found that needs attention.', GREEN)}")
 
@@ -2311,13 +2383,19 @@ def print_report(document, everything):
     findings = document["findings"]
     print(f"Omarchy {document['installed']} -> {described(document['target'], document['channel'])}. Nothing was changed.")
     print(checked_line(document["checks"]))
-    print_section("Needs attention", findings, ATTENTION, RED)
-    notes = sum(finding.level == NOTE for finding in findings)
+    attention = [finding for finding in findings if finding.level == ATTENTION and not finding.reviewed]
+    print_section("Needs attention", attention, RED, ". Seen one, and it's fine? Run this again with --ack and its id.")
+    notes = [finding for finding in findings if finding.level == NOTE]
     if everything:
-        print_section("Worth knowing", findings, NOTE, BOLD)
+        print_section("Worth knowing", notes, BOLD)
     elif notes:
-        print(f"\n{painted('Worth knowing', BOLD)}: {counted(notes, 'note')}. Add --all to see them.")
-    print_section("Limits of this check", findings, UNKNOWN, YELLOW)
+        print(f"\n{painted('Worth knowing', BOLD)}: {counted(len(notes), 'note')}. Add --all to see them.")
+    print_section("Limits of this check", [finding for finding in findings if finding.level == UNKNOWN], YELLOW)
+    reviewed = [finding for finding in findings if finding.reviewed]
+    if everything:
+        print_section("Reviewed", reviewed, BOLD, f". These don't count for {document['target']['name']}.")
+    elif reviewed:
+        print(f"\n{painted('Reviewed', BOLD)}: {counted(len(reviewed), 'finding')}. Add --all to see them.")
     print_closing(document)
 
 
@@ -2368,6 +2446,8 @@ def run(options):
             tag = tag or channel_tag(channel)
             installed, wanted = version_key(version), version_key(tag)
             if own_tree and installed and installed == wanted:
+                if options.ack:
+                    raise NotReviewable("there is no update, so there is nothing to review.")
                 return no_update(version, tag, channel)
             target = fetch_release(tag, cache)
             fetch_notes(tag, target)
@@ -2391,7 +2471,14 @@ def run(options):
         *compare_edits(options.root, target, options.home, checked),
     ]
     give_reasons(findings, target)
-    return compared(version, channel, tag or target.name, checked, findings)
+    name = tag or target.name
+    reviews = reviews_file(options.home)
+    seen = read_reviews(reviews, name)
+    if options.ack:
+        seen |= record_reviews(reviews, name, findings, options.ack, seen)
+    for finding in findings:
+        finding.reviewed = finding.level == ATTENTION and finding.id in seen
+    return compared(version, channel, name, checked, findings)
 
 
 class Parser(argparse.ArgumentParser):
@@ -2419,6 +2506,12 @@ def main():
     )
     parser.add_argument("--home", type=Path, help="read your config from this folder (default: your home)")
     parser.add_argument("--all", action="store_true", help="show every note, not only how many there are")
+    parser.add_argument(
+        "--ack",
+        action="append",
+        metavar="ID",
+        help="mark the finding with this id as reviewed, so it doesn't count for this release again",
+    )
     parser.add_argument("--json", action="store_true", help="print one JSON document instead (see docs/json.md)")
     parser.add_argument("--debug", action="store_true", help="show the traceback when something fails")
     options = parser.parse_args()
@@ -2432,6 +2525,8 @@ def main():
         document = fail("Can't compare", error, options.debug)
     except NoRelease as error:
         document = fail("Can't pick a release", error, options.debug)
+    except NotReviewable as error:
+        document = fail("Can't mark it reviewed", error, options.debug)
     except Exception as error:  # noqa: BLE001
         document = fail(f"Unexpected {type(error).__name__}", error, options.debug)
     print_document(document, options)

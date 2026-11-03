@@ -22,7 +22,7 @@ change, so ignore keys you don't know.
 | --- | --- | --- |
 | `clear` | 0 | Every check ran and nothing needs attention. |
 | `noUpdate` | 0 | The release is already installed. Nothing was compared. |
-| `attention` | 1 | Something needs attention. |
+| `attention` | 1 | Something needs attention, that you haven't reviewed. |
 | `failed` | 2 | No verdict: bad usage, a failed download, an unusable tree or a crash. |
 | `incomplete` | 3 | Nothing needs attention, but at least one check couldn't run in full. |
 
@@ -73,6 +73,7 @@ Each finding has every field, even an empty one.
 
 | Field | Value |
 | --- | --- |
+| `id` | Seven hex digits. It stays the same while what the finding says does. |
 | `check` | Which check found it. |
 | `level` | `attention`, `note` or `unknown`. |
 | `title` | What was found, in one sentence. |
@@ -81,8 +82,12 @@ Each finding has every field, even an empty one.
 | `fix` | What to do, or `""`. Every `attention` finding has one. |
 | `partial` | On an `unknown`, `true` when the rest of its check still stood. |
 | `reason` | The change in the release notes it comes from, or `null`. |
+| `reviewed` | `true` when you marked it with `--ack` for this release. Only `attention` can be. |
 
 The report shows `title` and `detail` together, then the `reason`, then the `fix`.
+
+A reviewed finding doesn't count for `result`, so `attention` means one that isn't
+reviewed. The report counts reviewed findings at the end, and `--all` lists them.
 
 A `reason` is there only when one change in the notes clearly names what the finding
 is about. Otherwise it is `null`, and so it is when the notes couldn't be fetched.
@@ -146,6 +151,7 @@ This report is from small fictional trees:
   },
   "findings": [
     {
+      "id": "9d67629",
       "check": "bindings",
       "level": "attention",
       "title": "SUPER + M: your \"Music\" will clash with the new default \"Minimize window\".",
@@ -156,9 +162,11 @@ This report is from small fictional trees:
       "detail": "Both will fire.",
       "fix": "Add hl.unbind(\"SUPER + M\") above your binding, or choose another key.",
       "partial": false,
-      "reason": null
+      "reason": null,
+      "reviewed": false
     },
     {
+      "id": "60d484f",
       "check": "bindings",
       "level": "note",
       "title": "New default shortcuts: SUPER + N (\"Notifications\").",
@@ -168,9 +176,11 @@ This report is from small fictional trees:
       "detail": "",
       "fix": "",
       "partial": false,
-      "reason": null
+      "reason": null,
+      "reviewed": false
     },
     {
+      "id": "1354b03",
       "check": "packages",
       "level": "attention",
       "title": "The update will remove fictional-editor, which is installed here.",
@@ -184,9 +194,11 @@ This report is from small fictional trees:
         "text": "Replace Fictional Editor with Fictional Writer",
         "reference": "#101",
         "evidence": ".omaupdateimpact-notes.md:3"
-      }
+      },
+      "reviewed": false
     },
     {
+      "id": "e1c345b",
       "check": "packages",
       "level": "unknown",
       "title": "Couldn't read what migrations/1700000002.sh removes, so check it by hand.",
@@ -196,9 +208,11 @@ This report is from small fictional trees:
       "detail": "",
       "fix": "",
       "partial": true,
-      "reason": null
+      "reason": null,
+      "reviewed": false
     },
     {
+      "id": "b2c1f5a",
       "check": "commands",
       "level": "attention",
       "title": "~/.local/bin/sync-all calls omarchy-sync-notes, which the release deletes.",
@@ -208,9 +222,11 @@ This report is from small fictional trees:
       "detail": "",
       "fix": "Change or remove line 2. This tool can't tell what replaces the command.",
       "partial": false,
-      "reason": null
+      "reason": null,
+      "reviewed": false
     },
     {
+      "id": "e2e0746",
       "check": "edits",
       "level": "note",
       "title": "migrations/1700000003.sh, line 1, looks like it edits ~/.config/fictional-app/theme.conf, which Omarchy has no default for.",
@@ -221,7 +237,8 @@ This report is from small fictional trees:
       "detail": "It is read, not run, so the result isn't known. omaforecast can show it by running the migration in a sandbox.",
       "fix": "",
       "partial": false,
-      "reason": null
+      "reason": null,
+      "reviewed": false
     }
   ]
 }
