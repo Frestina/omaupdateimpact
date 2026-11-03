@@ -391,8 +391,8 @@ class OwnFiles(RealCommand):
         self.plugins = self.clean_home / ".config/omarchy/plugins"
         self.plugins.mkdir(parents=True)
 
-    def clone(self, folder, plugin_id=None):
-        """A copy of this repository, with a manifest only when it has an id."""
+    def clone(self, folder, plugin_id=impact.PLUGIN_ID):
+        """A copy of this repository, with a fictional manifest only when it has an id."""
         shutil.copytree(REPOSITORY, folder, symlinks=True, ignore=shutil.ignore_patterns(".git", "__pycache__"))
         (folder / "manifest.json").unlink(missing_ok=True)
         if plugin_id:
@@ -416,7 +416,7 @@ class OwnFiles(RealCommand):
     def test_a_second_clone_with_this_tools_id_adds_nothing(self):
         alone = self.document(self.clean_home)
         self.clone(self.plugins / "omaupdateimpact", impact.PLUGIN_ID)
-        running = self.clone(self.base / "terminal-install")
+        running = self.clone(self.base / "terminal-install", plugin_id=None)
         self.assertEqual(self.document(self.clean_home, running / "bin/omaupdateimpact"), alone)
 
     def test_a_plugin_that_isnt_this_tool_beside_it_is_still_read_and_linted(self):
@@ -431,6 +431,40 @@ class OwnFiles(RealCommand):
         evidence = [finding["evidence"][0] for finding in document["findings"]]
         self.assertIn("~/.config/omarchy/plugins/demo/start.sh:1", evidence)
         self.assertIn("~/.config/omarchy/plugins/demo/Demo.qml", evidence)
+
+    def dictate(self, folder):
+        """A script of yours that calls a command the release deletes."""
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / "dictate").write_text("#!/bin/sh\nomarchy-voxtype-install\n")
+        (folder / "dictate").chmod(0o755)
+        return folder / "dictate"
+
+    def calls(self, document):
+        return [finding["evidence"] for finding in document["findings"] if finding["check"] == "commands"]
+
+    def test_a_copy_in_your_bin_folder_still_reads_your_other_files(self):
+        local = self.clean_home / ".local"
+        self.dictate(local / "bin")
+        (local / "share/applications").mkdir(parents=True)
+        (local / "share/applications/dictate.desktop").write_text("[Desktop Entry]\nExec=omarchy-voxtype-status\n")
+        shutil.copy(COMMAND, local / "bin/omaupdateimpact")
+        code, document = self.document(self.clean_home, local / "bin/omaupdateimpact")
+        self.assertEqual(code, 1)
+        self.assertEqual(
+            self.calls(document),
+            [["~/.local/bin/dictate:2"], ["~/.local/share/applications/dictate.desktop:2"]],
+        )
+        self.assertEqual(document["checks"]["commands"]["checked"]["yourFiles"], 2)
+
+    def test_a_packaged_command_still_reads_your_files_linked_beside_it(self):
+        usr = self.base / "usr"
+        (usr / "bin").mkdir(parents=True)
+        shutil.copy(COMMAND, usr / "bin/omaupdateimpact")
+        (self.clean_home / ".local/bin").mkdir(parents=True)
+        (self.clean_home / ".local/bin/dictate").symlink_to(self.dictate(usr / "local/bin"))
+        code, document = self.document(self.clean_home, usr / "bin/omaupdateimpact")
+        self.assertEqual(code, 1)
+        self.assertEqual(self.calls(document), [["~/.local/bin/dictate:2"]])
 
     def test_a_checkout_that_holds_the_home_leaves_nothing_out(self):
         checkout = self.clone(self.base / "checkout")

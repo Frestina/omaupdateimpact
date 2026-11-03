@@ -31,6 +31,9 @@ itself.
   linked from.
 - A folder that holds your home is never left out.
 - Note which constant holds the id, so 022's manifest and the command can't drift.
+- Review follow-ups: the folder above `bin/` is the tool's own only when it is
+  recognisably this tool, so a copy in `~/.local/bin` or a package in `/usr/bin`
+  leaves none of your files out.
 
 ## Not in this ticket
 
@@ -46,3 +49,9 @@ itself.
 - [x] A plugin that isn't this tool, beside it, is still read and linted.
 - [x] Running from a checkout that holds the fictional home leaves nothing out.
 - [x] `tests/run` passes.
+- [x] A copy of the command in a fictional `~/.local/bin` still reads the other
+      files in `~/.local/bin` and `~/.local/share/applications`, and a test fails
+      without the change.
+- [x] A command in a fictional `/usr/bin` still reads a file of yours linked to
+      `/usr/local/bin`.
+- [x] The spec says what makes the folder above `bin/` the tool's own.

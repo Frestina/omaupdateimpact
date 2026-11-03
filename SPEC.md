@@ -375,17 +375,26 @@ Commands are looked for in these places:
   every file. A script needs no suffix there.
 - `shell.json`, `shell.toml` and the startup files of bash, zsh and fish.
 
-The tool's own files aren't your setup, so no check reads them. They are the
-checkout the running command is in, found by real path, and a plugin whose
-`manifest.json` has this tool's id. The plugin is the whole repository, tests
-included, and its tests name deleted commands on purpose. A terminal install and
-the plugin can be two clones, so the id counts as well as the path. A folder of
-the tool's own is left out of the commands and plugins checks, and of the
-"Checked" counts. Its QML is linted in this project's CI. A file or folder whose
-real path is in one of them is left out wherever it is linked from, such as the link
-`install.sh` puts in `~/.local/bin`. A checkout that holds your home is never left
-out, as that would leave out everything. A plugin whose `manifest.json` can't be
-read isn't known to be this tool, so it is read as yours.
+The tool's own files aren't your setup, so no check reads them. They are:
+
+- The running command's own file, found by real path. This covers the link
+  `install.sh` puts in `~/.local/bin`, and a copy put there by hand.
+- The checkout the running command is in: the folder above its `bin/`, found by real
+  path. It counts only when it holds a `manifest.json` with this tool's id, as the
+  repository does. A copy in `~/.local/bin` would make that folder `~/.local`, and a
+  package in `/usr/bin` would make it `/usr`. Both hold files of yours, so without
+  the manifest the folder is read as yours.
+- A plugin whose `manifest.json` has this tool's id. The plugin is the whole
+  repository, tests included, and its tests name deleted commands on purpose. A
+  terminal install and the plugin can be two clones, so the id counts as well as the
+  path.
+
+They are left out of the commands and plugins checks, and of the "Checked" counts.
+The plugin's QML is linted in this project's CI. A file or folder whose real path is
+in one of them is left out wherever it is linked from. A folder that holds your home
+is never left out, as that would leave out everything. A `manifest.json` that can't
+be read, or isn't a plain file, doesn't make a folder this tool's own. It is never
+opened if it is a pipe, as that would wait forever.
 
 Links are followed, and each real folder is read once, so a link loop ends. A folder
 both ways of reading can reach is read in full. `.git` is skipped, and so are backups

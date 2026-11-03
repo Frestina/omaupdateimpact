@@ -9,6 +9,7 @@ import re
 import shutil
 import tarfile
 import tempfile
+import threading
 import unittest
 from email.message import Message
 from http.client import IncompleteRead
@@ -1670,9 +1671,10 @@ class OwnFiles(unittest.TestCase):
         (self.base / "current/bin/omarchy-gone").touch()
         # A checkout of the tool somewhere else, so the real one plays no part.
         self.running = self.base / "running-checkout"
-        patcher = mock.patch.object(impact, "CHECKOUT", self.running)
-        patcher.start()
-        self.addCleanup(patcher.stop)
+        for name, value in [("CHECKOUT", self.running), ("COMMAND", self.running / "bin/omaupdateimpact")]:
+            patcher = mock.patch.object(impact, name, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
 
     def plugin(self, folder, plugin_id=None):
         """A plugin that calls the deleted command, with a manifest when it has an id."""
@@ -1713,10 +1715,35 @@ class OwnFiles(unittest.TestCase):
         self.assertEqual(self.commands(), ([], 0))
         self.assertEqual(self.linted(), ([], 0, []))
 
-    def test_the_running_checkout_is_left_out_with_no_manifest(self):
-        (self.plugins / "dev").symlink_to(self.plugin(self.running))
+    def test_the_running_checkout_with_this_tools_manifest_is_left_out_outside_the_plugins_folder(self):
+        (self.home / ".config/hypr").mkdir()
+        (self.home / ".config/hypr/dev").symlink_to(self.plugin(self.running, impact.PLUGIN_ID))
         self.assertEqual(self.commands(), ([], 0))
-        self.assertEqual(self.linted(), ([], 0, []))
+
+    def test_a_running_checkout_without_the_manifest_leaves_out_only_the_command(self):
+        # As a copy in ~/.local/bin or a package in /usr/bin: the folder above bin/ is yours.
+        self.plugin(self.running)
+        (self.running / "bin").mkdir()
+        (self.running / "bin/omaupdateimpact").write_text("omarchy-gone\n")
+        (self.home / ".config/hypr").mkdir()
+        (self.home / ".config/hypr/dev").symlink_to(self.running)
+        self.assertEqual(self.commands(), (["~/.config/hypr/dev/tests/test_calls.sh:1"], 2))
+
+    def test_a_manifest_that_is_a_pipe_isnt_opened(self):
+        folder = self.plugins / "piped"
+        folder.mkdir()
+        os.mkfifo(folder / "manifest.json")
+        answer = []
+        reader = threading.Thread(target=lambda: answer.append(impact.is_own_plugin(folder)), daemon=True)
+        reader.start()
+        reader.join(5)
+        waited = reader.is_alive()
+        if waited:
+            # Let the stuck read end, so the test can finish.
+            os.close(os.open(folder / "manifest.json", os.O_WRONLY | os.O_NONBLOCK))
+            reader.join(5)
+        self.assertFalse(waited, "is_own_plugin waited on a pipe")
+        self.assertEqual(answer, [False])
 
     def test_the_tools_own_files_are_left_out_wherever_they_are_linked_from(self):
         ours = self.plugin(self.plugins / "ours", impact.PLUGIN_ID)
@@ -1740,6 +1767,7 @@ class OwnFiles(unittest.TestCase):
 
     def test_a_checkout_that_holds_your_home_leaves_nothing_out(self):
         self.plugin(self.plugins / "weather")
+        (self.base / "manifest.json").write_text(json.dumps({"id": impact.PLUGIN_ID}))
         with mock.patch.object(impact, "CHECKOUT", self.base):
             self.assertEqual(self.commands(), (["~/.config/omarchy/plugins/weather/tests/test_calls.sh:1"], 2))
             self.assertEqual(self.linted()[:2], (["weather"], 1))
