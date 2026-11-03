@@ -1208,9 +1208,27 @@ class Edits(unittest.TestCase):
         self.assertEqual(self.notes(wrapper + "as_root rm -f ~/.config/app/app.conf\n"), [
             "migrations/1.sh, line 8, looks like it removes ~/.config/app/app.conf, which differs from Omarchy's default.",
         ])
-        self.assertEqual(self.notes("retry 3 rm -f ~/.config/app/app.conf\n"), [
-            "migrations/1.sh, line 1, looks like it removes ~/.config/app/app.conf, which differs from Omarchy's default.",
+        retry = 'retry() {\n  local times=$1\n  shift\n  "$@" || "$@"\n}\n'
+        self.assertEqual(self.notes(retry + "retry 3 rm -f ~/.config/app/app.conf\n"), [
+            "migrations/1.sh, line 6, looks like it removes ~/.config/app/app.conf, which differs from Omarchy's default.",
         ])
+
+    def test_a_writer_behind_a_command_that_runs_its_arguments_is_read(self):
+        self.write(".config/app/app.conf")
+        for command in (
+            "sudo -u someone rm -f ~/.config/app/app.conf",
+            "env -u X Y=1 rm -f ~/.config/app/app.conf",
+            "timeout -s KILL 10 rm -f ~/.config/app/app.conf",
+            "nice -n 5 ionice -c 3 rm -f ~/.config/app/app.conf",
+            "Y=1 /usr/bin/rm -f ~/.config/app/app.conf",
+        ):
+            with self.subTest(command):
+                self.assertEqual(len(self.notes(command + "\n")), 1)
+
+    def test_a_writers_name_anywhere_else_in_a_command_isnt_a_write(self):
+        self.write(".bashrc")
+        text = 'mise install node\nnotify-send "cp" "$HOME/.bashrc"\ngit mv a ~/.bashrc\nretry 3 rm -f ~/.bashrc\n'
+        self.assertEqual(self.findings(text), [])
 
     def test_a_function_that_runs_sudo_counts_as_sudo(self):
         wrapper = 'as_root() {\n  sudo "$@"\n}\nfunction quietly { as_root "$@" >/dev/null; }\n'
@@ -1260,6 +1278,13 @@ class Edits(unittest.TestCase):
                 self.assertEqual(self.unknown(command + "\n"), [
                     "Couldn't tell which files migrations/1.sh writes on line 1, so check it by hand.",
                 ])
+
+    def test_find_that_runs_a_command_that_writes_nothing_says_nothing(self):
+        self.write(".config/app/app.conf")
+        self.assertEqual(self.findings("find ~/.config/app -name x -exec grep -l foo {} +\n"), [])
+        for command in ("-exec rm {} \\;", "-execdir sudo rm {} +", "-exec sh -c 'rm \"$1\"' _ {} \\;"):
+            with self.subTest(command):
+                self.assertEqual(len(self.unknown(f"find ~/.config/app -name x {command}\n")), 1)
 
     def test_find_elsewhere_or_only_listing_says_nothing(self):
         self.write(".config/app/app.conf")

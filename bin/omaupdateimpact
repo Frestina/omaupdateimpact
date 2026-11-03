@@ -121,6 +121,11 @@ OUTPUT_REDIRECTS = {">", ">>", ">|", "&>", "&>>", "<>", ">&"}
 BLOCK_WORDS = {"if", "then", "else", "elif", "fi", "while", "until", "do", "done", "case", "esac", "{", "}", "!", "time", "function"}
 DECLARES = {"local", "declare", "typeset", "export", "readonly"}
 WRITERS = {"sed", "rm", "tee", "mv", "cp", "install", "ln", "find"}
+# Commands that run the command after them, each with its short options that take a value.
+RUNNERS = {
+    "sudo": "ugCDhpTr", "doas": "uC", "env": "uSCP", "command": "", "exec": "a", "nohup": "",
+    "nice": "n", "ionice": "cnpP", "timeout": "sk", "stdbuf": "ioe",
+}
 ASSIGNMENT = re.compile(r"[A-Za-z_]\w*\+?=")
 NAME = re.compile(r"[A-Za-z_]\w*")
 PARAMETER = re.compile(r"([A-Za-z_]\w*)(?::?([-=])(.*))?", re.DOTALL)
@@ -1223,23 +1228,69 @@ def wrapper_functions(tokens):
     return found
 
 
+def writer_at(words, wrappers):
+    """Where in a command its writer is, or None, and whether sudo runs it.
+
+    It is the first word, or comes behind commands that run their arguments: one
+    of RUNNERS, past its options, or a function of the script's own that runs
+    "$@", past any arguments of its own.
+    """
+    index, sudo = 0, False
+    while index < len(words):
+        name = words[index].rsplit("/", 1)[-1]
+        if ASSIGNMENT.match(words[index]):
+            index += 1
+        elif name in WRITERS:
+            return index, sudo
+        elif name in RUNNERS:
+            sudo = sudo or name in ("sudo", "doas")
+            index += 1
+            # A timeout comes before the command it runs.
+            positional = name == "timeout"
+            while index < len(words) and (words[index].startswith("-") or ASSIGNMENT.match(words[index]) or positional):
+                if words[index].startswith("-"):
+                    index += 1 + (not words[index].startswith("--") and words[index][-1] in RUNNERS[name])
+                else:
+                    positional = positional and ASSIGNMENT.match(words[index]) is not None
+                    index += 1
+        elif words[index] in wrappers:
+            sudo = sudo or wrappers[words[index]]
+            later = [i for i in range(index + 1, len(words)) if words[i].rsplit("/", 1)[-1] in {*WRITERS, *RUNNERS}]
+            if not later:
+                return None, sudo
+            index = later[0]
+        else:
+            return None, sudo
+    return None, sudo
+
+
+def find_changes(arguments, wrappers):
+    """Whether find changes what it finds: -delete, or a writer or a shell string that -exec and its like run."""
+    if "-delete" in arguments:
+        return True
+    for index, word in enumerate(arguments):
+        if word in ("-exec", "-execdir", "-ok", "-okdir"):
+            run = list(itertools.takewhile(lambda part: part not in (";", "+"), arguments[index + 1 :]))
+            shell = run[:1] and run[0].rsplit("/", 1)[-1] in ("sh", "bash", "dash", "zsh")
+            if writer_at(run, wrappers)[0] is not None or (shell and any(SHELL_STRING_FLAG.fullmatch(part) for part in run)):
+                return True
+    return False
+
+
 def written(words, wrappers):
     """The words a command writes to, the folders it searches to change what it finds, and whether sudo runs it.
 
-    The writer can sit behind any command, such as sudo or a function of the
-    script's own, but not behind one that only prints or looks up. Each word comes
+    The writer is the first word, or comes behind commands that run their arguments:
+    see writer_at. Each word comes
     with whether the command only removes it, the words it copies or links, as one
     copied into a folder keeps its name there, and for a link, ln's -T or -n, or
     "" for neither. That is None for anything but a link.
     """
     targets = [(word, False, [], None) for word in words if isinstance(word, Redirect)]
     words = [word for word in words if not isinstance(word, Redirect)]
-    while words and ASSIGNMENT.match(words[0]):
-        words = words[1:]
     if not words or not_run(words):
         return targets, [], False
-    found = next((i for i, word in enumerate(words) if word.rsplit("/", 1)[-1] in WRITERS), None)
-    sudo = any(word.rsplit("/", 1)[-1] == "sudo" or wrappers.get(word) for word in words[:found])
+    found, sudo = writer_at(words, wrappers)
     if found is None:
         return targets, [], sudo
     name, arguments = words[found].rsplit("/", 1)[-1], words[found + 1 :]
@@ -1250,8 +1301,7 @@ def written(words, wrappers):
         targets += [(word, name == "rm", [], None) for word in operands(arguments)]
     elif name == "find":
         starts = list(itertools.takewhile(lambda word: not word.startswith(("-", "(", "!")), arguments)) or ["."]
-        changes = any(word in ("-delete", "-exec", "-execdir", "-ok", "-okdir") for word in arguments)
-        return targets, starts if changes else [], sudo
+        return targets, starts if find_changes(arguments, wrappers) else [], sudo
     elif name == "ln":
         linked = operands(arguments, "St")
         short = "".join(word[1:] for word in options if not word.startswith("--"))

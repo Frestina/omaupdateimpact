@@ -281,14 +281,21 @@ move or a link into a folder writes the file of the same name there, and `ln -n`
 points where the new one would says nothing. `ln` without `-f` and `install -d`
 write no file.
 
-As for packages, a writer behind any command counts, such as `sudo` or a function
-of the migration's own, unless that command only prints or looks up, such as `echo`.
-A function the migration defines that runs `sudo "$@"`, as v4.5.0-rc2's `as_root`
-does, counts as `sudo`.
+The writer is the first word of a command, or comes behind commands that run their
+arguments. Those are `sudo`, `doas`, `env`, `command`, `exec`, `nohup`, `nice`,
+`ionice`, `timeout` and `stdbuf`, past their options and assignments, and functions
+the migration defines that run `"$@"`. Behind such a function the next writer word
+counts, so `retry 3 rm ~/x` is read. A function that runs `sudo "$@"`, as
+v4.5.0-rc2's `as_root` does, counts as `sudo`. A writer's name anywhere else, as in
+`mise install node`, `git mv` or a quoted `"cp"`, isn't a write. This differs from
+packages, where any wrapper counts, because removal commands never turn up as plain
+words and writers' names do.
 
-`find` with `-delete`, `-exec`, `-execdir`, `-ok` or `-okdir` changes files whose
-names are only known when it runs. In your files that is `unknown`, and elsewhere,
-or in a folder you don't have, it says nothing.
+`find` changes files whose names are only known when it runs when it has `-delete`,
+or when `-exec`, `-execdir`, `-ok` or `-okdir` runs a writer, read as above, or a
+shell given a string, such as `sh -c`. `find -exec grep` changes nothing. In your
+files a find that changes them is `unknown`, and elsewhere, or in a folder you don't
+have, it says nothing.
 
 Nothing else is read as a write. That leaves out `xargs`, `awk -i inplace`,
 `perl -i`, `rsync`, `truncate`, `dd`, a `bash -c` or `eval` string and any other
