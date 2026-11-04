@@ -1,0 +1,331 @@
+#!/usr/bin/env python3
+"""Record the announcement video: a square MP4 of about 28 seconds.
+
+    demo/video                             # omaupdateimpact.mp4, in the current folder
+    demo/video --out /tmp/announce.mp4
+
+It shows a title card. Then a terminal types `omaupdateimpact v4.5.0-rc2` and the
+report prints, on the fictional home and the trimmed releases, as tests.demo runs
+it. The frame pans to the bar, whose icon shows the count, and the panel opens on
+the --json document of that same run. Last comes a card with both installs, as in
+the README.
+
+It uses demo/run's second shell, with the same promise. HOME is a new folder in
+XDG_RUNTIME_DIR, and of yours it reads only the committed files of Frestina's other
+plugins. It moves to an empty workspace while it records, and goes back after. On
+any exit, the shell, the terminal and the recorder are stopped, your workspace
+comes back, and the folder is deleted.
+
+The whole monitor is recorded, then your own bar is cropped off. The run stops if a
+window or layer of yours shows up while it records, such as a notification. Check
+the video before posting it. It is for posts, so it isn't kept in the repository.
+"""
+
+import argparse
+import importlib.machinery
+import importlib.util
+import json
+import os
+import re
+import shutil
+import signal
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.dont_write_bytecode = True
+sys.path.insert(0, str(ROOT))
+from tests import demo as recording
+
+
+def load_run():
+    loader = importlib.machinery.SourceFileLoader("demo_run", str(ROOT / "demo/run"))
+    module = importlib.util.module_from_spec(importlib.util.spec_from_loader("demo_run", loader))
+    loader.exec_module(module)
+    return module
+
+
+run = load_run()
+
+THEME = "tokyo-night"
+TERMINAL = "io.github.frestina.omaupdateimpact.video"
+FPS = 30
+SIDE = 1080
+SUBDUED = "#9aa5ce"
+# Seconds in the cut: the cards, how long each fades, and the body around the panel.
+TITLE, END, FADE = 3.5, 7.0, 0.5
+LEAD = 0.6  # from the start of typing to the first frame of the body
+PAN_BEFORE, PAN = 2.2, 1.0  # the pan to the bar starts this long before the panel
+HOLD = 7.75  # how long the panel shows before the end card
+OPEN = 8.0  # how long the panel stays open: the cut ends before it closes
+ENCODE = ("-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "16")
+
+TYPE = r"""#!/bin/bash
+# Types the command and prints the report, once demo/video says go.
+printf '\033[?25l'
+clear
+while [ ! -e "$1/go" ]; do sleep 0.05; done
+sleep 1.2
+printf '\033[1;32m$\033[0m '
+sleep 0.6
+cmd=$(cat "$1/command.txt")
+for ((i=0; i<${#cmd}; i++)); do printf '%s' "${cmd:i:1}"; sleep 0.07; done
+sleep 0.7
+printf '\n'
+sleep 0.9
+while IFS= read -r line; do printf '%s\n' "$line"; sleep 0.035; done < "$1/report.txt"
+touch "$1/typed"
+sleep infinity
+"""
+
+
+def font(style):
+    """The file of JetBrainsMono Nerd Font in a style, from fontconfig."""
+    path = run.run("fc-match", "-f", "%{file}", f"JetBrainsMono Nerd Font:style={style}")
+    if "JetBrainsMono" not in path:
+        sys.exit("video: JetBrainsMono Nerd Font isn't installed")
+    return path
+
+
+def wrap(line, width=50):
+    """A shell line broken with backslashes so no part is wider than width."""
+    parts, current = [], ""
+    for word in line.split(" "):
+        if current and len(current) + 1 + len(word) > width:
+            parts.append(current)
+            current = "  " + word
+        else:
+            current = f"{current} {word}" if current else word
+    return " \\\n".join([*parts, current])
+
+
+def installs():
+    """The README's two install blocks, with each long line broken to fit the card."""
+    readme = (ROOT / "README.md").read_text()
+    blocks = []
+    for heading in ("### In the bar", "### In the terminal"):
+        found = re.search(re.escape(heading) + r"\n.*?```\n(.*?)```", readme, re.DOTALL)
+        if not found:
+            sys.exit(f"video: the README has no code block under {heading}")
+        lines = found.group(1).rstrip("\n").split("\n")
+        blocks.append("\n".join(wrap(line) for line in lines))
+    return blocks
+
+
+def cards(state):
+    """The title card and the end card, as clips in state."""
+    regular, bold = font("Regular"), font("Bold")
+    plugin, terminal = installs()
+    texts = {
+        "title": "omaupdateimpact",
+        "tagline": "What an Omarchy update\nwill do to your machine,\nbefore you update.",
+        "end": "Try it before you update",
+        "bar": "In the bar",
+        "plugin": plugin,
+        "terminal": "In the terminal",
+        "clone": terminal,
+        "promise": "Read-only. Runs nothing from the release.",
+    }
+    for name, text in texts.items():
+        (state / f"{name}.txt").write_text(text)
+
+    def text(name, file, size, colour, x="(w-tw)/2", y=0, spacing=12):
+        return (
+            f"drawtext=fontfile={file}:textfile={state / name}.txt:expansion=none:fontsize={size}:"
+            f"fontcolor=0x{colour[1:]}:line_spacing={spacing}:x={x}:y={y}"
+        )
+
+    title = [text("title", bold, 76, recording.TEXT, y=330), text("tagline", regular, 44, SUBDUED, y=500, spacing=16)]
+    end = [
+        text("end", bold, 56, recording.TEXT, y=110),
+        text("bar", bold, 36, recording.GREEN, x=70, y=270),
+        text("plugin", regular, 30, recording.TEXT, x=70, y=330),
+        text("terminal", bold, 36, recording.GREEN, x=70, y=550),
+        text("clone", regular, 30, recording.TEXT, x=70, y=610),
+        text("promise", regular, 30, SUBDUED, y=930),
+    ]
+    for name, seconds, filters in (("title", TITLE, title), ("end", END, end)):
+        background = f"color=c=0x{recording.BACKGROUND[1:]}:s={SIDE}x{SIDE}:r={FPS}:d={seconds}"
+        ffmpeg("-f", "lavfi", "-i", background, "-vf", ",".join(filters), *ENCODE, str(state / f"{name}.mp4"))
+
+
+def ffmpeg(*args):
+    subprocess.run(["ffmpeg", "-v", "error", "-y", *args], check=True, timeout=600)
+
+
+def size(video):
+    found = run.run("ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height",
+                    "-of", "csv=p=0", str(video))
+    width, height = found.strip().split(",")
+    return int(width), int(height)
+
+
+def panel_opens(raw, x, y, w, h):
+    """When the panel first shows in the footage: the first frame that changes the
+    empty corner of the terminal it opens over."""
+    stats = subprocess.run(
+        ["ffmpeg", "-v", "error", "-i", str(raw), "-vf",
+         f"crop={w}:{h}:{x}:{y},signalstats,metadata=print:key=lavfi.signalstats.YDIF:file=-", "-f", "null", "-"],
+        capture_output=True, text=True, check=True, timeout=600,
+    ).stdout
+    moment = None
+    for line in stats.splitlines():
+        if line.startswith("frame:"):
+            moment = float(line.rpartition("pts_time:")[2])
+        elif line.startswith("lavfi.signalstats.YDIF=") and moment is not None and float(line.partition("=")[2]) > 1.0:
+            return moment
+    sys.exit("video: the panel didn't show in the footage")
+
+
+def strangers(monitor, workspace, shell):
+    """Windows and layers of yours that would show in the footage, by name."""
+    found = [
+        f"window {c['class']}" for c in run.hypr("clients")
+        if c["workspace"]["id"] == workspace and c["class"] != TERMINAL
+    ]
+    for level in run.hypr("layers").get(monitor["name"], {}).get("levels", {}).values():
+        found += [
+            f"layer {layer['namespace']} of process {layer['pid']}" for layer in level
+            if layer["pid"] != shell.pid and layer["namespace"] not in ("omarchy-bar", "omarchy-background")
+        ]
+    return found
+
+
+def wait(seconds, until=None, watch=None):
+    """Sleep up to seconds, or until until() is true. Stops the run if watch() finds anything."""
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        if until and until():
+            return
+        if watch and (found := watch()):
+            sys.exit(f"video: {', '.join(found)} showed while recording. Run it again.")
+        time.sleep(0.1)
+    if until:
+        sys.exit(f"video: gave up after {seconds} seconds")
+
+
+def stop(process, interrupt=False):
+    """Stops a process and its group, by SIGINT first for the recorder to finish its file."""
+    if not process or process.poll() is not None:
+        return
+    try:
+        os.killpg(process.pid, signal.SIGINT if interrupt else signal.SIGTERM)
+        process.wait(timeout=20)
+    except subprocess.TimeoutExpired:
+        os.killpg(process.pid, signal.SIGKILL)
+        process.wait()
+    except ProcessLookupError:
+        pass
+
+
+def record(demo, out):
+    """Records the footage, finds when the panel opens in it, and edits it into out."""
+    report = recording.recorded()
+    (demo.state / "command.txt").write_text(recording.COMMAND)
+    (demo.state / "report.txt").write_text(report)
+    (demo.state / "type.sh").write_text(TYPE)
+    (demo.state / "type.sh").chmod(0o755)
+    plugin_id = run.manifest()["id"]
+    monitor = next(m for m in run.hypr("monitors") if m["focused"])
+    workspace = run.hypr("activeworkspace")["id"]
+    top, bar = run.demo_bar(demo.shell.pid, monitor)
+    run.apply_theme(demo.shell.pid, demo.theme)
+    if not (demo.theme / "ghostty.conf").is_file():
+        sys.exit(f"video: the {THEME} theme has no ghostty.conf")
+
+    terminal = recorder = None
+    try:
+        terminal = subprocess.Popen(
+            ["ghostty", "--config-default-files=false", f"--config-file={demo.theme / 'ghostty.conf'}",
+             "--font-family=JetBrainsMono Nerd Font", "--font-size=9.5", "--window-padding-x=18",
+             "--window-padding-y=14", "--gtk-single-instance=false", "--confirm-close-surface=false",
+             f"--class={TERMINAL}", "-e", str(demo.state / "type.sh"), str(demo.state)],
+            env=demo.environment, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True,
+        )
+        wait(15, until=lambda: any(c["class"] == TERMINAL for c in run.hypr("clients")))
+        time.sleep(2.0)
+        run.check(demo)
+
+        raw = demo.state / "raw.mp4"
+        recorder = subprocess.Popen(
+            ["gpu-screen-recorder", "-w", monitor["name"], "-f", str(FPS), "-q", "very_high", "-cursor", "no",
+             "-encoder", "cpu", "-k", "h264", "-o", str(raw)],
+            stdout=subprocess.DEVNULL, stderr=(demo.state / "recorder.log").open("w"), start_new_session=True,
+        )
+        watch = lambda: strangers(monitor, workspace, demo.shell)
+        wait(2.0, watch=watch)
+        go = time.monotonic()
+        (demo.state / "go").touch()
+        wait(60, until=(demo.state / "typed").exists, watch=watch)
+        wait(5.0, watch=watch)
+        summoned = time.monotonic()
+        run.ipc(demo.shell.pid, "call", "shell", "summon", plugin_id, "{}")
+        wait(OPEN, watch=watch)
+        stop(recorder, interrupt=True)
+        if recorder.returncode or not raw.is_file() or not raw.stat().st_size:
+            sys.exit("video: gpu-screen-recorder wrote no video")
+        run.ipc(demo.shell.pid, "call", "shell", "hide", plugin_id)
+    finally:
+        stop(recorder, interrupt=True)
+        stop(terminal)
+
+    width, height = size(raw)
+    scale = height / (monitor["height"] / monitor["scale"])
+    # An empty corner of the terminal, below the bar, that the panel opens over.
+    corner = round(300 * scale)
+    panel = panel_opens(raw, width - corner, round((top + bar + 20) * scale), corner - round(10 * scale), corner)
+    start = panel - (summoned - go) + LEAD
+    edit(demo.state, raw, start, panel, round(top * scale), out)
+
+
+def edit(state, raw, start, panel, cropped, out):
+    """Cards, then the footage below your bar, square, panning right to the bar and panel."""
+    width, height = size(raw)
+    side = (height - cropped) // 2 * 2
+    if side > width:
+        sys.exit("video: the monitor is taller than it is wide, so the footage can't be cut square")
+    cards(state)
+    pan, travel = panel - start - PAN_BEFORE, width - side
+    x = f"if(lt(t,{pan}),0,if(lt(t,{pan + PAN}),{travel}*(1-cos(PI*(t-{pan})/{PAN}))/2,{travel}))"
+    ffmpeg(
+        "-ss", f"{start:.3f}", "-to", f"{panel + HOLD:.3f}", "-i", str(raw), "-vf",
+        f"crop=w={side}:h={side}:y={height - side}:x='{x}',scale={SIDE}:{SIDE}:flags=lanczos,fps={FPS},format=yuv420p",
+        *ENCODE, "-an", str(state / "body.mp4"),
+    )
+    body = float(run.run("ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0",
+                         str(state / "body.mp4")))
+    second = TITLE - FADE + body - FADE
+    ffmpeg(
+        "-i", str(state / "title.mp4"), "-i", str(state / "body.mp4"), "-i", str(state / "end.mp4"),
+        "-filter_complex",
+        f"[0][1]xfade=transition=fade:duration={FADE}:offset={TITLE - FADE}[a];"
+        f"[a][2]xfade=transition=fade:duration={FADE}:offset={second:.3f},format=yuv420p[v]",
+        "-map", "[v]", "-c:v", "libx264", "-preset", "slow", "-crf", "18", "-profile:v", "high", "-r", str(FPS),
+        "-movflags", "+faststart", str(state / "video.mp4"),
+    )
+    shutil.move(state / "video.mp4", out)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--out", type=Path, default=Path("omaupdateimpact.mp4"), help="where to write the MP4")
+    args = parser.parse_args()
+    out = args.out.resolve()
+    out.parent.mkdir(parents=True, exist_ok=True)
+    run.require(
+        "quickshell", "qs", "hyprctl", "omarchy-theme-set-templates", "ffmpeg", "ffprobe", "gpu-screen-recorder",
+        "ghostty", "fc-match",
+    )
+    document = json.loads(recording.recorded(recording.COMMAND + " --json"))
+    if document["result"] != "attention":
+        sys.exit(f"video: the demo run's result is {document['result']}, not attention")
+    with run.session(document, THEME) as demo:
+        record(demo, out)
+    print(f"video: wrote {out}")
+
+
+if __name__ == "__main__":
+    run.stop_on_signals()
+    main()

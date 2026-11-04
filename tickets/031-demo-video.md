@@ -56,9 +56,9 @@ by hand from a draft script.
 
 ## Done when
 
-- [ ] `demo/video` writes the MP4, with a fictional home and nothing of the owner's
+- [x] `demo/video` writes the MP4, with a fictional home and nothing of the owner's
       in it but the neighbour plugins, as committed, as for `preview.png`.
-- [ ] A run that fails or is stopped leaves no second shell, terminal, recorder or
+- [x] A run that fails or is stopped leaves no second shell, terminal, recorder or
       folder behind, and goes back to the workspace it started on.
-- [ ] The spec's Tests bullets name `demo/video`.
-- [ ] `tests/run` passes.
+- [x] The spec's Tests bullets name `demo/video`.
+- [x] `tests/run` passes.

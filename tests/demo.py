@@ -55,7 +55,7 @@ def stub(folder, name, body):
     path.chmod(0o755)
 
 
-def recorded():
+def recorded(command=COMMAND):
     """What the command prints on a terminal, colours included."""
     with tempfile.TemporaryDirectory() as directory:
         base = Path(directory)
@@ -83,7 +83,7 @@ def recorded():
             "OMARCHY_PATH": str(FIXTURES / "releases/v4.0.6"),
         }
         parent, child = pty.openpty()
-        process = subprocess.Popen(COMMAND.split(), env=env, stdin=subprocess.DEVNULL, stdout=child, stderr=child)
+        process = subprocess.Popen(command.split(), env=env, stdin=subprocess.DEVNULL, stdout=child, stderr=child)
         os.close(child)
         output = b""
         try:

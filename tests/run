@@ -12,7 +12,7 @@ else
   echo "shellcheck isn't installed, so it didn't run."
 fi
 if command -v ruff >/dev/null; then
-  ruff check bin/omaupdateimpact demo/run tests || status=1
+  ruff check bin/omaupdateimpact demo/run demo/video tests || status=1
 else
   echo "ruff isn't installed, so it didn't run."
 fi

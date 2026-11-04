@@ -28,8 +28,10 @@ Check every image before committing it.
 
 import argparse
 import base64
+import contextlib
 import json
 import os
+import shlex
 import shutil
 import signal
 import struct
@@ -37,6 +39,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import types
 import zlib
 from pathlib import Path
 
@@ -44,6 +47,8 @@ ROOT = Path(__file__).resolve().parent.parent
 GOLDEN = ROOT / "tests/fixtures/json"
 EXIT_CODES = {"clear": 0, "noUpdate": 0, "attention": 1, "failed": 2, "incomplete": 3}
 PREFIX = "omaupdateimpact-demo."
+# In the fictional home: the fixture command touches it each time it runs.
+CHECKED = ".checked"
 # Logical pixels from the top right of the demo bar: the bar and the panel.
 WIDTH, HEIGHT = 560, 800
 # The right of the bar, as on the owner's: Frestina's public plugins, then Omarchy's.
@@ -115,7 +120,7 @@ def neighbours(plugins):
     return found
 
 
-def fictional_home(home, omarchy, result):
+def fictional_home(home, omarchy, document):
     """The fictional home: a shell.json with the widget, and the plugin with a fixture command."""
     plugin_id = manifest()["id"]
     config = home / ".config/omarchy"
@@ -138,11 +143,12 @@ def fictional_home(home, omarchy, result):
     (plugin / "bin").mkdir(parents=True)
     shutil.copy(ROOT / "manifest.json", plugin)
     shutil.copytree(ROOT / "plugin", plugin / "plugin")
-    document = GOLDEN / f"{result}.json"
-    shutil.copy(document, plugin / "bin/document.json")
-    code = EXIT_CODES[json.loads(document.read_text())["result"]]
+    (plugin / "bin/document.json").write_text(json.dumps(document, indent=2) + "\n")
+    code = EXIT_CODES[document["result"]]
+    # The mark is outside the plugin's folder, which the shell would reload on a change.
+    mark = shlex.quote(str(home / CHECKED))
     fixture = plugin / "bin/omaupdateimpact"
-    fixture.write_text(f'#!/bin/sh\n# A fixture: one golden document.\ncat "$(dirname "$0")/document.json"\nexit {code}\n')
+    fixture.write_text(f'#!/bin/sh\n# A fixture: one document.\ncat "$(dirname "$0")/document.json"\ntouch {mark}\nexit {code}\n')
     fixture.chmod(0o755)
 
 
@@ -210,76 +216,74 @@ def wait_for(pid, target, seconds=30):
     sys.exit(f"demo: the demo shell didn't offer {target} within {seconds} seconds")
 
 
-def main():
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--theme", action="append", help="a theme in $OMARCHY_PATH/themes (repeatable)")
-    parser.add_argument("--result", default="report", help="a golden document in tests/fixtures/json")
-    parser.add_argument("--out", type=Path, help="a folder for one PNG per theme, in place of preview.png")
-    args = parser.parse_args()
-    themes = args.theme or ["tokyo-night"]
-
-    for command in ("quickshell", "qs", "grim", "hyprctl", "omarchy-theme-set-templates"):
+def require(*commands):
+    for command in commands:
         if not shutil.which(command):
             sys.exit(f"demo: {command} isn't installed")
+
+
+def apply_theme(pid, current):
+    payload = [base64.b64encode((current / file).read_bytes()).decode() for file in ("colors.toml", "shell.toml")]
+    ipc(pid, "call", "shell", "applyTheme", *payload)
+
+
+def check(demo, seconds=30):
+    """Check again, and wait until the fixture has answered and the bar shows it."""
+    mark = demo.home / CHECKED
+    mark.unlink(missing_ok=True)
+    ipc(demo.shell.pid, "call", manifest()["id"], "check")
+    deadline = time.monotonic() + seconds
+    while not mark.exists():
+        if time.monotonic() > deadline:
+            sys.exit(f"demo: the plugin didn't check within {seconds} seconds")
+        time.sleep(0.1)
+    time.sleep(1.0)
+
+
+@contextlib.contextmanager
+def session(document, theme_name):
+    """A second shell on a fictional home whose plugin prints document, on an empty workspace.
+
+    Whatever happens, the shell is stopped, your workspace comes back, and the folder is
+    deleted. Yields the folder, the home, Omarchy's tree, the shell, its environment and
+    the current theme's folder.
+    """
     omarchy = Path(os.environ.get("OMARCHY_PATH") or "/usr/share/omarchy")
     runtime = Path(os.environ["XDG_RUNTIME_DIR"])
     stale = sorted(runtime.glob(PREFIX + "*"))
     if stale:
         sys.exit(f"demo: an earlier run left {stale[0]}. Stop any quickshell started from it, then delete it.")
-    if not (GOLDEN / f"{args.result}.json").is_file():
-        sys.exit(f"demo: no golden document {args.result}")
-
     state = Path(tempfile.mkdtemp(prefix=PREFIX, dir=runtime))
     home = state / "home"
     shell = None
     workspace = hypr("activeworkspace")["id"]
     try:
-        fictional_home(home, omarchy, args.result)
-        theme(home, omarchy, themes[0])
+        fictional_home(home, omarchy, document)
+        current = theme(home, omarchy, theme_name)
         used = {w["id"] for w in hypr("workspaces")}
         empty = next(n for n in range(9, 100) if n not in used)
         go_to(empty)
 
+        # Without PYTHONDONTWRITEBYTECODE, a neighbour's first run writes __pycache__
+        # into its folder, and the shell reloads it over and over.
         environment = dict(
             os.environ, HOME=str(home), XDG_CONFIG_HOME=str(home / ".config"),
             XDG_STATE_HOME=str(home / ".local/state"), XDG_CACHE_HOME=str(home / ".cache"),
             XDG_DATA_HOME=str(home / ".local/share"), QS_DISABLE_FILE_WATCHER="1", QS_NO_RELOAD_POPUP="1",
+            PYTHONDONTWRITEBYTECODE="1",
         )
         log = (state / "shell.log").open("w")
         shell = subprocess.Popen(
             ["quickshell", "-p", str(omarchy / "shell")], env=environment, stdout=log, stderr=log,
             start_new_session=True,
         )
-        plugin_id = manifest()["id"]
-        wait_for(shell.pid, plugin_id)
-
-        monitor = next(m for m in hypr("monitors") if m["focused"])
-        width, height = monitor["width"] / monitor["scale"], monitor["height"] / monitor["scale"]
-        top, bar = demo_bar(shell.pid, monitor)
-        w, h = min(WIDTH, width), min(HEIGHT, height - bar)
-        x, y = monitor["x"] + width - w, monitor["y"]
-
-        for index, name in enumerate(themes):
-            current = theme(home, omarchy, name) if index else home / ".local/state/omarchy/current/theme"
-            payload = [base64.b64encode((current / file).read_bytes()).decode() for file in ("colors.toml", "shell.toml")]
-            ipc(shell.pid, "call", "shell", "applyTheme", *payload)
-            ipc(shell.pid, "call", plugin_id, "check")
-            time.sleep(1.5)
-            pixels, strip = capture(x, y + top, w, bar)
-            ipc(shell.pid, "call", "shell", "summon", plugin_id, "{}")
-            time.sleep(1.5)
-            _, panel = capture(x, y + bar, w, h)
-            target = args.out / f"{name}.png" if args.out else ROOT / "preview.png"
-            target.parent.mkdir(parents=True, exist_ok=True)
-            left = panel_left(strip, panel)
-            write_png(target, pixels - left // 3, [row[left:] for row in strip + panel])
-            ipc(shell.pid, "call", "shell", "hide", plugin_id)
-            time.sleep(0.5)
-            print(f"demo: wrote {target}")
+        wait_for(shell.pid, manifest()["id"])
+        yield types.SimpleNamespace(
+            state=state, home=home, omarchy=omarchy, shell=shell, environment=environment, theme=current,
+        )
     except BaseException:
-        log_file = state / "shell.log"
-        if log_file.exists():
-            print("demo: the demo shell's log ends:", *log_file.read_text().splitlines()[-40:], sep="\n", file=sys.stderr)
+        for log_file in sorted(state.glob("*.log")):
+            print(f"demo: {log_file.name} ends:", *log_file.read_text().splitlines()[-40:], sep="\n", file=sys.stderr)
         raise
     finally:
         if shell:
@@ -300,7 +304,49 @@ def main():
             print(f"demo: the demo shell is still running; {state} was kept", file=sys.stderr)
 
 
-if __name__ == "__main__":
+def stop_on_signals():
+    """SIGTERM and SIGHUP end the run as an error does, so everything is still cleaned up."""
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(1))
     signal.signal(signal.SIGHUP, lambda *_: sys.exit(1))
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--theme", action="append", help="a theme in $OMARCHY_PATH/themes (repeatable)")
+    parser.add_argument("--result", default="report", help="a golden document in tests/fixtures/json")
+    parser.add_argument("--out", type=Path, help="a folder for one PNG per theme, in place of preview.png")
+    args = parser.parse_args()
+    themes = args.theme or ["tokyo-night"]
+
+    require("quickshell", "qs", "grim", "hyprctl", "omarchy-theme-set-templates")
+    if not (GOLDEN / f"{args.result}.json").is_file():
+        sys.exit(f"demo: no golden document {args.result}")
+    document = json.loads((GOLDEN / f"{args.result}.json").read_text())
+
+    with session(document, themes[0]) as demo:
+        plugin_id = manifest()["id"]
+        monitor = next(m for m in hypr("monitors") if m["focused"])
+        width, height = monitor["width"] / monitor["scale"], monitor["height"] / monitor["scale"]
+        top, bar = demo_bar(demo.shell.pid, monitor)
+        w, h = min(WIDTH, width), min(HEIGHT, height - bar)
+        x, y = monitor["x"] + width - w, monitor["y"]
+
+        for index, name in enumerate(themes):
+            current = theme(demo.home, demo.omarchy, name) if index else demo.theme
+            apply_theme(demo.shell.pid, current)
+            check(demo)
+            pixels, strip = capture(x, y + top, w, bar)
+            ipc(demo.shell.pid, "call", "shell", "summon", plugin_id, "{}")
+            time.sleep(1.5)
+            _, panel = capture(x, y + bar, w, h)
+            target = args.out / f"{name}.png" if args.out else ROOT / "preview.png"
+            target.parent.mkdir(parents=True, exist_ok=True)
+            left = panel_left(strip, panel)
+            write_png(target, pixels - left // 3, [row[left:] for row in strip + panel])
+            ipc(demo.shell.pid, "call", "shell", "hide", plugin_id)
+            time.sleep(0.5)
+            print(f"demo: wrote {target}")
+
+if __name__ == "__main__":
+    stop_on_signals()
     main()

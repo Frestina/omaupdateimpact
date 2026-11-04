@@ -898,6 +898,15 @@ Nothing else in the panel changes anything.
   demo bar sits under the user's, and its panel places itself below one bar, so it
   covers the demo bar. The image is that bar, taken before the panel opens, above
   the panel, cut at the panel's left edge.
+- `demo/video` records the announcement video, a square MP4 of about 28 seconds,
+  in `demo/run`'s second shell, with the same promise. A title card comes first.
+  Then a terminal types the command and prints the report, as `tests.demo` runs it,
+  and the frame pans to the bar while the panel opens on that run's `--json`
+  document. An end card shows the README's two installs. It records the whole
+  monitor with `gpu-screen-recorder`, crops the user's bar off, and finds when the
+  panel opens from the footage. It stops if a window or layer of the user's shows
+  while it records. It also stops the terminal and the recorder, whatever happens.
+  It needs `ffmpeg`, `gpu-screen-recorder` and `ghostty`, and CI doesn't run it.
 
 ## Docs
 
@@ -908,6 +917,9 @@ stops matching what the command prints.
 
 The recording is an animated SVG rather than a GIF. GitHub plays it, it needs nothing
 but Python to make, and being text it can be searched for anything real.
+
+`demo/video` makes the video for posts. Neither the README nor `docs/` embeds it,
+and it isn't kept in the repository.
 
 Security reports go through GitHub's private reporting, so no personal address is
 published. It can only be turned on once the repository is public.
