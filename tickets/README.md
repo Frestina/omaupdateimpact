@@ -79,3 +79,4 @@ when.
 | 033 | [Panel polish after the owner's first use](033-panel-polish.md) | 032 | done |
 | 034 | [Undo a review, short notes, and ask what replaces it](034-undo-items-and-replacements.md) | 033 | done |
 | 035 | [Notes in groups, and arrows that show](035-panel-groups-and-arrows.md) | 034 | done |
+| 036 | [Check soon after loading, and wait for the network](036-first-check-sooner.md) | 035 | todo |

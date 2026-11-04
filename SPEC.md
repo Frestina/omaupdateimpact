@@ -618,7 +618,11 @@ its evidence included, its `id`, and whether it was `reviewed`.
 
 When there is no update, the document says so and names any newer release on
 another channel, with whether it is already in the cache. A failure that ends in
-exit 2 is a document too, with the reason.
+exit 2 is a document too, with the reason. It has `unreachable: true` when the run
+got no answer from GitHub at all: a name that doesn't resolve, a connection refused
+or cut, or a request that timed out. An answer GitHub gave, such as a rate limit or a
+rejected token, isn't that, and nor is any other failure. Other failed documents have
+`unreachable: false`.
 
 `result` names the kind of document and maps to one exit code: `clear`, `noUpdate`,
 `attention`, `failed` or `incomplete`. A count of something that wasn't looked at is
@@ -774,8 +778,12 @@ to GitHub, for the list of releases, and downloads nothing. With one, it downloa
 that release once and keeps it in the cache, so later checks read it from there. So
 the download, about 200 MB, happens once, when a new release appears.
 
-- The first check is 2 minutes after the service loads, so the network has time to
-  come up after login.
+- The first check is 5 seconds after the service loads. Right after login the
+  network may not be up yet, so a first check whose document has `unreachable` keeps
+  the bar on "Not checked", with "Waiting for the network…", and tries again a
+  minute later, up to 5 times. After the fifth, or on any other failure, it shows
+  "couldn't check" with the reason. Only the scheduled first check waits like this.
+  "Check again", and every later check, shows the failure at once, as before.
 - Then one every `checkEveryHours`, the widget's one setting. It is 6 by default,
   as for Omarchy's own update icon, and goes from 1 to 168. 0 checks only when
   asked, for a metered connection. The widget hands it to the service. The panel
@@ -790,7 +798,7 @@ the download, about 200 MB, happens once, when a new release appears.
   started twice. A run from a terminal or the menu at the same time shares the
   cache, and the release still downloads once. See [Downloads](#downloads).
 - An update restarts the shell, so the service loads again and checks the new
-  version 2 minutes later. No hook is needed.
+  version 5 seconds later. No hook is needed.
 - It doesn't use `omarchy-update-available` to decide. That runs `checkupdates`,
   which asks the package mirrors, and only GitHub may be asked. It also follows the
   package, not the tag the command compares with.
@@ -803,7 +811,7 @@ that is shown as "couldn't check", with the last line of stderr.
 
 | State | When | Icon | Tooltip |
 | --- | --- | --- | --- |
-| Not checked | No result yet | Muted, with `…` | "Checking…", or "Not checked yet" when it checks only when asked |
+| Not checked | No result yet | Muted, with `…` | "Checking…", "Waiting for the network…" between first tries, or "Not checked yet" when it checks only when asked |
 | Quiet | `noUpdate` or `clear` | Muted, no mark | "Omarchy v4.0.6 is up to date", or "v4.5.0: nothing needs attention" |
 | Attention | `attention` | Warning colour, with the count to review | "v4.5.0: 2 things need attention" |
 | Couldn't check | `incomplete`, `failed`, output it couldn't read, no service, or no command | Text colour, with `?` | "Couldn't check v4.5.0" and why |
