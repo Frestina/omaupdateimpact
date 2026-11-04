@@ -11,7 +11,8 @@ import "State.js" as State
 // Left click opens the panel, always on the user's own result. Its buttons check
 // again, open the report in a terminal, and check a newer release, whose report shows
 // in the panel and is kept until the shell restarts. The bar follows only the user's
-// own channel. Each finding starts closed, and its title opens it. "Mark reviewed" has
+// own channel. Each finding starts closed, and a click anywhere on its title row opens
+// it. Worth knowing lists its notes by group, each group closed. "Mark reviewed" has
 // the service run the command with --ack at once, and "Undo" under Reviewed with
 // --unack, as each undoes the other. "Ask agent" hands a finding, or the whole report,
 // to the user's own coding agent. The only other thing it changes is its own setting,
@@ -54,6 +55,8 @@ Panel {
   readonly property var barStyle: Style.bar
   readonly property real barIconSlot: root.barStyle.iconSlot
   property bool notesOpen: false
+  // Worth knowing's groups, as the document names them, with "Other" last.
+  readonly property var noteGroups: State.noteGroups(root.view.notes)
   // The findings opened by a click on their title. Each starts closed, in every
   // section, and they close again with the panel or another report.
   property var openFindings: ({})
@@ -236,43 +239,71 @@ Panel {
     fontFamily: root.fontFamily
   }
 
-  // A finding's title, with a chevron. A click opens the rest of it, or closes it.
-  component FindingTitle: Item {
-    id: findingTitle
-    property var about: null
+  // A row that opens: a finding's title, a group of notes, or Worth knowing. A click
+  // anywhere on it opens it or closes it, and it lights up under the pointer with the
+  // theme's hover colour. Its arrow sits on the right, in the text colour, a size
+  // larger than the title, and turns down when it opens.
+  component OpenRow: Item {
+    id: openRow
+    property string text: ""
+    property bool opened: false
     property color colour: root.foreground
     property bool strong: false
-    readonly property bool isOpen: root.isOpen(findingTitle.about)
+    signal activated()
+    readonly property real pad: Style.space(4)
     width: parent ? parent.width : implicitWidth
-    implicitHeight: Math.max(chevron.implicitHeight, titleText.implicitHeight)
+    implicitHeight: Math.max(arrow.implicitHeight, rowText.implicitHeight) + 2 * openRow.pad
 
-    Text {
-      id: chevron
-      textFormat: Text.PlainText
-      text: findingTitle.isOpen ? "󰅀" : "󰅂"
-      color: findingTitle.colour
-      font.family: root.fontFamily
-      font.pixelSize: root.fonts.body
+    Rectangle {
+      anchors.fill: parent
+      radius: Style.cornerRadius
+      color: rowMouse.containsMouse ? Style.hoverFillFor(root.foreground, Color.accent) : "transparent"
+      Behavior on color { ColorAnimation { duration: 120 } }
     }
 
     Text {
-      id: titleText
-      x: chevron.width + Style.space(4)
-      width: parent.width - x
+      id: rowText
+      x: openRow.pad
+      width: arrow.x - x - Style.space(8)
+      anchors.verticalCenter: parent.verticalCenter
       textFormat: Text.PlainText
-      text: findingTitle.about ? findingTitle.about.title : ""
+      text: openRow.text
       wrapMode: Text.Wrap
-      color: findingTitle.colour
+      color: openRow.colour
       font.family: root.fontFamily
       font.pixelSize: root.fonts.body
-      font.bold: findingTitle.strong
+      font.bold: openRow.strong
+    }
+
+    Text {
+      id: arrow
+      x: parent.width - width - openRow.pad
+      anchors.verticalCenter: parent.verticalCenter
+      textFormat: Text.PlainText
+      text: "󰅂"
+      color: root.foreground
+      font.family: root.fontFamily
+      font.pixelSize: root.fonts.title
+      rotation: openRow.opened ? 90 : 0
+      Behavior on rotation { NumberAnimation { duration: 120 } }
     }
 
     MouseArea {
+      id: rowMouse
       anchors.fill: parent
+      hoverEnabled: true
       cursorShape: Qt.PointingHandCursor
-      onClicked: root.toggleFinding(findingTitle.about)
+      onClicked: openRow.activated()
     }
+  }
+
+  // A finding's title. A click opens the rest of it, or closes it.
+  component FindingTitle: OpenRow {
+    id: findingTitle
+    property var about: null
+    text: findingTitle.about ? findingTitle.about.title : ""
+    opened: root.isOpen(findingTitle.about)
+    onActivated: root.toggleFinding(findingTitle.about)
   }
 
   // The rest of an open finding: its detail, its items one per line, why, fix,
@@ -665,36 +696,59 @@ Panel {
             }
           }
 
-          // ---------- Worth knowing, the notes, collapsed ----------
+          // ---------- Worth knowing, the notes, collapsed, in their groups ----------
+          // Opening it lists each group with its count, closed, in the document's
+          // order. Opening a group lists its notes, each one line until it opens.
           PanelSeparator { visible: root.view.notes.length > 0; foreground: root.foreground }
-          Button {
+          OpenRow {
             visible: root.view.notes.length > 0
-            iconText: root.notesOpen ? "󰅀" : "󰅂"
             text: "Worth knowing: " + State.plural(root.view.notes.length, "note", "notes")
-            tooltipText: root.notesOpen ? "Hide the notes" : "Show the notes"
-            foreground: root.foreground
-            fontFamily: root.fontFamily
-            fontSize: root.fonts.bodySmall
-            onClicked: root.notesOpen = !root.notesOpen
+            strong: true
+            opened: root.notesOpen
+            onActivated: root.notesOpen = !root.notesOpen
           }
 
           Repeater {
-            model: root.notesOpen ? root.view.notes : []
+            model: root.notesOpen ? root.noteGroups : []
             delegate: Column {
-              id: note
+              id: group
               required property var modelData
               width: body.width
               spacing: Style.space(3)
 
-              FindingTitle { about: note.modelData }
+              OpenRow {
+                text: group.modelData.line
+                opened: root.isOpen(group.modelData)
+                onActivated: root.toggleFinding(group.modelData)
+              }
 
+              // Its notes, a step in, so they read as the group's.
               Column {
-                visible: root.isOpen(note.modelData)
-                width: parent.width
+                visible: root.isOpen(group.modelData)
+                x: Style.space(12)
+                width: parent.width - x
                 spacing: Style.space(3)
 
-                FindingBody { about: note.modelData }
-                AgentButton { about: note.modelData }
+                Repeater {
+                  model: root.isOpen(group.modelData) ? group.modelData.notes : []
+                  delegate: Column {
+                    id: note
+                    required property var modelData
+                    width: parent ? parent.width : 0
+                    spacing: Style.space(3)
+
+                    FindingTitle { about: note.modelData }
+
+                    Column {
+                      visible: root.isOpen(note.modelData)
+                      width: parent.width
+                      spacing: Style.space(3)
+
+                      FindingBody { about: note.modelData }
+                      AgentButton { about: note.modelData }
+                    }
+                  }
+                }
               }
             }
           }

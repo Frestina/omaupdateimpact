@@ -29,6 +29,12 @@
   returns to your own result.
 - The panel's findings start closed, so every title shows. Click a title to see
   the rest. The notes are now "Worth knowing", as in the text report.
+- Worth knowing lists the notes by kind, each with its count, in the order the
+  report gives them. Open a kind to see its notes. A note of no kind goes under
+  "Other", last.
+- Every row that opens has its arrow on the right, in the text colour, and the
+  arrow turns when it opens. A click anywhere on the row opens it, and the row
+  lights up under the pointer.
 - A newer release is "Coming next", with "Check it", and says your updates won't
   bring it until it reaches your channel. While it is checked, the panel shows the
   turning icon and "Checking" with its tag. Its report is kept until the shell

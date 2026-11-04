@@ -81,8 +81,11 @@ omarchy plugin add https://github.com/Frestina/omaupdateimpact.git --enable
   never shown as clear for a check that didn't run.
 - Click it for the panel: what needs attention, then what couldn't be checked,
   then what is worth knowing, then what you reviewed. Each finding shows its title.
-  Click the title to see the rest, with the fix to copy. A note that lists things,
-  such as the new default shortcuts, shows one per line. "Check again" checks now.
+  Click anywhere on its row to see the rest, with the fix to copy. The arrow on the
+  right turns when it opens. Worth knowing lists the notes by kind, such as
+  "Shortcuts that move", each with its count. Open a kind to see its notes. A note
+  that lists things, such as the new default shortcuts, shows one per line. "Check
+  again" checks now.
   "Open report" shows the full report in a terminal.
 - "Mark reviewed", under a finding that needs attention, is for one you've seen and
   accepted. It runs the command with `--ack` and that id at once, so the finding no

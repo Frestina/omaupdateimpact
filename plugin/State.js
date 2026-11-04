@@ -441,8 +441,41 @@ function chosenLine(tag, channel) {
 
 // ---------- Findings, closed until their title is clicked ----------
 
-// What tells one finding from another in the report the panel shows.
+// Where a note without a group goes, last, so nothing is hidden if the command adds a
+// kind of note and forgets to name its group.
+var OTHER_GROUP = "Other"
+
+// Worth knowing, by group: each group the notes name, in the order the document gives
+// them, with its count and its notes. Notes with no group go under "Other", last.
+// Each group opens and closes as a finding does, by its key.
+function noteGroups(notes) {
+  var groups = []
+  var byName = {}
+  var other = []
+  ;(Array.isArray(notes) ? notes : []).forEach(function(n) {
+    var name = n && isText(n.group) && n.group.trim() !== "" ? n.group : ""
+    if (name === "" || name === OTHER_GROUP) {
+      other.push(n)
+      return
+    }
+    if (!Object.prototype.hasOwnProperty.call(byName, name)) {
+      byName[name] = { key: "group:" + name, title: name, notes: [] }
+      groups.push(byName[name])
+    }
+    byName[name].notes.push(n)
+  })
+  if (other.length > 0) groups.push({ key: "group:" + OTHER_GROUP, title: OTHER_GROUP, notes: other })
+  return groups.map(function(g) {
+    g.count = g.notes.length
+    g.line = g.title + " (" + g.count + ")"
+    return g
+  })
+}
+
+// What tells one finding, or one group of notes, from another in the report the
+// panel shows.
 function findingKey(f) {
+  if (f && isText(f.key) && f.key !== "") return f.key
   return f && isText(f.id) && f.id !== "" ? f.id : f && isText(f.title) ? "title:" + f.title : ""
 }
 

@@ -39,10 +39,10 @@ The spec already records each decision below.
 
 ## Done when
 
-- [ ] Every row that opens has its arrow on the right, in the text colour, turning
+- [x] Every row that opens has its arrow on the right, in the text colour, turning
       when it opens, and opens on a click anywhere on it.
-- [ ] Worth knowing groups notes by `group`, in the document's order, with counts,
+- [x] Worth knowing groups notes by `group`, in the document's order, with counts,
       and a note without one goes under "Other". Tested with fixture JSON.
-- [ ] Needs attention and Couldn't check still show every title. Tested.
-- [ ] The plugin still passes `omarchy plugin validate` and CI's QML lint.
-- [ ] `tests/run` passes.
+- [x] Needs attention and Couldn't check still show every title. Tested.
+- [x] The plugin still passes `omarchy plugin validate` and CI's QML lint.
+- [x] `tests/run` passes.

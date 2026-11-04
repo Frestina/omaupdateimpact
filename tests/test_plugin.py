@@ -513,7 +513,7 @@ class MarkReviewed(unittest.TestCase):
         self.assertIn("model: root.view.reviewed", section)
         self.assertIn("visible: root.isOpen(reviewed.modelData)", section)
         self.assertIn("AgentButton { about: reviewed.modelData }", section)
-        self.assertLess(widget.index("model: root.notesOpen ? root.view.notes"), widget.index('text: "REVIEWED"'))
+        self.assertLess(widget.index("model: root.notesOpen ? root.noteGroups"), widget.index('text: "REVIEWED"'))
         service = (PLUGIN / "Service.qml").read_text()
         self.assertIn("start(State.startUnack(held, id))", service)
 
@@ -757,17 +757,19 @@ class Findings(unittest.TestCase):
         widget = (PLUGIN / "Widget.qml").read_text()
         self.assertIn("property var openFindings: ({})", widget)
         for model, item in (("root.view.attention", "finding"), ("root.view.unknowns", "unknown"),
-                            ("root.notesOpen ? root.view.notes : []", "note")):
+                            ("root.isOpen(group.modelData) ? group.modelData.notes : []", "note"),
+                            ("root.view.reviewed", "reviewed")):
             with self.subTest(model):
-                delegate = widget.split(f"model: {model}", 1)[1].split("\n          }\n", 1)[0]
-                self.assertIn(f"about: {item}.modelData", delegate.split("FindingTitle {", 1)[1])
-                # The rest, and its buttons, show only once its title is clicked.
-                rest = delegate.split(f"visible: root.isOpen({item}.modelData)", 1)[1]
+                delegate = widget.split(f"model: {model}\n", 1)[1].split("Repeater {", 1)[0]
+                title, rest = delegate.split(f"visible: root.isOpen({item}.modelData)", 1)
+                self.assertIn(f"about: {item}.modelData", title.split("FindingTitle {", 1)[1])
+                # The rest, and its buttons, show only once its title row is clicked.
                 self.assertIn(f"FindingBody {{ about: {item}.modelData }}", rest)
-                self.assertIn("AgentButton { about: ", rest)
-                self.assertNotIn("Selectable", delegate.split(f"visible: root.isOpen({item}.modelData)", 1)[0])
-        title = widget.split("component FindingTitle: Item {", 1)[1].split("\n  }\n", 1)[0]
-        self.assertIn("onClicked: root.toggleFinding(findingTitle.about)", title)
+                self.assertIn(f"AgentButton {{ about: {item}.modelData }}", rest)
+                self.assertNotIn("Selectable", title)
+        title = widget.split("component FindingTitle: OpenRow {", 1)[1].split("\n  }\n", 1)[0]
+        self.assertIn("opened: root.isOpen(findingTitle.about)", title)
+        self.assertIn("onActivated: root.toggleFinding(findingTitle.about)", title)
         # They close again with the panel, and on another report.
         closing = widget.split("onOpenedChanged: if (!opened) {", 1)[1].split("\n  }\n", 1)[0]
         self.assertIn("openFindings = {}", closing)
@@ -783,16 +785,138 @@ class Findings(unittest.TestCase):
                 self.assertNotIn("Open", heading_block)
                 self.assertNotIn("Open ?", section)
                 self.assertNotIn("notesOpen", section)
+                self.assertNotIn("noteGroups", section)
+                self.assertNotIn("OpenRow {", section)
         self.assertIn("model: root.view.attention\n", widget)
         self.assertIn("model: root.view.unknowns\n", widget)
         self.assertIn("model: root.view.limits\n", widget)
 
+    def test_every_title_shows_under_needs_attention_and_couldnt_check(self):
+        # Every finding of those levels is in its list, whatever groups the notes have.
+        text, code = golden("report")
+        doc = json.loads(text)
+        found = views(run(text, code), run(*grouped(doc, [None, "Fictional"])))
+        for v in found:
+            self.assertEqual([f["title"] for f in v["attention"]],
+                             [f["title"] for f in doc["findings"] if f["level"] == "attention" and not f["reviewed"]])
+            self.assertEqual([f["title"] for f in v["unknowns"]],
+                             [f["title"] for f in doc["findings"] if f["level"] == "unknown"])
+
     def test_the_notes_are_worth_knowing(self):
         widget = (PLUGIN / "Widget.qml").read_text()
-        self.assertIn('text: "Worth knowing: " + State.plural(root.view.notes.length, "note", "notes")', widget)
-        self.assertIn("model: root.notesOpen ? root.view.notes : []", widget)
+        row = widget.split("// ---------- Worth knowing", 1)[1].split("Repeater {", 1)[0]
+        self.assertIn("OpenRow {", row)
+        self.assertIn('text: "Worth knowing: " + State.plural(root.view.notes.length, "note", "notes")', row)
+        self.assertIn("opened: root.notesOpen", row)
+        self.assertIn("onActivated: root.notesOpen = !root.notesOpen", row)
+        # Opening it lists the groups, each closed until its row is clicked.
+        self.assertIn("readonly property var noteGroups: State.noteGroups(root.view.notes)", widget)
+        groups = widget.split("model: root.notesOpen ? root.noteGroups : []\n", 1)[1].split("FindingTitle {", 1)[0]
+        self.assertIn("text: group.modelData.line", groups)
+        self.assertIn("opened: root.isOpen(group.modelData)", groups)
+        self.assertIn("onActivated: root.toggleFinding(group.modelData)", groups)
+        self.assertIn("model: root.isOpen(group.modelData) ? group.modelData.notes : []", groups)
+        # Notes are listed nowhere else.
+        self.assertEqual([m for m in re.findall(r"model: .*", widget) if "notes" in m],
+                         ["model: root.notesOpen ? root.noteGroups : []",
+                          "model: root.isOpen(group.modelData) ? group.modelData.notes : []"])
         # As the text report calls them.
         self.assertIn("print(f\"\\n{painted('Worth knowing', BOLD)}\")", (ROOT / "bin/omaupdateimpact").read_text())
+
+    def test_every_row_that_opens_has_its_arrow_on_the_right(self):
+        widget = (PLUGIN / "Widget.qml").read_text()
+        row = widget.split("component OpenRow: Item {", 1)[1].split("\n  }\n", 1)[0]
+        arrow = row.split("id: arrow", 1)[1].split("\n    }\n", 1)[0]
+        # On the right, in the text colour whatever the title's colour, a size larger
+        # than the title, and it turns when the row opens.
+        self.assertIn("x: parent.width - width - openRow.pad", arrow)
+        self.assertIn("color: root.foreground", arrow)
+        self.assertIn("font.pixelSize: root.fonts.title", arrow)
+        self.assertIn("font.pixelSize: root.fonts.body", row.split("id: rowText", 1)[1].split("\n    }\n", 1)[0])
+        self.assertIn("rotation: openRow.opened ? 90 : 0", arrow)
+        self.assertIn("width: arrow.x - x", row.split("id: rowText", 1)[1])
+        # A click anywhere on the row opens it, and it lights up under the pointer.
+        mouse = row.split("id: rowMouse", 1)[1].split("\n    }\n", 1)[0]
+        for line in ("anchors.fill: parent", "hoverEnabled: true", "onClicked: openRow.activated()"):
+            self.assertIn(line, mouse)
+        self.assertIn("color: rowMouse.containsMouse ? Style.hoverFillFor(root.foreground, Color.accent)", row)
+        # Every row that opens is one: a finding, a group and Worth knowing. The old
+        # arrows on the left, and the button Worth knowing was, are gone.
+        self.assertEqual(widget.count("FindingTitle {"), 4)
+        self.assertIn("component FindingTitle: OpenRow {", widget)
+        self.assertEqual(len(re.findall(r"^ +OpenRow \{$", widget, re.MULTILINE)), 2)
+        self.assertNotIn("󰅀", widget)
+        self.assertEqual(widget.count("󰅂"), 1)
+        self.assertNotIn("Hide the notes", widget)
+
+
+def grouped(doc, groups):
+    """The golden report with one note per group given, after its own: None for a note
+    with no group. Returns the document as the command would print it, and its exit code."""
+    doc = copy.deepcopy(doc)
+    base = next(f for f in doc["findings"] if f["level"] == "note")
+    for i, name in enumerate(groups):
+        note = dict(copy.deepcopy(base), id=f"f{i:06x}", title=f"Fictional note {i}")
+        note.pop("group", None)
+        if name is not None:
+            note["group"] = name
+        doc["findings"].append(note)
+    return json.dumps(doc, indent=2), impact.RESULTS[doc["result"]]
+
+
+@unittest.skipUnless(NODE, "node isn't installed")
+class NoteGroups(unittest.TestCase):
+    """Worth knowing lists its notes by group, in the document's order, with "Other" last."""
+
+    def groups(self, *texts):
+        found = views(*(run(*t) for t in texts))
+        return views(*(call("noteGroups", v["notes"]) for v in found))
+
+    def test_the_groups_of_a_report(self):
+        [groups] = self.groups(golden("report"))
+        self.assertEqual([(g["title"], g["count"], g["line"]) for g in groups],
+                         [("New default shortcuts", 1, "New default shortcuts (1)"),
+                          ("Files a migration may edit", 1, "Files a migration may edit (1)")])
+        self.assertEqual([[n["id"] for n in g["notes"]] for g in groups], [["61e5cbb"], ["16c9791"]])
+
+    def test_in_the_documents_order_with_counts(self):
+        doc = json.loads(golden("report")[0])
+        [groups] = self.groups(grouped(doc, ["Shortcuts that move", "New default shortcuts", "Shortcuts that move"]))
+        self.assertEqual([(g["title"], g["count"]) for g in groups],
+                         [("New default shortcuts", 2), ("Files a migration may edit", 1), ("Shortcuts that move", 2)])
+        # Each group's notes keep the document's order too.
+        self.assertEqual([n["title"] for n in groups[2]["notes"]], ["Fictional note 0", "Fictional note 2"])
+        # Every note is in exactly one group.
+        self.assertEqual(sum(g["count"] for g in groups), 5)
+
+    def test_a_note_without_a_group_goes_under_other_last(self):
+        doc = json.loads(golden("report")[0])
+        # Ungrouped first, a blank group, and one the command calls Other itself.
+        doc["findings"].insert(0, dict(copy.deepcopy(next(f for f in doc["findings"] if f["level"] == "note")),
+                                       id="f0first", title="Fictional first note", group=None))
+        [groups] = self.groups(grouped(doc, [None, "  ", "Other", "Shortcuts that change"]))
+        self.assertEqual([(g["title"], g["count"]) for g in groups],
+                         [("New default shortcuts", 1), ("Files a migration may edit", 1),
+                          ("Shortcuts that change", 1), ("Other", 4)])
+        self.assertEqual([n["title"] for n in groups[-1]["notes"]],
+                         ["Fictional first note", "Fictional note 0", "Fictional note 1", "Fictional note 2"])
+        self.assertEqual(sum(g["count"] for g in groups), 7)
+
+    def test_no_notes_no_groups(self):
+        self.assertEqual(self.groups(golden("clear"), golden("incomplete")), [[], []])
+        self.assertEqual(views(call("noteGroups", None)), [[]])
+
+    def test_a_group_opens_and_closes_on_its_own(self):
+        doc = json.loads(golden("report")[0])
+        # A group named as a note's title doesn't open that note.
+        [groups] = self.groups(grouped(doc, ["Fictional note 1"]))
+        group = groups[-1]
+        note = group["notes"][0]
+        [opened] = views(call("toggled", {}, group))
+        self.assertEqual(views(call("isOpen", opened, group), call("isOpen", opened, note),
+                               call("isOpen", opened, dict(note, id=""))), [True, False, False])
+        [closed] = views(call("toggled", opened, group))
+        self.assertEqual(views(call("isOpen", closed, group)), [False])
 
 
 TAG = "v1.4.0-rc1"

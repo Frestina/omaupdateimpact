@@ -837,8 +837,11 @@ anything out:
 3. Couldn't check: each check that didn't run in full, and each `unknown` finding.
    Never collapsed, as in the report.
 4. Worth knowing: the notes, under the name the report gives them. A count,
-   collapsed. Opening it lists each `group` with its count, closed, in the order the
-   document gives them, and opening a group lists its notes.
+   collapsed. Opening it lists each `group` with its count, as "Shortcuts that move
+   (3)", closed, in the order the document gives them, and opening a group lists its
+   notes, a step in. A note without a `group` goes under "Other", last, so nothing
+   is hidden if the command adds a kind and forgets to name it. A group the document
+   calls "Other" is the same one.
 5. Reviewed: each finding reviewed for this release, with "Undo".
 
 Each finding shows its title, and starts closed. A click anywhere on its title row
