@@ -77,4 +77,5 @@ when.
 | 031 | [Record the demo video](031-demo-video.md) | 023 | done |
 | 032 | [A newer release's report in the panel](032-chosen-release-in-panel.md) | 030 | done |
 | 033 | [Panel polish after the owner's first use](033-panel-polish.md) | 032 | done |
-| 034 | [Undo a review, list what a note lists, and ask what replaces it](034-undo-items-and-replacements.md) | 033 | todo |
+| 034 | [Undo a review, short notes, and ask what replaces it](034-undo-items-and-replacements.md) | 033 | todo |
+| 035 | [Notes in groups, and arrows that show](035-panel-groups-and-arrows.md) | 034 | todo |

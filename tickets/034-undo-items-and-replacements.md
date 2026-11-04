@@ -1,28 +1,30 @@
 ---
 id: "034"
-title: Undo a review, list what a note lists, and ask what replaces it
+title: Undo a review, short notes, and ask what replaces it
 milestone: M4 Plugin
 depends_on: ["033"]
 ---
 
-# 034 Undo a review, list what a note lists, and ask what replaces it
+# 034 Undo a review, short notes, and ask what replaces it
 
 ## Goal
 
-Three changes the owner asked for after using the panel, each needing the command as
+Changes the owner asked for after using the panel, each needing the command as
 well as the plugin:
 
 - Marking a finding reviewed takes one click, and a Reviewed section at the bottom
   undoes it.
 - A note that lists many things, such as the new default shortcuts, shows them one
   per line, not as one paragraph.
+- Every note reads as one short line, and says what kind it is, so the panel can
+  group them (035). The owner found 27 notes of whole sentences hard to read.
 - "Ask agent" finds out what replaces a removed package, command or shortcut, and
   what the user would keep or lose. Asking about Tensaku and Omasnap showed the need.
 
 ## Spec
 
 - [Reviewed findings](../SPEC.md#reviewed-findings): `--unack`
-- [JSON](../SPEC.md#json): `target.path` and `items`
+- [JSON](../SPEC.md#json): `target.path`, `items`, `group` and short note titles
 - [Plugin](../SPEC.md#plugin): The panel
 - [What must never happen](../SPEC.md#what-must-never-happen), rule 3
 - [Files](../SPEC.md#files)
@@ -47,6 +49,14 @@ The spec already records each decision below.
   per line under the title. The panel shows them one per line when the finding is
   open. `docs/json.md` and the golden files change with it. It is an addition, so
   `schemaVersion` stays 1.
+- **Short note titles and `group`**, as the spec's JSON section says. Every note
+  gets a `group` heading for its kind, named by the command. A note's title becomes
+  one short line, and the rest moves to its detail: a move is
+  `Calculator: SUPER + CTRL + Q -> SUPER + SHIFT + Q`, and a changed default is
+  `SUPER + ALT + SPACE: "Apps menu" -> "Apps"`. Go through every note the command
+  makes, in each check, and give each a group and a short title. `--all` prints the
+  notes under their group headings. The README's report and `docs/demo.svg` change
+  with it, through `python3 -m tests.demo`.
 - **`target.path`**: the unpacked release the command read, in every document that
   compares.
 - **The prompt's new step**, after "explain first": when a finding is about something
@@ -64,6 +74,8 @@ The spec already records each decision below.
       with fixture JSON.
 - [ ] Both shortcut notes have `items` and a short title, in `--json`, the text
       report and the panel. The golden files and `docs/json.md` match.
+- [ ] Every note has a `group` and a one-line title, with the rest in its detail,
+      in `--json` and under `--all`. Tested for each kind of note.
 - [ ] `target.path` is in the document, and the prompt names it in its new step.
       Tested.
 - [ ] The plugin still passes `omarchy plugin validate` and CI's QML lint.

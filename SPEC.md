@@ -596,6 +596,18 @@ shortcut, has `items`, one string per thing, such as
 "18 new default shortcuts." The text report prints the items one per line under the
 title. Other findings have no `items`.
 
+Every note has `group`, a short heading for its kind, such as "Shortcuts that move",
+"Shortcuts that change", "New default shortcuts" or "Files a migration may edit".
+The command names the groups, so the plugin needs no rules to sort notes. Other
+levels have no `group`. A note's title is one short line, and the rest is its
+detail. A move's title is the action and its two keys, as
+`Calculator: SUPER + CTRL + Q -> SUPER + SHIFT + Q`, and what else changed on those
+keys is its detail, such as `Replaces "Toggle nightlight". SUPER + CTRL + W is now
+"Background switcher".` A changed default's title is
+`SUPER + ALT + SPACE: "Apps menu" -> "Apps"`. Notes can't be reviewed, so a new
+title changes no review. With `--all`, the text report lists the notes under their
+group headings, each title on one line and its detail under it.
+
 The plugin holds no rules, so the document carries what the report works out. What
 was checked is data, not the "Checked" line's text. Each check says whether it ran,
 ran in part or didn't run, as the closing line does. Each finding has every field,
@@ -821,11 +833,15 @@ anything out:
 3. Couldn't check: each check that didn't run in full, and each `unknown` finding.
    Never collapsed, as in the report.
 4. Worth knowing: the notes, under the name the report gives them. A count,
-   collapsed. Opening it lists them.
+   collapsed. Opening it lists each `group` with its count, closed, in the order the
+   document gives them, and opening a group lists its notes.
 5. Reviewed: each finding reviewed for this release, with "Undo".
 
-Each finding shows its title, and starts closed. A click on the title opens it: the
-detail, reason and reference, fix, evidence, `items` one per line, id and buttons.
+Each finding shows its title, and starts closed. A click anywhere on its title row
+opens it: the detail, reason and reference, fix, evidence, `items` one per line, id
+and buttons. The row lights up under the pointer, and its arrow sits on the right,
+in the text colour, and turns when it opens. A group and the Worth knowing section
+open the same way.
 Its text can be selected, so a fix can be copied. Findings close again when the panel
 closes or shows another report.
 
