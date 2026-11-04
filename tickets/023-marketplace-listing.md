@@ -49,6 +49,14 @@ List the plugin where Omarchy users look for tools.
   are development notes that nothing loads. The demo preflight wants a bash harness
   and a `demo/fixtures` folder: `demo/run` is Python, cleans up in `finally`,
   replaces no config, and reads the golden documents.
+- Review follow-ups: `demo/run`'s docstring and the spec's Tests bullet still say
+  the demo reads none of your plugins, but it now copies Frestina's from your
+  plugins folder.
+- Review follow-ups: the owner chose to untrack `AGENTS.md`, `CLAUDE.md` and
+  `.claude/`, as the spec's Plugin section now says. `git rm --cached` them, keep
+  the files on disk, and add them to `.gitignore`. A test fails when `git ls-files`
+  lists any of them, and skips outside a git checkout. The issue drops its
+  agent-payload bullet, and names the new candidate SHA.
 - A new `preview.png`: the icon in the top bar, just left of the owner's fleetlog
   icon, not in a bar at the bottom. Every plugin on the owner's bar is in a public
   repository, so they may show. Their data must still be fictional.
@@ -64,6 +72,10 @@ List the plugin where Omarchy users look for tools.
 - [ ] The README's clone names the release tag.
 - [ ] The scan of the committed tree has no `FINDING` but
       `remote-git-execution-unpinned`, and the issue answers it and each capability.
+- [ ] `demo/run`'s docstring and the spec say it copies the neighbouring plugins
+      from your plugins folder, as committed, and reads nothing else of yours.
+- [ ] Git tracks no `AGENTS.md`, `CLAUDE.md` or `.claude/`, they are still on disk,
+      and a test holds it.
 - [ ] `preview.png` shows the icon in the top bar, left of the fleetlog icon, and
       no real data.
 - [ ] The plugin is listed, and installs with `omarchy plugin add` on a clean

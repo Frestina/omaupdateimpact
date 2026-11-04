@@ -100,6 +100,16 @@ class Manifest(unittest.TestCase):
             links += [Path(folder, name) for name in folders + files if Path(folder, name).is_symlink()]
         self.assertEqual(links, [])
 
+    def test_no_agent_files_in_the_repository(self):
+        # The plugin is the whole clone, and the marketplace turns down agent instructions.
+        if not shutil.which("git") or not (ROOT / ".git").exists():
+            self.skipTest("not a git checkout")
+        tracked = subprocess.run(
+            ["git", "-C", str(ROOT), "ls-files", "-z"], capture_output=True, text=True, timeout=60, check=True
+        ).stdout.split("\0")
+        agent = [path for path in tracked if path in ("AGENTS.md", "CLAUDE.md") or path.startswith(".claude/")]
+        self.assertEqual(agent, [])
+
     @unittest.skipUnless(VALIDATE, "omarchy plugin validate isn't installed")
     def test_omarchy_plugin_validate(self):
         result = subprocess.run([VALIDATE, str(ROOT)], capture_output=True, text=True, timeout=60, check=False)

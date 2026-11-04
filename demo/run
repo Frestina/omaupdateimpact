@@ -5,17 +5,21 @@
     demo/run --theme catppuccin-latte --theme gruvbox --out /tmp/themes
 
 Nothing of yours is touched or shown. A second shell starts with HOME set to a new
-folder in XDG_RUNTIME_DIR, so it reads none of your config, plugins or files. That
-home holds a copy of the plugin whose bin/omaupdateimpact only prints one of the
-golden documents in tests/fixtures/json, which are the command's own output on small
-fictional trees. Its bar sits at the top, under yours. Its panels place themselves
-below one bar, so they cover it: the image is its bar, taken before the panel
-opens, above the panel, as one bar and its panel look. Left of the panel the demo bar
-shows through, so the image starts at the panel's left edge. The icon sits just left of fleetlog's, between Frestina's other plugins, as
-on a real bar. Those are copied from the commits in your plugins folder, and skipped
-when they aren't there. They read the fictional home, so they show no data of yours.
-Omarchy's own services are off but for the wallpaper, which shows the demo theme's
-own over yours. So your bar, notifications and lock screen carry on.
+folder in XDG_RUNTIME_DIR. It reads only the committed files of Frestina's other
+plugins from your plugins folder, with git archive, and nothing else of yours: none
+of your config, other plugins or files. Those plugins are left out when they aren't
+there. They read the fictional home, so they show no data of yours. The home also
+holds a copy of this plugin whose bin/omaupdateimpact only prints one of the golden
+documents in tests/fixtures/json, which are the command's own output on small
+fictional trees.
+
+Its bar sits at the top, under yours, with the icon just left of fleetlog's, between
+Frestina's other plugins, as on a real bar. Its panels place themselves below one
+bar, so they cover it: the image is its bar, taken before the panel opens, above the
+panel, as one bar and its panel look. Left of the panel the demo bar shows through,
+so the image starts at the panel's left edge. Omarchy's own services are off but for
+the wallpaper, which shows the demo theme's own over yours. So your bar,
+notifications and lock screen carry on.
 
 It moves to an empty workspace while it captures, and goes back after. On any exit,
 the second shell is stopped, your workspace comes back, and the folder is deleted.

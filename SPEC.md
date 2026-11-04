@@ -709,6 +709,10 @@ disagree. It was checked against the shell in v4.0.6 and v4.5.0-rc2.
   every id in the QML to `PLUGIN_ID`.
 - **No links in the repository.** `omarchy plugin validate` refuses a plugin that
   holds one. There are none now, and a fixture that needs one makes it in the test.
+- **No agent files in the repository.** The plugin is the whole clone, and the
+  marketplace has turned plugins down for carrying instructions to coding agents.
+  `AGENTS.md`, `CLAUDE.md` and `.claude/` stay on the developer's disk, ignored by
+  git, and a test fails if git tracks one.
 
 ### Kinds
 
@@ -848,17 +852,19 @@ anything. Marking a finding reviewed stays in the terminal, with `--ack`, for no
   Quickshell's own modules from Arch's `quickshell` package. `tests/lint-plugin`
   does the same with any Omarchy tree, such as one in the cache.
 - The demo and preview use fixture JSON from a fictional run, never a real one.
-  `demo/run` starts a second shell with `HOME` set to a new folder, so it reads
-  none of the user's files. Its copy of the plugin has a `bin/omaupdateimpact` that
-  prints a golden document. Omarchy's own services are off in it but for the
+  `demo/run` starts a second shell with `HOME` set to a new folder. It reads only
+  the committed files of Frestina's other plugins from the user's plugins folder,
+  and nothing else of the user's. Its copy of the plugin has a `bin/omaupdateimpact`
+  that prints a golden document. Omarchy's own services are off in it but for the
   wallpaper, which shows the demo theme's own. It writes `preview.png`, or one image
   per theme with `--out`, and stops that shell, whatever happens.
 - The preview shows the icon in a bar at the top, just left of fleetlog's, as on the
   owner's bar. Frestina's other plugins are public, so they may show. `demo/run`
-  copies them from the commits in the user's plugins folder, and they read the
-  fictional home, so they show no data. The demo bar sits under the user's, and its
-  panel places itself below one bar, so it covers the demo bar. The image is that
-  bar, taken before the panel opens, above the panel, cut at the panel's left edge.
+  copies them with `git archive HEAD` from the user's plugins folder, and leaves out
+  any that isn't there. They read the fictional home, so they show no data. The
+  demo bar sits under the user's, and its panel places itself below one bar, so it
+  covers the demo bar. The image is that bar, taken before the panel opens, above
+  the panel, cut at the panel's left edge.
 
 ## Docs
 
