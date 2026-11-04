@@ -9,7 +9,7 @@ depends_on: ["001"]
 
 ## Goal
 
-Make it one step to install and one step to remove, with no `curl | bash` required.
+Make it one step to install and one step to remove, with no script downloaded and run.
 
 ## Spec
 

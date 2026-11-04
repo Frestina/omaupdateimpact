@@ -215,9 +215,3 @@ Paths already ruled out are not here; they are under
 - **The plugin reads all of stdout.** The command is the plugin's own, so its output
   is trusted and isn't cut while it is read, only the stderr line it shows. Marketplace
   reviewers ask for limits while receiving. Revisit in 023 if review asks.
-- **Advisory findings for the listing (023).** `validate_plugin.py --security` flags
-  the README's clone-and-run install, a ticket's words about `curl | bash`, and
-  `AGENTS.md`, `CLAUDE.md` and `.claude/` in the installed tree. The demo preflight
-  wants a bash harness and a `demo/fixtures` folder: `demo/run` is Python, cleans up
-  in `finally`, replaces no config, and reads the golden documents. Settle each with
-  the release and publish skills.

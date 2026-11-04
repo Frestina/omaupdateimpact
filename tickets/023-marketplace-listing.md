@@ -35,6 +35,20 @@ List the plugin where Omarchy users look for tools.
 - Say where a plugin-only user finds the command, for `--ack`: it is
   `bin/omaupdateimpact` in the plugin's folder, and `./install.sh` there links it
   onto `PATH`. Found by the audit of 2026-11-03.
+- README, Install: the clone names the release tag, as
+  `git clone --branch v<version> ...`, so a terminal install gets the version that
+  was reviewed. The scanner wants `git checkout --detach <full sha>`, which a commit
+  can't hold for itself, so `remote-git-execution-unpinned` stays. The issue says
+  why: `install.sh` makes one link and runs nothing else from the network.
+- Settle the advisory scan with the release and publish skills, on the committed
+  tree (`git archive`, or a fresh clone), since the working tree holds files git
+  ignores. The ticket wording that matched `curl-pipe-shell` is gone. Answer the rest
+  in the issue, honestly, and never by hiding a real command: the capability notes on
+  `install.sh`, the plugin's `Process`, `sudo` in Omarchy's release files under
+  `tests/fixtures`, and `AGENTS.md`, `CLAUDE.md` and `.claude/` in the tree, which
+  are development notes that nothing loads. The demo preflight wants a bash harness
+  and a `demo/fixtures` folder: `demo/run` is Python, cleans up in `finally`,
+  replaces no config, and reads the golden documents.
 - A new `preview.png`: the icon in the top bar, just left of the owner's fleetlog
   icon, not in a bar at the bottom. Every plugin on the owner's bar is in a public
   repository, so they may show. Their data must still be fictional.
@@ -47,6 +61,9 @@ List the plugin where Omarchy users look for tools.
 - [ ] `packaging/aur` is gone, and nothing in the spec, README or tests names it.
 - [ ] The README's Install section puts the plugin first, and says the plugin and
       the terminal install each work on their own.
+- [ ] The README's clone names the release tag.
+- [ ] The scan of the committed tree has no `FINDING` but
+      `remote-git-execution-unpinned`, and the issue answers it and each capability.
 - [ ] `preview.png` shows the icon in the top bar, left of the fleetlog icon, and
       no real data.
 - [ ] The plugin is listed, and installs with `omarchy plugin add` on a clean
