@@ -24,9 +24,12 @@ def wants_json(argv):
     return False
 
 
-def failure(reason):
-    """The --json document for a run that ends in exit 2."""
-    return {"schemaVersion": SCHEMA_VERSION, "result": "failed", "reason": reason}
+def failure(reason, unreachable=False):
+    """The --json document for a run that ends in exit 2.
+
+    unreachable says no answer came from GitHub at all, so the plugin can wait for the network.
+    """
+    return {"schemaVersion": SCHEMA_VERSION, "result": "failed", "reason": reason, "unreachable": unreachable}
 
 
 # Before the other imports, and this file must still parse on an old Python, or it
@@ -44,6 +47,7 @@ if sys.version_info < (3, 11, 4):
 import argparse
 import contextlib
 import dataclasses
+import errno
 import fcntl
 import fnmatch
 import glob
@@ -55,6 +59,7 @@ import json
 import os
 import re
 import shutil
+import socket
 import subprocess
 import tarfile
 import tempfile
@@ -268,6 +273,10 @@ class RateLimited(OSError):
 
 class TokenRejected(OSError):
     """GitHub turned down the GITHUB_TOKEN it was given."""
+
+
+class Unreachable(OSError):
+    """No answer came from GitHub at all: a name that didn't resolve, a connection refused or cut, or a timeout."""
 
 
 class NoRelease(Exception):
@@ -2287,13 +2296,39 @@ def github(url, timeout, token=None, advice="Try again later."):
             raise
 
 
+# What a socket says when there is no route to anyone, as before the network is up.
+NO_ROUTE = {errno.ENETUNREACH, errno.ENETDOWN, errno.EHOSTUNREACH, errno.EHOSTDOWN}
+
+
+def no_answer(error):
+    """Whether an error means GitHub never answered. Any answer it gave, a rate limit included, isn't that."""
+    if isinstance(error, urllib.error.HTTPError):
+        return False
+    if isinstance(error, urllib.error.URLError) and isinstance(error.reason, BaseException):
+        error = error.reason
+    return isinstance(error, (socket.gaierror, ConnectionError, TimeoutError)) or getattr(error, "errno", None) in NO_ROUTE
+
+
+@contextlib.contextmanager
+def heard_from_github():
+    """A request to GitHub and the reading of its answer. Hearing nothing at all raises Unreachable, with the same words."""
+    try:
+        yield
+    except Unreachable:
+        raise
+    except OSError as error:
+        if no_answer(error):
+            raise Unreachable(str(error)) from error
+        raise
+
+
 def api(path):
     token = os.environ.get("GITHUB_TOKEN", "").strip()
     if token and not TOKEN.fullmatch(token):
         # http.client's own complaint would quote the value.
         raise ValueError("GITHUB_TOKEN holds characters a request header can't carry")
     advice = "Try again later." if token else "Try again later, or set GITHUB_TOKEN."
-    with github(f"https://api.github.com/repos/{REPO}/{path}", 30, token, advice) as response:
+    with heard_from_github(), github(f"https://api.github.com/repos/{REPO}/{path}", 30, token, advice) as response:
         return json.load(response)
 
 
@@ -2425,7 +2460,7 @@ def download(tag, cache, root):
     url = f"https://github.com/{REPO}/archive/refs/tags/{tag}.tar.gz"
     with tempfile.TemporaryDirectory(dir=cache) as scratch:
         archive = Path(scratch) / "release.tar.gz"
-        with github(url, 120) as response, archive.open("wb") as out:
+        with heard_from_github(), github(url, 120) as response, archive.open("wb") as out:
             save(response, out, tag)
         # tarfile stops at the end-of-archive marker and never reaches gzip's checksum.
         with gzip.open(archive) as stream:
@@ -2704,7 +2739,7 @@ def fail(what, error, debug):
         traceback.print_exception(error)
     reason = f"{what}: {' '.join(str(error).split())}"
     print(reason, file=sys.stderr)
-    return failure(reason)
+    return failure(reason, isinstance(error, Unreachable))
 
 
 def run(options):

@@ -1,0 +1,6 @@
+{
+  "schemaVersion": 1,
+  "result": "failed",
+  "reason": "Couldn't download the release: <urlopen error [Errno -3] Temporary failure in name resolution>",
+  "unreachable": true
+}

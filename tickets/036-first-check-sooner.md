@@ -43,13 +43,13 @@ The spec already records each decision below.
 
 ## Done when
 
-- [ ] `unreachable` is `true` for a failure with no answer from GitHub, and `false`
+- [x] `unreachable` is `true` for a failure with no answer from GitHub, and `false`
       for a rate limit, a rejected token and a failure that isn't a download.
       Tested.
-- [ ] The first check runs 5 seconds after loading. Tested.
-- [ ] An unreachable first check keeps "Not checked" with "Waiting for the
+- [x] The first check runs 5 seconds after loading. Tested.
+- [x] An unreachable first check keeps "Not checked" with "Waiting for the
       network…", tries again each minute up to 5 times, then shows "couldn't check".
       Tested with fixture JSON.
-- [ ] "Check again" and later checks show an unreachable failure at once. Tested.
-- [ ] The plugin still passes `omarchy plugin validate` and CI's QML lint.
-- [ ] `tests/run` passes.
+- [x] "Check again" and later checks show an unreachable failure at once. Tested.
+- [x] The plugin still passes `omarchy plugin validate` and CI's QML lint.
+- [x] `tests/run` passes.

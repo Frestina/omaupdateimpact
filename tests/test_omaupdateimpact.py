@@ -9,6 +9,7 @@ import json
 import os
 import re
 import shutil
+import socket
 import stat
 import tarfile
 import tempfile
@@ -19,7 +20,7 @@ from email.message import Message
 from http.client import IncompleteRead
 from pathlib import Path
 from unittest import mock
-from urllib.error import HTTPError
+from urllib.error import HTTPError, URLError
 
 path = Path(__file__).parent.parent / "bin/omaupdateimpact"
 loader = importlib.machinery.SourceFileLoader("impact", str(path))
@@ -2328,6 +2329,17 @@ class Terminal(io.StringIO):
         return True
 
 
+class Breaks(io.BytesIO):
+    """An answer that breaks off with error as it is read."""
+
+    def __init__(self, error):
+        super().__init__()
+        self.error = error
+
+    def read(self, *args):
+        raise self.error
+
+
 def refused(code, **headers):
     """An HTTP error from GitHub, as urllib raises it."""
     message = Message()
@@ -2673,7 +2685,9 @@ class Json(ProgramCase):
         with mock.patch.object(impact, "compare_commands", side_effect=RuntimeError("broke\nbadly")):
             code, document, err = self.document()
         self.assertEqual(code, 2)
-        self.assertEqual(document, {"schemaVersion": 1, "result": "failed", "reason": "Unexpected RuntimeError: broke badly"})
+        self.assertEqual(document, {
+            "schemaVersion": 1, "result": "failed", "reason": "Unexpected RuntimeError: broke badly", "unreachable": False,
+        })
         self.assertEqual(err, "Unexpected RuntimeError: broke badly\n")
 
     def test_an_unusable_tree_is_a_document(self):
@@ -2687,6 +2701,59 @@ class Json(ProgramCase):
             code, out, err = self.run_main("v1.2.3", "--json")
         self.assertEqual((code, json.loads(out)["reason"]), (2, "Couldn't download the release: no network"))
         self.assertEqual(err, "Couldn't download the release: no network\n")
+
+    def test_no_answer_from_github_is_unreachable(self):
+        # Whatever the request: the list of releases, then the archive.
+        listed = b'[{"tag_name": "v1.2.3"}]'
+        failures = {
+            "a name that doesn't resolve": (URLError(socket.gaierror(-3, "Temporary failure in name resolution")),),
+            "a connection refused": (URLError(ConnectionRefusedError(errno.ECONNREFUSED, "Connection refused")),),
+            "no route": (URLError(OSError(errno.ENETUNREACH, "Network is unreachable")),),
+            "a timeout": (URLError(TimeoutError("timed out")),),
+            "a timeout while reading": (io.BytesIO(listed), Breaks(TimeoutError("The read operation timed out"))),
+            "an archive cut off": (io.BytesIO(listed), Breaks(ConnectionResetError(errno.ECONNRESET, "Connection reset"))),
+        }
+        for name, answers in failures.items():
+            with self.subTest(name):
+                shutil.rmtree(self.cache, ignore_errors=True)
+                code, out, err = self.download(*answers, args=("--channel", "rc", "--json"))
+                document = json.loads(out)
+                self.assertEqual((code, document["result"], document["unreachable"]), (2, "failed", True))
+                # The reason reads as it did before.
+                self.assertTrue(document["reason"].startswith("Couldn't download the release: "), document["reason"])
+                self.assertEqual(err, document["reason"] + "\n")
+
+    def test_an_answer_from_github_isnt_unreachable(self):
+        failures = {
+            "a rate limit": refused(403, x_ratelimit_remaining="0"),
+            "a server error": refused(500),
+            "a bad answer": io.BytesIO(b"not json"),
+        }
+        for name, answer in failures.items():
+            with self.subTest(name):
+                code, out, _ = self.download(answer, args=("--channel", "rc", "--json"))
+                self.assertEqual((code, json.loads(out)["unreachable"]), (2, False))
+        with mock.patch.dict(os.environ, GITHUB_TOKEN="fictional"):
+            code, out, _ = self.download(refused(401), args=("--channel", "rc", "--json"))
+        self.assertEqual((code, json.loads(out)["unreachable"]), (2, False))
+        self.assertIn("rejected GITHUB_TOKEN", json.loads(out)["reason"])
+
+    def test_a_failure_that_isnt_a_download_isnt_unreachable(self):
+        # A timeout of its own, waiting for the cache, isn't one from GitHub.
+        cache = self.cache / "omaupdateimpact"
+        cache.mkdir(parents=True)
+        with mock.patch.object(impact, "CACHE_WAIT", 0.1), impact.locked(cache, impact.fcntl.LOCK_EX), \
+                mock.patch.object(impact.urllib.request, "urlopen") as urlopen:
+            code, out, _ = self.run_main("v1.2.3", "--json")
+        urlopen.assert_not_called()
+        document = json.loads(out)
+        self.assertIn("another omaupdateimpact run held the cache", document["reason"])
+        self.assertEqual((code, document["unreachable"]), (2, False))
+        shutil.rmtree(self.base / "target/shell")
+        code, out, _ = self.check("--json")
+        self.assertEqual((code, json.loads(out)["unreachable"]), (2, False))
+        with mock.patch.object(impact, "compare_commands", side_effect=TimeoutError("fictional")):
+            self.assertFalse(self.document()[1]["unreachable"])
 
     def test_progress_on_a_terminal_stays_on_stderr(self):
         self.terminal = True
@@ -2709,6 +2776,7 @@ class Json(ProgramCase):
                 self.assertEqual(code, 2)
                 self.assertEqual(json.loads(out), {
                     "schemaVersion": 1, "result": "failed", "reason": "Bad usage: unrecognized arguments: --no-such-option",
+                    "unreachable": False,
                 })
                 self.assertIn("error: unrecognized arguments: --no-such-option", err)
 

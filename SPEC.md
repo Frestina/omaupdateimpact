@@ -781,8 +781,10 @@ the download, about 200 MB, happens once, when a new release appears.
 - The first check is 5 seconds after the service loads. Right after login the
   network may not be up yet, so a first check whose document has `unreachable` keeps
   the bar on "Not checked", with "Waiting for the network…", and tries again a
-  minute later, up to 5 times. After the fifth, or on any other failure, it shows
-  "couldn't check" with the reason. Only the scheduled first check waits like this.
+  minute later, up to 5 times. A minute counts from when the last try ended, and the
+  5 come after the first, so it runs up to 6 times. After the fifth, or on any other
+  failure, it shows "couldn't check" with the reason. Only the scheduled first check
+  waits like this.
   "Check again", and every later check, shows the failure at once, as before.
 - Then one every `checkEveryHours`, the widget's one setting. It is 6 by default,
   as for Omarchy's own update icon, and goes from 1 to 168. 0 checks only when

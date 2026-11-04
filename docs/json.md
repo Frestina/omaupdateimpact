@@ -319,13 +319,20 @@ download nothing. A cache that can't be read counts as `false`.
 
 ## A failure
 
-`failed` has only `reason`: the line printed on stderr. Bad usage starts with
-`Bad usage:`.
+`failed` has `reason`, the line printed on stderr, and `unreachable`.
+
+| Key | Value |
+| --- | --- |
+| `reason` | Why it failed. Bad usage starts with `Bad usage:`. |
+| `unreachable` | `true` when no answer came from GitHub at all: a name that didn't resolve, a connection refused or cut, or a timeout. `false` for any other failure, an answer from GitHub such as a rate limit or a rejected token included. |
+
+A run with `unreachable` may work once the network is up, as just after login.
 
 ```json
 {
   "schemaVersion": 1,
   "result": "failed",
-  "reason": "Can't pick a release: the channel is edge, and only stable and rc have tagged releases. Pass a tag, such as omaupdateimpact v4.5.0."
+  "reason": "Can't pick a release: the channel is edge, and only stable and rc have tagged releases. Pass a tag, such as omaupdateimpact v4.5.0.",
+  "unreachable": false
 }
 ```

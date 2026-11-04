@@ -40,6 +40,12 @@
   turning icon and "Checking" with its tag. Its report is kept until the shell
   restarts, and its check goes on when the panel closes. Its row then says what
   was found, with "Show" and "Check again".
+- The plugin checks 5 seconds after the shell loads, not 2 minutes. If the network
+  isn't up yet, as right after login, the bar says "Waiting for the network…" and
+  tries again each minute, up to 5 times, before it says it couldn't check. "Check
+  again" shows a failure at once.
+- A failed `--json` document has `unreachable`: `true` when no answer came from
+  GitHub at all, such as a name that didn't resolve or a timeout.
 
 ## 0.2.0 (2026-11-04)
 

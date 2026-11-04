@@ -18,8 +18,12 @@ var DEFAULT_HOURS = 6
 var MOST_HOURS = 168
 // What the panel's "Check every" offers.
 var OFFERED_HOURS = [0, 1, 6, 12, 24]
-// The first check waits this long, so the network is up after login.
-var FIRST_CHECK_MS = 2 * 60 * 1000
+// The first check waits this long after the service loads.
+var FIRST_CHECK_MS = 5 * 1000
+// Right after login the network may not be up yet. A first check that got no answer
+// from GitHub tries again this much later, this many times, before it says so.
+var NETWORK_RETRY_MS = 60 * 1000
+var NETWORK_RETRIES = 5
 // "Open report" runs the command in this.
 var LAUNCHER = "omarchy-launch-floating-terminal-with-presentation"
 
@@ -44,7 +48,8 @@ function view(state, fields) {
     reviewed: [],       // findings reviewed for this release, each with "Undo"
     hasReport: false,   // a comparison, which "Ask agent" in the header can hand over
     newer: [],          // newer releases on other channels, with noUpdate
-    newerProblem: ""
+    newerProblem: "",
+    unreachable: false  // a failed run that got no answer from GitHub at all
   }
   for (var key in fields) base[key] = fields[key]
   return base
@@ -67,13 +72,22 @@ function isText(value) {
   return typeof value === "string"
 }
 
-// Before the first check. With checks only when asked, nothing is on its way.
-function notChecked(onlyWhenAsked) {
-  return view("notChecked", {
-    mark: "…",
-    tooltip: onlyWhenAsked ? "Not checked yet" : "Checking…",
-    summary: onlyWhenAsked ? "Not checked yet. Check now to compare with the next release." : "Checking…"
-  })
+// Before the first check. With checks only when asked, nothing is on its way. Between
+// first tries that got no answer from GitHub, it is waiting for the network.
+function notChecked(onlyWhenAsked, network) {
+  if (onlyWhenAsked)
+    return view("notChecked", {
+      mark: "…",
+      tooltip: "Not checked yet",
+      summary: "Not checked yet. Check now to compare with the next release."
+    })
+  if (network)
+    return view("notChecked", {
+      mark: "…",
+      tooltip: "Waiting for the network…",
+      summary: "Waiting for the network… It tries again in a minute."
+    })
+  return view("notChecked", { mark: "…", tooltip: "Checking…", summary: "Checking…" })
 }
 
 // It couldn't check. why says what happened, and stays on screen.
@@ -232,7 +246,7 @@ function fromRun(run) {
       run.stderr)
   if (doc.result === "failed") {
     var reason = isText(doc.reason) && doc.reason !== "" ? doc.reason : lastLine(run.stderr)
-    return cantCheck("", reason || "It failed, and didn't say why.")
+    return cantCheck("", reason || "It failed, and didn't say why.", { unreachable: doc.unreachable === true })
   }
   if (doc.result === "noUpdate") {
     if (!doc.target || !isText(doc.target.name)) return unreadable("It has no release.", run.stderr)
@@ -252,13 +266,15 @@ function fromRun(run) {
 // { kind: "check", "chosen", "ack" or "unack", tag: "" for the user's own release }.
 // There is one run at a time, so a check of each kind can't overlap. ackProblem and
 // undoProblem say why the last "Mark reviewed" or "Undo" wrote nothing, or are "".
+// tries counts the first check's tries again while GitHub didn't answer, and retryAt
+// is when the next is due, or null.
 //
 // Each change returns { held, args }: what the service holds next, and the arguments
 // for the bundled command, or null when nothing runs.
 
 function held(onlyWhenAsked) {
   return { own: notChecked(onlyWhenAsked), ownAt: null, ackProblem: "", undoProblem: "", reports: {}, showing: "",
-    job: null }
+    job: null, tries: 0, retryAt: null }
 }
 
 function changed(h, fields) {
@@ -282,13 +298,19 @@ function step(h, args) {
 
 // Before the first check, the bar says whether one is on its way.
 function waiting(h, onlyWhenAsked) {
-  return h.job || h.ownAt !== null ? h : changed(h, { own: notChecked(onlyWhenAsked) })
+  return h.job || h.ownAt !== null ? h : changed(h, { own: notChecked(onlyWhenAsked, isNumber(h.retryAt)) })
 }
 
-// The timer and "Check again": the user's own release only.
-function startCheck(h) {
+function isNumber(value) {
+  return typeof value === "number" && isFinite(value)
+}
+
+// The timer and "Check again": the user's own release only. scheduled says the timer
+// started it. Only the timer's first check, before any result, waits for the network.
+function startCheck(h, scheduled) {
   if (h.job) return step(h, null)
-  return step(changed(h, { job: { kind: "check", tag: "" } }), ["--json"])
+  return step(changed(h, { job: { kind: "check", tag: "", first: scheduled === true && h.ownAt === null } }),
+    ["--json"])
 }
 
 // What the panel shows while a release chosen by hand is checked: "Checking" and the
@@ -368,7 +390,13 @@ function finished(h, run, now) {
   h = changed(h, { job: null })
   if (!job) return h
   var cleared = { ackProblem: "", undoProblem: "" }
-  if (job.kind === "check") return changed(h, changed(cleared, { own: fromRun(run), ownAt: now }))
+  if (job.kind === "check") {
+    var own = fromRun(run)
+    // Right after login the network may not be up: the first check tries again soon.
+    if (job.first && own.unreachable && h.tries < NETWORK_RETRIES)
+      return changed(h, { own: notChecked(false, true), tries: h.tries + 1, retryAt: now + NETWORK_RETRY_MS })
+    return changed(h, changed(cleared, { own: own, ownAt: now, retryAt: null }))
+  }
   var undo = job.kind === "unack"
   var problem = undo ? "undoProblem" : "ackProblem"
   if (job.tag === "") {
@@ -532,10 +560,12 @@ function withSetting(settings, id, key, value) {
 }
 
 // When the next check is due, in ms since the epoch, or null when it checks only
-// when asked. The first is 2 minutes after loading, then every hours after the last
+// when asked. The first is 5 seconds after loading, then every hours after the last
 // one started. A changed setting counts from the same start, so it applies at once.
-function nextCheckAt(hours, lastStartedAt, loadedAt) {
+// retryAt, while the first check waits for the network, comes before all of that.
+function nextCheckAt(hours, lastStartedAt, loadedAt, retryAt) {
   if (hours === 0) return null
+  if (isNumber(retryAt)) return retryAt
   return lastStartedAt > 0 ? lastStartedAt + hours * 3600 * 1000 : loadedAt + FIRST_CHECK_MS
 }
 

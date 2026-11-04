@@ -59,8 +59,9 @@ Item {
   }
 
   // Check the user's own release now. A check already running isn't started twice.
-  function check() {
-    if (start(State.startCheck(held))) lastStartedAt = Date.now()
+  // scheduled is true from the timer: only its first check waits for the network.
+  function check(scheduled) {
+    if (start(State.startCheck(held, scheduled === true))) lastStartedAt = Date.now()
     schedule()
   }
 
@@ -109,13 +110,16 @@ Item {
       stdout: out.text,
       stderr: errOut.text
     }, Date.now())
+    // A first check still waiting for the network says so, unless it checks only when asked.
+    held = State.waiting(held, checkEveryHours === 0)
     schedule()
   }
 
-  // The next check: two minutes after loading, then every checkEveryHours after
-  // the last one started. "Check again" starts the wait over.
+  // The next check: 5 seconds after loading, then every checkEveryHours after the
+  // last one started. A first check that got no answer from GitHub tries again a
+  // minute later, up to 5 times. "Check again" starts the wait over.
   function schedule() {
-    var due = State.nextCheckAt(checkEveryHours, lastStartedAt, loadedAt)
+    var due = State.nextCheckAt(checkEveryHours, lastStartedAt, loadedAt, held.retryAt)
     if (due === null) {
       timer.stop()
       return
@@ -140,7 +144,7 @@ Item {
     id: timer
     repeat: false
     // A check still running when the time comes reschedules when it ends.
-    onTriggered: if (!root.running) root.check()
+    onTriggered: if (!root.running) root.check(true)
   }
 
   // Both streams end and exited fires before running drops, so finish() sees

@@ -114,7 +114,9 @@ omarchy plugin add https://github.com/Frestina/omaupdateimpact.git --enable
   its check. The panel always opens on your own result. The "Coming next" row then
   says what was found, with "Show" to open it and "Check again".
 - It runs the command in its own folder with `--json`, never one on your `PATH`, and
-  holds no rules of its own. It checks 2 minutes after login, then every 6 hours.
+  holds no rules of its own. It checks 5 seconds after the shell loads, then every 6
+  hours. Right after login, if GitHub can't be reached yet, it says "Waiting for the
+  network…" and tries again each minute, up to 5 times.
   "Check every" in the panel changes that: only when asked, 1, 6, 12 or 24 hours.
   It saves `checkEveryHours` on the widget's entry in `~/.config/omarchy/shell.json`.
   Another value set there by hand, up to 168, is kept. That setting, "Mark

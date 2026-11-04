@@ -924,7 +924,9 @@ class Version(RealCommand):
         result = self.old_python(3, 11, 3, "final", 0, args=("--js",))
         reason = "omaupdateimpact needs Python 3.11.4 or newer, and this is 3.11.3."
         self.assert_exit(result, 2)
-        self.assertEqual(json.loads(result.stdout), {"schemaVersion": 1, "result": "failed", "reason": reason})
+        self.assertEqual(json.loads(result.stdout), {
+            "schemaVersion": 1, "result": "failed", "reason": reason, "unreachable": False,
+        })
         self.assertEqual(result.stderr, reason + "\n")
 
     def test_the_oldest_python_it_takes_runs(self):

@@ -15,7 +15,9 @@ import contextlib
 import io
 import json
 import os
+import socket
 import tempfile
+import urllib.error
 from pathlib import Path
 from unittest import mock
 
@@ -78,8 +80,13 @@ def github(request, timeout):
     return io.BytesIO(json.dumps(RELEASES).encode())
 
 
-def printed(base, version, *args):
-    """What the command prints on stdout with --json."""
+def offline(request, timeout):
+    """No network yet, as just after login: GitHub's name doesn't resolve. -3 is Linux's EAI_AGAIN."""
+    raise urllib.error.URLError(socket.gaierror(-3, "Temporary failure in name resolution"))
+
+
+def printed(base, version, *args, answer=github):
+    """What the command prints on stdout with --json. answer stands in for GitHub."""
     stubs = base / "stubs"
     stubs.mkdir(exist_ok=True)
     stub(stubs, "omarchy-version", f"echo {version}")
@@ -93,7 +100,7 @@ def printed(base, version, *args):
     }
     argv = ["omaupdateimpact", "--json", "--home", str(base / "home"), *args]
     with mock.patch.dict(os.environ, environment), mock.patch("sys.argv", argv), \
-            mock.patch.object(impact.urllib.request, "urlopen", github), \
+            mock.patch.object(impact.urllib.request, "urlopen", answer), \
             contextlib.redirect_stdout(io.StringIO()) as out, contextlib.redirect_stderr(io.StringIO()):
         impact.main()
     return out.getvalue().replace(json.dumps(str(base))[1:-1], PLACE)
@@ -110,6 +117,7 @@ def documents():
             "report": printed(base, "1.2.3-1", *compare, str(release)),
             "no-update": printed(base, "1.3.0-1"),
             "failed": printed(base, "1.2.3-1", "--root", str(installed), "--channel", "edge"),
+            "unreachable": printed(base, "1.2.3-1", "--root", str(installed), answer=offline),
         }
         # Each is v1.3.0 to the command, so it is compared as the release.
         found["clear"] = printed(base, "1.2.3-1", *compare, str(write(base / "clear/v1.3.0", INSTALLED)))

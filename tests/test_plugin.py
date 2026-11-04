@@ -83,7 +83,7 @@ class Manifest(unittest.TestCase):
         self.assertIn('Qt.resolvedUrl("../bin/omaupdateimpact")', service)
         self.assertTrue((PLUGIN / "../bin/omaupdateimpact").resolve() == impact.COMMAND)
         self.assertIn("proc.command = [root.command].concat(next.args)", service)
-        self.assertIn("start(State.startCheck(held))", service)
+        self.assertIn("start(State.startCheck(held, scheduled === true))", service)
         if NODE:
             [step] = views(call("startCheck", views(call("held", False))[0]))
             self.assertEqual(step["args"], ["--json"])
@@ -133,6 +133,8 @@ class States(unittest.TestCase):
             "report": ("attention", "3", "warning", "v1.3.0: 3 things need attention"),
             "reviewed": ("attention", "2", "warning", "v1.3.0: 2 things need attention"),
             "failed": ("unknown", "?", "text", "Couldn't check\nCan't pick a release: the channel is edge"),
+            # A check that isn't the first shows it at once. See FirstCheck.
+            "unreachable": ("unknown", "?", "text", "Couldn't check\nCouldn't download the release: <urlopen error"),
             "incomplete": ("unknown", "?", "text", "Couldn't check v1.3.0\nSome checks didn't run in full: packages."),
         }
         self.assertEqual(sorted(expected), names)
@@ -289,13 +291,18 @@ class States(unittest.TestCase):
                 self.assertIn("doesn't add up", found["problem"])
 
     def test_before_the_first_check(self):
-        waiting, asked, no_service = views(
+        waiting, asked, network, asked_anyway, no_service = views(
             {"call": "notChecked", "args": [False]},
             {"call": "notChecked", "args": [True]},
+            {"call": "notChecked", "args": [False, True]},
+            {"call": "notChecked", "args": [True, True]},
             {"call": "noService", "args": []},
         )
         self.assertEqual((waiting["state"], waiting["mark"], waiting["tooltip"]), ("notChecked", "…", "Checking…"))
         self.assertEqual(asked["tooltip"], "Not checked yet")
+        self.assertEqual((network["state"], network["mark"], network["tooltip"]),
+                         ("notChecked", "…", "Waiting for the network…"))
+        self.assertEqual(asked_anyway, asked)
         self.assertEqual((no_service["state"], no_service["mark"]), ("unknown", "?"))
         self.assertIn("no service", no_service["problem"])
 
@@ -352,14 +359,14 @@ class CheckEvery(unittest.TestCase):
             call("nextCheckAt", 0, started, loaded),
             call("nextCheckAt", 0, 0, loaded),
         )
-        self.assertEqual(first, loaded + 2 * 60 * 1000)
+        self.assertEqual(first, loaded + 5 * 1000)
         self.assertEqual((six, one), (started + 6 * hour, started + hour))
         self.assertEqual((asked, before), (None, None))
 
     def test_the_service_and_the_widget_read_it_alike(self):
         service, widget = ((PLUGIN / name).read_text() for name in ("Service.qml", "Widget.qml"))
         self.assertIn("State.hoursFrom(value)", service)
-        self.assertIn("State.nextCheckAt(checkEveryHours, lastStartedAt, loadedAt)", service)
+        self.assertIn("State.nextCheckAt(checkEveryHours, lastStartedAt, loadedAt, held.retryAt)", service)
         self.assertIn('State.hoursFrom(root.setting("checkEveryHours", State.DEFAULT_HOURS))', widget)
         self.assertEqual(MANIFEST["barWidget"]["defaults"]["checkEveryHours"], views(call("hoursFrom", None))[0])
 
@@ -437,6 +444,94 @@ def report_views():
     """The views of every golden document that holds a comparison, by name."""
     names = ["clear", "incomplete", "report", "reviewed"]
     return dict(zip(names, views(*(run(*golden(name)) for name in names))))
+
+
+MINUTE = 60 * 1000
+
+
+@unittest.skipUnless(NODE, "node isn't installed")
+class FirstCheck(unittest.TestCase):
+    """The first check runs soon after loading, and waits for the network when GitHub didn't answer."""
+
+    def tries(self, *runs, scheduled=True, held=None):
+        """What the service holds after each run, the timer's first check and its tries again."""
+        h = held or views(call("held", False))[0]
+        after = []
+        for number, (text, code) in enumerate(runs):
+            now = 10_000 + number * 2 * MINUTE
+            [step] = views(call("startCheck", h, scheduled))
+            self.assertEqual(step["args"], ["--json"])
+            [h] = views(call("finished", step["held"], run(text, code)["args"][0], now))
+            after.append((h, now))
+        return after
+
+    def test_it_runs_five_seconds_after_loading(self):
+        loaded = 1_000_000
+        [first, ms] = views(call("nextCheckAt", 6, 0, loaded, None), {"get": "FIRST_CHECK_MS"})
+        self.assertEqual((first, ms), (loaded + 5000, 5000))
+        service = (PLUGIN / "Service.qml").read_text()
+        self.assertIn("Component.onCompleted: {\n    schedule()", service)
+        self.assertIn("onTriggered: if (!root.running) root.check(true)", service)
+
+    def test_an_unreachable_first_check_waits_and_tries_again_each_minute(self):
+        unreachable = golden("unreachable")
+        held = self.tries(*[unreachable] * 6)
+        for number, (h, now) in enumerate(held[:5]):
+            with self.subTest(attempt=number + 1):
+                own = h["own"]
+                self.assertEqual((own["state"], own["mark"], own["colour"]), ("notChecked", "…", "muted"))
+                self.assertEqual(own["tooltip"], "Waiting for the network…")
+                self.assertEqual((h["ownAt"], h["tries"], h["retryAt"]), (None, number + 1, now + MINUTE))
+                # The next check is due a minute after this one, whatever the setting.
+                [due] = views(call("nextCheckAt", 6, now - 1000, 0, h["retryAt"]))
+                self.assertEqual(due, now + MINUTE)
+        # After the fifth try again, it says it couldn't check, with the reason.
+        last, now = held[5]
+        reason = json.loads(unreachable[0])["reason"]
+        self.assertEqual((last["own"]["state"], last["own"]["mark"], last["own"]["problem"]), ("unknown", "?", reason))
+        self.assertEqual((last["ownAt"], last["retryAt"]), (now, None))
+        [due] = views(call("nextCheckAt", 6, now - 1000, 0, last["retryAt"]))
+        self.assertEqual(due, now - 1000 + 6 * 3600 * 1000)
+
+    def test_it_stops_waiting_once_github_answers(self):
+        [(waiting, _), (h, now)] = self.tries(golden("unreachable"), golden("clear"))
+        self.assertEqual(waiting["own"]["tooltip"], "Waiting for the network…")
+        self.assertEqual((h["own"]["state"], h["ownAt"], h["retryAt"]), ("quiet", now, None))
+
+    def test_any_other_failure_shows_at_once(self):
+        # Even between tries, a failure GitHub answered is "couldn't check".
+        limited = json.dumps(impact.failure("Couldn't download the release: GitHub's rate limit is used up."))
+        for runs in ([golden("failed")], [(limited, 2)], [golden("unreachable"), (limited, 2)], [("not json", 2)]):
+            with self.subTest(runs=runs):
+                h, now = self.tries(*runs)[-1]
+                self.assertEqual((h["own"]["state"], h["ownAt"], h["retryAt"]), ("unknown", now, None))
+
+    def test_check_again_shows_it_at_once(self):
+        # "Check again" before any result, and between first tries.
+        [(h, now)] = self.tries(golden("unreachable"), scheduled=False)
+        self.assertEqual((h["own"]["state"], h["own"]["mark"], h["ownAt"]), ("unknown", "?", now))
+        [(waiting, _)] = self.tries(golden("unreachable"))
+        [(h, now)] = self.tries(golden("unreachable"), scheduled=False, held=waiting)
+        self.assertEqual((h["own"]["state"], h["ownAt"], h["retryAt"]), ("unknown", now, None))
+        widget, service = ((PLUGIN / name).read_text() for name in ("Widget.qml", "Service.qml"))
+        self.assertIn("root.service.check()", widget)
+        self.assertIn("function check(): void { root.check() }", service)
+        self.assertEqual(service.count("root.check(true)"), 1)
+
+    def test_a_later_check_shows_it_at_once(self):
+        own = holding("clear")
+        [(h, now)] = self.tries(golden("unreachable"), held=own)
+        self.assertEqual((h["own"]["state"], h["own"]["mark"], h["ownAt"], h["retryAt"]), ("unknown", "?", now, None))
+
+    def test_only_when_asked_waits_for_nothing(self):
+        [(h, _)] = self.tries(golden("unreachable"))
+        [asked] = views(call("waiting", h, True))
+        self.assertEqual(asked["own"]["tooltip"], "Not checked yet")
+        [none, again] = views(call("nextCheckAt", 0, 10_000, 0, h["retryAt"]), call("waiting", asked, False))
+        self.assertIsNone(none)
+        self.assertEqual(again["own"]["tooltip"], "Waiting for the network…")
+        service = (PLUGIN / "Service.qml").read_text()
+        self.assertIn("held = State.waiting(held, checkEveryHours === 0)\n    schedule()", service)
 
 
 @unittest.skipUnless(NODE, "node isn't installed")
