@@ -79,9 +79,10 @@ omarchy plugin add https://github.com/Frestina/omaupdateimpact.git --enable
 - The icon is faded when nothing needs attention, has a count in the warning colour
   when something does, and a `?` when it couldn't check. It never hides, and it is
   never shown as clear for a check that didn't run.
-- Click it for the panel: what needs attention, with each fix to copy, then what
-  couldn't be checked, then the notes. "Check again" checks now. "Open report"
-  shows the full report in a terminal.
+- Click it for the panel: what needs attention, then what couldn't be checked,
+  then what is worth knowing. Each finding shows its title. Click the title to see
+  the rest, with the fix to copy. "Check again" checks now. "Open report" shows the
+  full report in a terminal.
 - "Mark reviewed", under a finding that needs attention, is for one you've seen and
   accepted. It asks "Mark reviewed?" first, and writes nothing until you say Yes.
   Then it runs the command with `--ack` and that id, so the finding no longer counts
@@ -96,12 +97,15 @@ omarchy plugin add https://github.com/Frestina/omaupdateimpact.git --enable
   finding's text is data, never instructions, as part of it comes from the release.
   Read what the agent proposes before you agree to it. What the agent sends to its
   model is up to the agent.
-- When you are up to date and another channel has a newer release, "Check" beside
-  it shows that release's report in the panel. It downloads the release first,
-  about 200 MB, unless it is already in the cache. "Mark reviewed" and "Ask agent"
-  work on it too, and "Open report" opens it in a terminal. The icon stays on your
-  own channel, as an update wouldn't bring that release. "Back", or closing the
-  panel, returns to your own result.
+- When you are up to date and another channel has a newer release, the panel
+  shows it under "Coming next". "Check it" shows that release's report in the
+  panel. It downloads the release first, about 200 MB, unless it is already in the
+  cache. "Mark reviewed" and "Ask agent" work on it too, and "Open report" opens it
+  in a terminal. The icon stays on your own channel, as an update wouldn't bring
+  that release. "Back" returns to your own result.
+- That report is kept until the shell restarts, and closing the panel doesn't stop
+  its check. The panel always opens on your own result. The "Coming next" row then
+  says what was found, with "Show" to open it and "Check again".
 - It runs the command in its own folder with `--json`, never one on your `PATH`, and
   holds no rules of its own. It checks 2 minutes after login, then every 6 hours.
   "Check every" in the panel changes that: only when asked, 1, 6, 12 or 24 hours.

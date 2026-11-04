@@ -7,7 +7,8 @@ import "State.js" as State
 // however many monitors there are, so a check runs once, not once per bar.
 //
 // It runs the bundled bin/omaupdateimpact with --json, never one on PATH, and keeps
-// the last result in memory, with a newer release's report while the panel shows one.
+// the last result in memory, with each newer release's report checked in the panel,
+// by its tag, until the shell restarts.
 // It writes nothing itself: "Mark reviewed" runs the command with --ack, which writes
 // the reviewed file. The command decides every finding; State.js only reads what it
 // printed.
@@ -23,14 +24,14 @@ Item {
   readonly property string command: decodeURIComponent(
     Qt.resolvedUrl("../bin/omaupdateimpact").toString().replace(/^file:\/\//, ""))
 
-  // The user's own result, a newer release's report chosen in the panel, and the run
-  // going. See State.js. The bar reads only the user's own.
+  // The user's own result, the newer releases' reports checked in the panel, the one
+  // it shows, and the run going. See State.js. The bar reads only the user's own.
   property var held: State.held(false)
   readonly property var view: State.bar(held).view
   readonly property bool running: held.job !== null
   // A run for the user's own release, so the bar's tooltip says "Checking…".
   readonly property bool barRunning: State.bar(held).running
-  // What the panel shows: the chosen report while there is one, else the user's own.
+  // What the panel shows: a chosen report while it shows one, else the user's own.
   readonly property var panel: State.panel(held)
   // Where --ack keeps reviews, for the panel to name.
   readonly property string reviewedFile: State.reviewedFile(Quickshell.env("XDG_CONFIG_HOME"))
@@ -68,13 +69,19 @@ Item {
     start(State.startChosen(held, tag, cached))
   }
 
+  // "Show": a kept report on a newer release, with nothing run.
+  function show(tag) {
+    held = State.show(held, tag)
+  }
+
   // Mark one finding reviewed, for the report the panel shows. The panel asks first.
   // A run already going isn't started twice.
   function ack(id) {
     start(State.startAck(held, id))
   }
 
-  // Back to the user's own result, from "Back" or a closed panel.
+  // Back to the user's own result, from "Back" or a closed panel. Chosen reports are
+  // kept, and a run on one goes on.
   function back() {
     held = State.back(held)
   }

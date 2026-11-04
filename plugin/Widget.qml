@@ -8,9 +8,10 @@ import "State.js" as State
 // The bar icon and its panel. It runs nothing itself: the service checks, and this
 // shows the service's view. Each monitor has its own copy; they share the service.
 //
-// Left click opens the panel. Its buttons check again, open the report in a
-// terminal, and show a newer release's report in the panel. The bar follows only
-// the user's own channel. "Mark reviewed" asks first, then has the service run the
+// Left click opens the panel, always on the user's own result. Its buttons check
+// again, open the report in a terminal, and check a newer release, whose report shows
+// in the panel and is kept until the shell restarts. The bar follows only the user's
+// own channel. Each finding starts closed, and its title opens it. "Mark reviewed" asks first, then has the service run the
 // command with --ack. "Ask agent" hands a finding, or the whole report, to the user's
 // own coding agent. The only other thing it changes is its own setting, how often it
 // checks, when one is chosen.
@@ -52,6 +53,9 @@ Panel {
   readonly property var barStyle: Style.bar
   readonly property real barIconSlot: root.barStyle.iconSlot
   property bool notesOpen: false
+  // The findings opened by a click on their title. Each starts closed, in every
+  // section, and they close again with the panel or another report.
+  property var openFindings: ({})
   // The id of the finding whose "Mark reviewed?" is open, or "".
   property string confirming: ""
   // "Ask agent" shows only when omarchy-agent-prompt is on PATH.
@@ -84,9 +88,23 @@ Panel {
       root.service.checkRelease(release.tag, release.cached)
   }
 
-  // Back to the user's own result. Closing the panel does the same.
+  // A kept report on a newer release, or the run on it still going. Nothing runs.
+  function showRelease(release) {
+    if (root.service && typeof root.service.show === "function") root.service.show(release.tag)
+  }
+
+  // Back to the user's own result. Closing the panel does the same. Chosen reports are
+  // kept, and a check of one goes on.
   function goBack() {
     if (root.service && typeof root.service.back === "function") root.service.back()
+  }
+
+  function isOpen(finding) {
+    return State.isOpen(root.openFindings, finding)
+  }
+
+  function toggleFinding(finding) {
+    root.openFindings = State.toggled(root.openFindings, finding)
   }
 
   // The same bundled command, in the launcher Omarchy's update row uses, on the
@@ -156,7 +174,14 @@ Panel {
   onOpenedChanged: if (!opened) {
     notesOpen = false
     confirming = ""
+    openFindings = {}
     goBack()
+  }
+  // Another report: its findings start closed too.
+  onChosenChanged: {
+    notesOpen = false
+    openFindings = {}
+    confirming = ""
   }
 
   implicitWidth: button.implicitWidth
@@ -206,6 +231,74 @@ Panel {
   component Heading: PanelSectionHeader {
     foreground: root.foreground
     fontFamily: root.fontFamily
+  }
+
+  // A finding's title, with a chevron. A click opens the rest of it, or closes it.
+  component FindingTitle: Item {
+    id: findingTitle
+    property var about: null
+    property color colour: root.foreground
+    property bool strong: false
+    readonly property bool isOpen: root.isOpen(findingTitle.about)
+    width: parent ? parent.width : implicitWidth
+    implicitHeight: Math.max(chevron.implicitHeight, titleText.implicitHeight)
+
+    Text {
+      id: chevron
+      textFormat: Text.PlainText
+      text: findingTitle.isOpen ? "󰅀" : "󰅂"
+      color: findingTitle.colour
+      font.family: root.fontFamily
+      font.pixelSize: root.fonts.body
+    }
+
+    Text {
+      id: titleText
+      x: chevron.width + Style.space(4)
+      width: parent.width - x
+      textFormat: Text.PlainText
+      text: findingTitle.about ? findingTitle.about.title : ""
+      wrapMode: Text.Wrap
+      color: findingTitle.colour
+      font.family: root.fontFamily
+      font.pixelSize: root.fonts.body
+      font.bold: findingTitle.strong
+    }
+
+    MouseArea {
+      anchors.fill: parent
+      cursorShape: Qt.PointingHandCursor
+      onClicked: root.toggleFinding(findingTitle.about)
+    }
+  }
+
+  // The rest of an open finding: its detail, why, fix, evidence and id, all selectable.
+  component FindingBody: Column {
+    id: findingBody
+    property var about: null
+    readonly property var f: findingBody.about || ({})
+    width: parent ? parent.width : implicitWidth
+    spacing: Style.space(3)
+
+    Selectable {
+      visible: !!findingBody.f.detail
+      text: findingBody.f.detail || ""
+    }
+    Selectable {
+      visible: !!findingBody.f.reason
+      text: findingBody.f.reason
+        ? "Why: " + findingBody.f.reason.text + " (" + findingBody.f.reason.reference + ")" : ""
+    }
+    Selectable {
+      visible: !!findingBody.f.fix
+      text: "Fix: " + (findingBody.f.fix || "")
+    }
+    Selectable {
+      text: (Array.isArray(findingBody.f.evidence) && findingBody.f.evidence.length > 0
+        ? findingBody.f.evidence.join("\n") + "\n" : "") + "[" + (findingBody.f.id || "") + "]"
+      color: root.muted
+      font.pixelSize: root.fonts.caption
+    }
   }
 
   // "Ask agent" for one finding, or for the whole report when finding is null.
@@ -342,11 +435,24 @@ Panel {
               visible: root.chosen !== ""
               iconText: "󰁍"
               text: "Back"
-              tooltipText: "Your own release's result"
+              tooltipText: "Your own release's result. This check goes on."
               foreground: root.foreground
               fontFamily: root.fontFamily
               fontSize: root.fonts.bodySmall
               onClicked: root.goBack()
+            }
+
+            // A chosen check looks as busy as one of the user's own: the same turning icon.
+            Button {
+              visible: root.chosen !== "" && root.running
+              iconText: "󰑐"
+              text: "Checking…"
+              tooltipText: "Checking " + root.chosen + ". Closing the panel doesn't stop it."
+              enabled: false
+              iconSpinning: root.running
+              foreground: root.foreground
+              fontFamily: root.fontFamily
+              fontSize: root.fonts.bodySmall
             }
 
             Button {
@@ -373,44 +479,78 @@ Panel {
             font.pixelSize: root.fonts.body
           }
 
-          // ---------- Up to date, and newer releases elsewhere ----------
+          // ---------- Up to date: what is coming next on another channel ----------
           Repeater {
-            model: root.view.newer
+            model: root.shown ? root.shown.newer : []
             delegate: Column {
               id: newer
               required property var modelData
               width: body.width
               spacing: Style.space(3)
 
+              Selectable {
+                text: newer.modelData.line
+                font.pixelSize: root.fonts.body
+                font.bold: true
+              }
+              Selectable {
+                text: newer.modelData.about
+                color: root.muted
+              }
+              // Before it is checked, whether checking downloads it; after, what it found.
+              Selectable {
+                visible: !newer.modelData.kept
+                text: newer.modelData.download
+                color: root.muted
+                font.pixelSize: root.fonts.caption
+              }
+              Selectable {
+                visible: newer.modelData.kept
+                text: newer.modelData.found
+                color: root.iconColour(newer.modelData.foundColour)
+              }
+
               Row {
-                width: parent.width
-                spacing: Style.space(8)
+                spacing: Style.space(6)
 
                 Button {
-                  id: checkNewer
-                  anchors.verticalCenter: parent.verticalCenter
+                  visible: !newer.modelData.kept
                   iconText: "󰑐"
-                  text: "Check"
+                  text: "Check it"
                   tooltipText: "The report on " + newer.modelData.tag + ", here. The bar stays on your channel."
-                  // A check of it already running shows again, and isn't started twice.
-                  enabled: !!root.service && (!root.busy || root.shown.checking === newer.modelData.tag)
+                  enabled: !!root.service && !root.busy
+                  iconSpinning: newer.modelData.running
                   foreground: root.foreground
                   fontFamily: root.fontFamily
                   fontSize: root.fonts.bodySmall
                   onClicked: root.checkRelease(newer.modelData)
                 }
 
-                Selectable {
-                  anchors.verticalCenter: parent.verticalCenter
-                  width: parent.width - checkNewer.width - parent.spacing
-                  text: newer.modelData.line
+                // Opens the kept report, or the check of it still going. Nothing runs.
+                Button {
+                  visible: newer.modelData.kept
+                  iconText: "󰈈"
+                  text: "Show"
+                  tooltipText: "The report on " + newer.modelData.tag + ", as last checked"
+                  enabled: !!root.service
+                  foreground: root.foreground
+                  fontFamily: root.fontFamily
+                  fontSize: root.fonts.bodySmall
+                  onClicked: root.showRelease(newer.modelData)
                 }
-              }
 
-              Selectable {
-                text: newer.modelData.download
-                color: root.muted
-                font.pixelSize: root.fonts.caption
+                Button {
+                  visible: newer.modelData.kept
+                  iconText: "󰑐"
+                  text: newer.modelData.running ? "Checking…" : "Check again"
+                  tooltipText: "Check " + newer.modelData.tag + " again, here"
+                  enabled: !!root.service && !root.busy
+                  iconSpinning: newer.modelData.running
+                  foreground: root.foreground
+                  fontFamily: root.fontFamily
+                  fontSize: root.fonts.bodySmall
+                  onClicked: root.checkRelease(newer.modelData)
+                }
               }
             }
           }
@@ -421,7 +561,7 @@ Panel {
             color: root.muted
           }
 
-          // ---------- Needs attention, never collapsed ----------
+          // ---------- Needs attention, never collapsed: every title shows ----------
           PanelSeparator { visible: root.view.attention.length > 0; foreground: root.foreground }
           Heading {
             visible: root.view.attention.length > 0
@@ -442,81 +582,74 @@ Panel {
               width: body.width
               spacing: Style.space(3)
 
-              Selectable {
-                text: finding.modelData.title + (finding.modelData.detail ? " " + finding.modelData.detail : "")
-                color: root.warning
-                font.pixelSize: root.fonts.body
-                font.bold: true
-              }
-              Selectable {
-                visible: !!finding.modelData.reason
-                text: finding.modelData.reason
-                  ? "Why: " + finding.modelData.reason.text + " (" + finding.modelData.reason.reference + ")" : ""
-              }
-              Selectable {
-                visible: finding.modelData.fix !== ""
-                text: "Fix: " + finding.modelData.fix
-              }
-              Selectable {
-                text: finding.modelData.evidence.join("\n") + "\n[" + finding.modelData.id + "]"
-                color: root.muted
-                font.pixelSize: root.fonts.caption
+              FindingTitle {
+                about: finding.modelData
+                colour: root.warning
+                strong: true
               }
 
-              Row {
-                visible: root.confirming !== finding.modelData.id
-                spacing: Style.space(6)
+              Column {
+                visible: root.isOpen(finding.modelData)
+                width: parent.width
+                spacing: Style.space(3)
 
-                Button {
-                  iconText: "󰄬"
-                  text: "Mark reviewed"
-                  tooltipText: "Seen it, and it's fine: it won't count for " + root.view.release + " again"
-                  enabled: !!root.service && !root.busy
-                  foreground: root.foreground
-                  fontFamily: root.fontFamily
-                  fontSize: root.fonts.bodySmall
-                  onClicked: root.confirming = finding.modelData.id
+                FindingBody { about: finding.modelData }
+
+                Row {
+                  visible: root.confirming !== finding.modelData.id
+                  spacing: Style.space(6)
+
+                  Button {
+                    iconText: "󰄬"
+                    text: "Mark reviewed"
+                    tooltipText: "Seen it, and it's fine: it won't count for " + root.view.release + " again"
+                    enabled: !!root.service && !root.busy
+                    foreground: root.foreground
+                    fontFamily: root.fontFamily
+                    fontSize: root.fonts.bodySmall
+                    onClicked: root.confirming = finding.modelData.id
+                  }
+
+                  AgentButton { about: finding.modelData }
                 }
 
-                AgentButton { about: finding.modelData }
-              }
+                // In place, and nothing is written until Yes.
+                Row {
+                  visible: root.confirming === finding.modelData.id
+                  spacing: Style.space(6)
 
-              // In place, and nothing is written until Yes.
-              Row {
-                visible: root.confirming === finding.modelData.id
-                spacing: Style.space(6)
+                  Text {
+                    anchors.verticalCenter: parent.verticalCenter
+                    textFormat: Text.PlainText
+                    text: "Mark reviewed?"
+                    color: root.foreground
+                    font.family: root.fontFamily
+                    font.pixelSize: root.fonts.bodySmall
+                  }
 
-                Text {
-                  anchors.verticalCenter: parent.verticalCenter
-                  textFormat: Text.PlainText
-                  text: "Mark reviewed?"
-                  color: root.foreground
-                  font.family: root.fontFamily
-                  font.pixelSize: root.fonts.bodySmall
-                }
+                  Button {
+                    text: "Yes"
+                    tooltipText: "Run --ack " + finding.modelData.id + " for " + root.view.release
+                    enabled: !!root.service && !root.busy
+                    foreground: root.foreground
+                    fontFamily: root.fontFamily
+                    fontSize: root.fonts.bodySmall
+                    onClicked: root.markReviewed(finding.modelData.id)
+                  }
 
-                Button {
-                  text: "Yes"
-                  tooltipText: "Run --ack " + finding.modelData.id + " for " + root.view.release
-                  enabled: !!root.service && !root.busy
-                  foreground: root.foreground
-                  fontFamily: root.fontFamily
-                  fontSize: root.fonts.bodySmall
-                  onClicked: root.markReviewed(finding.modelData.id)
-                }
-
-                Button {
-                  text: "No"
-                  foreground: root.foreground
-                  fontFamily: root.fontFamily
-                  fontSize: root.fonts.bodySmall
-                  onClicked: root.confirming = ""
+                  Button {
+                    text: "No"
+                    foreground: root.foreground
+                    fontFamily: root.fontFamily
+                    fontSize: root.fonts.bodySmall
+                    onClicked: root.confirming = ""
+                  }
                 }
               }
             }
           }
 
-          // ---------- Couldn't check, never collapsed ----------
+          // ---------- Couldn't check, never collapsed: every title shows ----------
           PanelSeparator {
             visible: root.view.limits.length + root.view.unknowns.length > 0
             foreground: root.foreground
@@ -540,26 +673,27 @@ Panel {
               id: unknown
               required property var modelData
               width: body.width
-              spacing: Style.space(2)
+              spacing: Style.space(3)
 
-              Selectable {
-                text: unknown.modelData.title + (unknown.modelData.detail ? " " + unknown.modelData.detail : "")
+              FindingTitle { about: unknown.modelData }
+
+              Column {
+                visible: root.isOpen(unknown.modelData)
+                width: parent.width
+                spacing: Style.space(3)
+
+                FindingBody { about: unknown.modelData }
+                AgentButton { about: unknown.modelData }
               }
-              Selectable {
-                text: unknown.modelData.evidence.join("\n")
-                color: root.muted
-                font.pixelSize: root.fonts.caption
-              }
-              AgentButton { about: unknown.modelData }
             }
           }
 
-          // ---------- Notes, collapsed ----------
+          // ---------- Worth knowing, the notes, collapsed ----------
           PanelSeparator { visible: root.view.notes.length > 0; foreground: root.foreground }
           Button {
             visible: root.view.notes.length > 0
             iconText: root.notesOpen ? "󰅀" : "󰅂"
-            text: State.plural(root.view.notes.length, "note", "notes")
+            text: "Worth knowing: " + State.plural(root.view.notes.length, "note", "notes")
             tooltipText: root.notesOpen ? "Hide the notes" : "Show the notes"
             foreground: root.foreground
             fontFamily: root.fontFamily
@@ -573,17 +707,18 @@ Panel {
               id: note
               required property var modelData
               width: body.width
-              spacing: Style.space(2)
+              spacing: Style.space(3)
 
-              Selectable {
-                text: note.modelData.title + (note.modelData.detail ? " " + note.modelData.detail : "")
+              FindingTitle { about: note.modelData }
+
+              Column {
+                visible: root.isOpen(note.modelData)
+                width: parent.width
+                spacing: Style.space(3)
+
+                FindingBody { about: note.modelData }
+                AgentButton { about: note.modelData }
               }
-              Selectable {
-                text: note.modelData.evidence.join("\n")
-                color: root.muted
-                font.pixelSize: root.fonts.caption
-              }
-              AgentButton { about: note.modelData }
             }
           }
 

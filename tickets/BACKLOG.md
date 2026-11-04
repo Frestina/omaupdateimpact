@@ -25,8 +25,9 @@ Paths already ruled out are not here; they are under
 - **What the update adds.** New packages, new services, download size. Waits
   because it isn't what breaks things, and Update Review covers packages.
 - **A preview with the new buttons.** `preview.png` shows the panel from before 030,
-  without "Mark reviewed" and "Ask agent". `demo/run` draws them now. Waits for the
-  next listing update, or for 031, so the image changes once.
+  without "Mark reviewed" and "Ask agent", and with every finding open, as before
+  033. `demo/run` draws the new panel now. Waits for the next listing update, or for
+  031, so the image changes once.
 
 ## Later
 

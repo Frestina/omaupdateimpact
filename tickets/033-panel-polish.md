@@ -46,14 +46,14 @@ The spec already records each decision below.
 
 ## Done when
 
-- [ ] A chosen check shows the turning icon and "Checking <tag>…" in the header.
+- [x] A chosen check shows the turning icon and "Checking <tag>…" in the header.
       Tested.
-- [ ] The row reads "Coming next", names the user's channel, and the button says
+- [x] The row reads "Coming next", names the user's channel, and the button says
       "Check it".
-- [ ] A chosen report and its check outlive a closed panel. The panel opens on the
+- [x] A chosen report and its check outlive a closed panel. The panel opens on the
       user's own result, and "Show" opens the chosen one with nothing run. Tested.
-- [ ] Every finding starts closed and opens on its title. Needs attention and
+- [x] Every finding starts closed and opens on its title. Needs attention and
       Couldn't check never collapse as sections. Tested.
-- [ ] The notes section is "Worth knowing".
-- [ ] The plugin still passes `omarchy plugin validate` and CI's QML lint.
-- [ ] `tests/run` passes.
+- [x] The notes section is "Worth knowing".
+- [x] The plugin still passes `omarchy plugin validate` and CI's QML lint.
+- [x] `tests/run` passes.

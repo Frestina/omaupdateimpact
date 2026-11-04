@@ -168,30 +168,42 @@ function report(doc) {
   return view("quiet", fields)
 }
 
-// A newer release on another channel. Checking it shows its report in the panel,
-// and downloads it first unless the command said it is in the cache.
-function newerRelease(n) {
+// A newer release on another channel, as "Coming next". Checking it shows its report
+// in the panel, and downloads it first unless the command said it is in the cache.
+// own is the user's own channel, which the line names.
+function newerRelease(n, own) {
   var cached = n.cached === true
   return {
     tag: n.tag,
     channel: n.channel,
     cached: cached,
-    line: "Newer on the " + n.channel + " channel: " + n.tag,
+    line: "Coming next: " + n.tag,
+    about: comingNextAbout(n.channel, own),
     download: cached ? "It is in the cache, so nothing downloads." : "Checking it downloads it first, about 200 MB."
   }
 }
 
+// Why an update doesn't bring it. An RC is a test release that reaches the user's
+// channel later; anything else is said plainly, with both channels named.
+function comingNextAbout(channel, own) {
+  var yours = own ? own : "your channel"
+  if (channel === "rc") return "A test release on the rc channel. Your updates won't bring it until it reaches " + yours + "."
+  return "A release on the " + channel + " channel. Your updates on " + (own ? "the " + own + " channel" : "your channel")
+    + " won't bring it."
+}
+
 function upToDate(doc) {
+  var channel = isText(doc.channel) ? doc.channel : ""
   var newer = Array.isArray(doc.newer) ? doc.newer.filter(function(n) {
     return n && isText(n.tag) && isText(n.channel)
-  }).map(newerRelease) : []
+  }).map(function(n) { return newerRelease(n, channel) }) : []
   var installed = "Omarchy " + doc.target.name + " is up to date"
   return view("quiet", {
     tooltip: installed,
     summary: installed,
     installed: isText(doc.installed) ? doc.installed : "",
     release: doc.target.name,
-    channel: isText(doc.channel) ? doc.channel : "",
+    channel: channel,
     newer: newer,
     newerProblem: doc.newer === null && isText(doc.newerProblem) ? doc.newerProblem : ""
   })
@@ -231,9 +243,10 @@ function fromRun(run) {
 
 // ---------- What the service holds ----------
 //
-// own is the user's own result, and the only one the bar shows. chosen is a newer
-// release's report, checked by hand from the panel, or null. Nothing keeps it: Back,
-// closing the panel, or a restart drops it. job is the run going, or null:
+// own is the user's own result, and the only one the bar shows. reports holds each
+// newer release's report checked by hand from the panel, by its tag, until the shell
+// restarts. showing is the tag of the one the panel shows, or "" for the user's own.
+// Back and closing the panel only set it to "". job is the run going, or null:
 // { kind: "check", "chosen" or "ack", tag: "" for the user's own release }. There is
 // one run at a time, so a check of each kind can't overlap.
 //
@@ -241,13 +254,21 @@ function fromRun(run) {
 // for the bundled command, or null when nothing runs.
 
 function held(onlyWhenAsked) {
-  return { own: notChecked(onlyWhenAsked), ownAt: null, ackProblem: "", chosen: null, job: null }
+  return { own: notChecked(onlyWhenAsked), ownAt: null, ackProblem: "", reports: {}, showing: "", job: null }
 }
 
 function changed(h, fields) {
   var next = {}
   for (var key in h) next[key] = h[key]
   for (var k in fields) next[k] = fields[k]
+  return next
+}
+
+// The reports with one release's replaced, the rest as they were.
+function withReport(reports, report) {
+  var next = {}
+  for (var tag in reports) next[tag] = reports[tag]
+  next[report.tag] = report
   return next
 }
 
@@ -266,7 +287,8 @@ function startCheck(h) {
   return step(changed(h, { job: { kind: "check", tag: "" } }), ["--json"])
 }
 
-// What the panel shows while a release chosen by hand is checked.
+// What the panel shows while a release chosen by hand is checked: "Checking" and the
+// tag in the header, and whether it downloads.
 function checkingChosen(tag, cached) {
   return view("notChecked", {
     mark: "…",
@@ -277,33 +299,42 @@ function checkingChosen(tag, cached) {
   })
 }
 
-// "Check" on a newer release: its report, in the panel only. A check of it already
-// running isn't started twice: the panel shows it again, and its result lands there.
+// "Check it", and "Check again" on a kept report: its report, in the panel only. A
+// check of it already running isn't started twice: the panel shows it again, and its
+// result lands there.
 function startChosen(h, tag, cached) {
-  var c = { tag: String(tag), view: checkingChosen(tag, cached), at: null, ackProblem: "" }
+  tag = String(tag)
   if (h.job) {
-    if (h.job.kind === "chosen" && h.job.tag === c.tag && !h.chosen) return step(changed(h, { chosen: c }), null)
+    if (h.job.kind === "chosen" && h.job.tag === tag && h.reports[tag]) return step(changed(h, { showing: tag }), null)
     return step(h, null)
   }
-  return step(changed(h, { job: { kind: "chosen", tag: c.tag }, chosen: c }), ["--json", c.tag])
+  var report = { tag: tag, view: checkingChosen(tag, cached), at: null, ackProblem: "" }
+  return step(changed(h, { job: { kind: "chosen", tag: tag }, reports: withReport(h.reports, report), showing: tag }),
+    ["--json", tag])
+}
+
+// "Show": a kept report, or the run on it still going, with nothing run.
+function show(h, tag) {
+  return h.reports[tag] ? changed(h, { showing: String(tag) }) : h
 }
 
 // "Mark reviewed", for the report the panel shows: the chosen release's, by its tag,
 // or the user's own.
 function startAck(h, id) {
   if (h.job) return step(h, null)
-  if (h.chosen) {
-    if (h.chosen.at === null || !h.chosen.view.hasReport) return step(h, null)
-    return step(changed(h, { job: { kind: "ack", tag: h.chosen.tag } }), ackArgs(id, h.chosen.tag))
+  var shown = h.showing ? h.reports[h.showing] : null
+  if (shown) {
+    if (shown.at === null || !shown.view.hasReport) return step(h, null)
+    return step(changed(h, { job: { kind: "ack", tag: shown.tag } }), ackArgs(id, shown.tag))
   }
   if (!h.own.release) return step(h, null)
   return step(changed(h, { job: { kind: "ack", tag: "" } }), ackArgs(id, h.own.release))
 }
 
-// "Back", and closing the panel: the user's own result again. A chosen check still
-// running finishes, and its result is dropped.
+// "Back", and closing the panel: the user's own result again. Every chosen report is
+// kept, and a run on one goes on.
 function back(h) {
-  return h.chosen ? changed(h, { chosen: null }) : h
+  return h.showing ? changed(h, { showing: "" }) : h
 }
 
 // A run on a release chosen by hand, read as a check is. One that couldn't check
@@ -316,7 +347,7 @@ function chosenFromRun(run, tag) {
 }
 
 // What a finished run leaves. A chosen run, or an --ack on it, never touches own,
-// and so never the bar. Its result is dropped if the panel went back meanwhile.
+// and so never the bar. Its result is kept for its release, whatever the panel shows.
 function finished(h, run, now) {
   var job = h.job
   h = changed(h, { job: null })
@@ -327,13 +358,15 @@ function finished(h, run, now) {
     return own.kept ? changed(h, { ackProblem: own.problem })
       : changed(h, { own: own.view, ownAt: now, ackProblem: "" })
   }
-  if (!h.chosen || h.chosen.tag !== job.tag) return h
   if (job.kind === "chosen")
-    return changed(h, { chosen: { tag: job.tag, view: chosenFromRun(run, job.tag), at: now, ackProblem: "" } })
-  var after = afterAck(run, h.chosen.view, job.tag)
-  var chosen = after.kept ? changed(h.chosen, { ackProblem: after.problem })
+    return changed(h, { reports: withReport(h.reports,
+      { tag: job.tag, view: chosenFromRun(run, job.tag), at: now, ackProblem: "" }) })
+  var last = h.reports[job.tag]
+  if (!last) return h
+  var after = afterAck(run, last.view, job.tag)
+  var report = after.kept ? changed(last, { ackProblem: after.problem })
     : { tag: job.tag, view: after.view, at: now, ackProblem: "" }
-  return changed(h, { chosen: chosen })
+  return changed(h, { reports: withReport(h.reports, report) })
 }
 
 // The bar: the user's own result, and whether a run for it is going.
@@ -341,10 +374,11 @@ function bar(h) {
   return { view: h.own, running: !!h.job && h.job.tag === "" }
 }
 
-// The panel: the chosen report while there is one, else the user's own. running says
-// whether a run for what it shows is going; busy, whether any run is.
+// The panel: the chosen report it shows, else the user's own. running says whether a
+// run for what it shows is going; busy, whether any run is. newer is the user's own
+// "Coming next" rows, each with what its kept report found.
 function panel(h) {
-  var c = h.chosen
+  var c = h.showing ? h.reports[h.showing] || null : null
   var tag = c ? c.tag : ""
   return {
     view: c ? c.view : h.own,
@@ -354,15 +388,54 @@ function panel(h) {
     chosenLine: c ? chosenLine(tag, h.own.channel) : "",
     running: !!h.job && h.job.tag === tag,
     busy: !!h.job,
-    // The release a chosen check is running for, even after Back, so "Check" on it
-    // shows that run again rather than starting another.
-    checking: h.job && h.job.kind === "chosen" ? h.job.tag : ""
+    newer: c ? [] : h.own.newer.map(function(n) { return comingNext(n, h) })
   }
+}
+
+// One "Coming next" row. Without a kept report it offers "Check it", and says whether
+// that downloads. With one it says what it found, and offers "Show" and "Check again".
+// running says a run on that release is going, even with the panel closed meanwhile.
+function comingNext(n, h) {
+  var report = h.reports[n.tag] || null
+  var row = {}
+  for (var key in n) row[key] = n[key]
+  row.kept = !!report
+  row.found = report ? (report.at === null ? "Checking…" : foundLine(report.view)) : ""
+  row.foundColour = report && report.at !== null ? report.view.colour : "muted"
+  row.running = !!h.job && h.job.tag === n.tag
+  return row
+}
+
+// What a kept report found, in a few words: its row already names the release.
+function foundLine(v) {
+  if (v.state === "attention") return plural(v.attention.length, "thing needs", "things need") + " attention"
+  if (v.state === "quiet") return "Nothing needs attention"
+  return "Couldn't check it"
 }
 
 function chosenLine(tag, channel) {
   return tag + ", chosen by hand. An update wouldn't bring it, so the bar follows "
     + (channel ? "the " + channel + " channel." : "your own channel.")
+}
+
+// ---------- Findings, closed until their title is clicked ----------
+
+// What tells one finding from another in the report the panel shows.
+function findingKey(f) {
+  return f && isText(f.id) && f.id !== "" ? f.id : f && isText(f.title) ? "title:" + f.title : ""
+}
+
+// The open findings with one opened or closed, as a new object, so QML sees it change.
+function toggled(open, f) {
+  var key = findingKey(f)
+  var next = {}
+  for (var k in open) if (k !== key) next[k] = true
+  if (!open || open[key] !== true) next[key] = true
+  return next
+}
+
+function isOpen(open, f) {
+  return !!open && open[findingKey(f)] === true
 }
 
 // ---------- How often it checks ----------

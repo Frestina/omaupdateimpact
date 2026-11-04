@@ -826,45 +826,52 @@ anything out:
 
 Each finding shows its title, and starts closed. A click on the title opens it: the
 detail, reason and reference, fix, evidence, `items` one per line, id and buttons.
-Its text can be selected, so a fix can be copied.
+Its text can be selected, so a fix can be copied. Findings close again when the panel
+closes or shows another report.
 
 With `noUpdate`, it says Omarchy is up to date and names any newer release on
 another channel, from `newer`, or `newerProblem`, as "Coming next: v4.5.0-rc3", with
 "A test release on the rc channel. Your updates won't bring it until it reaches
-stable." for a user on stable. Each has "Check it", which runs the bundled command
-with `--json` and that tag, and shows its report in the panel, in the same sections
-as the user's own. It says the release downloads first, about 200 MB, unless it is
-already in the cache. The command says which: each entry in `newer` has `cached`, as
-a run would find the release there. The plugin doesn't look in the cache itself, so
-the two can't disagree on where it is. With `failed`, it shows `reason`.
+stable." for a user on stable. On any channel but rc it says "A release on the
+<channel> channel. Your updates on the <your> channel won't bring it." Each has
+"Check it", which runs the bundled command with `--json` and that tag, and shows its
+report in the panel, in the same sections as the user's own. It says the release
+downloads first, about 200 MB, unless it is already in the cache. The command says
+which: each entry in `newer` has `cached`, as a run would find the release there.
+The plugin doesn't look in the cache itself, so the two can't disagree on where it
+is. With `failed`, it shows `reason`.
 
 A release chosen by hand never changes the bar: the icon, the count and the tooltip
 follow the user's own channel only, as an update wouldn't deliver that release. The
 tooltip adds "Checking…" only for a run on the user's own release. A chosen check
 that runs looks like a check of the user's own in the panel: the same turning icon,
-and "Checking v4.5.0-rc3…" in the header, with whether it downloads. Then the panel
-says at the top which release it shows, that it was chosen by hand, and that the bar
-follows the user's channel. "Back" returns to the user's own result. "Back" takes
-the place of "Check again", and `r` does nothing on a chosen report.
+on a "Checking…" button beside "Back", and "Checking v4.5.0-rc3…" in the header,
+with whether it downloads. Then the panel says at the top which release it shows,
+that it was chosen by hand, and that the bar follows the user's channel. "Back"
+returns to the user's own result. "Back" takes the place of "Check again", and `r`
+does nothing on a chosen report.
 
 The panel always opens on the user's own result, so it matches the bar. A chosen
 report stays in memory, by its tag, until the shell restarts, and closing the panel
 doesn't stop its check. Its row under "Coming next" then shows what it found, such
 as "10 things need attention", with "Show", which opens it without running anything,
-and "Check again". The timer and "Check again" on the user's own result check the
-user's own release only. On a chosen report, "Mark reviewed" runs `--ack` with its
-tag, so the review counts for that release only, and its document replaces the
-chosen report. "Ask agent" hands over the chosen report, and its prompt names the
-tag in the command to run. "Open report" opens that tag in the terminal. A chosen
-check that fails shows "couldn't check" for that release in the panel, and leaves
-the bar alone. So does a document on a release other than the tag, as the plugin
-can't tell which part is wrong.
+and "Check again". The row no longer says whether checking downloads. While its
+check runs, the row says "Checking…" and "Check again" turns, and "Show" opens the
+run. "Check again" shows "Checking v4.5.0-rc3…" in place of the last report until
+its result comes, as "Check it" does. The timer and "Check again" on the user's own
+result check the user's own release only. On a chosen report, "Mark reviewed" runs
+`--ack` with its tag, so the review counts for that release only, and its document
+replaces the chosen report. "Ask agent" hands over the chosen report, and its prompt
+names the tag in the command to run. "Open report" opens that tag in the terminal. A
+chosen check that fails shows "couldn't check" for that release in the panel, and
+leaves the bar alone. So does a document on a release other than the tag, as the
+plugin can't tell which part is wrong.
 
 There is one run at a time, as before. A chosen check, or an `--ack` or `--unack` on
 one, that is still running after "Back" or a closed panel finishes, and its result
 is kept for that release. "Check it" on that release while it still runs shows that
 run again, so it isn't started twice. `State.js` holds what the service keeps: the
-user's own result, the chosen report, and the run going. The tests run it under
+user's own result, the chosen reports, and the run going. The tests run it under
 `node`.
 
 A left click opens it. "Check again" checks now, as `r` does while it is open.
