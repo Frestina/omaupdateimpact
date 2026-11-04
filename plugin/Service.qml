@@ -7,9 +7,10 @@ import "State.js" as State
 // however many monitors there are, so a check runs once, not once per bar.
 //
 // It runs the bundled bin/omaupdateimpact with --json, never one on PATH, and keeps
-// the last result in memory. It writes nothing itself: "Mark reviewed" runs the
-// command with --ack, which writes the reviewed file. The command decides every
-// finding; State.js only reads what it printed.
+// the last result in memory, with a newer release's report while the panel shows one.
+// It writes nothing itself: "Mark reviewed" runs the command with --ack, which writes
+// the reviewed file. The command decides every finding; State.js only reads what it
+// printed.
 Item {
   id: root
 
@@ -22,19 +23,19 @@ Item {
   readonly property string command: decodeURIComponent(
     Qt.resolvedUrl("../bin/omaupdateimpact").toString().replace(/^file:\/\//, ""))
 
-  // What the bar and the panel show. See State.js.
-  property var view: State.notChecked(false)
-  property bool running: false
-  // What the running process is for: "check", or "ack" for "Mark reviewed".
-  property string runKind: "check"
-  // Why the last "Mark reviewed" wrote nothing, or "".
-  property string ackProblem: ""
+  // The user's own result, a newer release's report chosen in the panel, and the run
+  // going. See State.js. The bar reads only the user's own.
+  property var held: State.held(false)
+  readonly property var view: State.bar(held).view
+  readonly property bool running: held.job !== null
+  // A run for the user's own release, so the bar's tooltip says "Checking…".
+  readonly property bool barRunning: State.bar(held).running
+  // What the panel shows: the chosen report while there is one, else the user's own.
+  readonly property var panel: State.panel(held)
   // Where --ack keeps reviews, for the panel to name.
   readonly property string reviewedFile: State.reviewedFile(Quickshell.env("XDG_CONFIG_HOME"))
   // Whether omarchy-agent-prompt is on PATH, so "Ask agent" can show. Looked up once.
   property bool agentReady: false
-  // When the last check finished, or null before the first.
-  property var checkedAt: null
 
   // Hours between checks, handed over by the widget. 0 checks only when asked.
   property int checkEveryHours: State.DEFAULT_HOURS
@@ -52,55 +53,50 @@ Item {
     var hours = State.hoursFrom(value)
     if (hours === checkEveryHours) return
     checkEveryHours = hours
-    if (!running && !checkedAt) view = State.notChecked(hours === 0)
+    held = State.waiting(held, hours === 0)
     schedule()
   }
 
-  // Check now. A check already running isn't started twice.
+  // Check the user's own release now. A check already running isn't started twice.
   function check() {
-    if (running) return
-    lastStartedAt = Date.now()
-    start("check", [root.command, "--json"])
+    if (start(State.startCheck(held))) lastStartedAt = Date.now()
     schedule()
   }
 
-  // Mark one finding reviewed, for the release the bar shows. The panel asks first.
+  // A newer release's report, for the panel only. It never changes the bar.
+  function checkRelease(tag, cached) {
+    start(State.startChosen(held, tag, cached))
+  }
+
+  // Mark one finding reviewed, for the report the panel shows. The panel asks first.
   // A run already going isn't started twice.
   function ack(id) {
-    if (running || !view.release) return
-    start("ack", [root.command].concat(State.ackArgs(id, view.release)))
+    start(State.startAck(held, id))
   }
 
-  function start(kind, command) {
-    running = true
-    runKind = kind
+  // Back to the user's own result, from "Back" or a closed panel.
+  function back() {
+    held = State.back(held)
+  }
+
+  // Runs the bundled command with the step's arguments, if it has any.
+  function start(next) {
+    held = next.held
+    if (next.args === null) return false
     procStarted = false
     procExitCode = -1
-    proc.command = command
+    proc.command = [root.command].concat(next.args)
     proc.running = true
+    return true
   }
 
   function finish() {
-    running = false
-    var run = {
+    held = State.finished(held, {
       started: procStarted,
       exitCode: procExitCode,
       stdout: out.text,
       stderr: errOut.text
-    }
-    if (runKind === "ack") {
-      // A failed --ack wrote nothing: the last result stays, with its reason.
-      const after = State.afterAck(run, view)
-      ackProblem = after.problem
-      if (!after.kept) {
-        view = after.view
-        checkedAt = new Date()
-      }
-    } else {
-      ackProblem = ""
-      checkedAt = new Date()
-      view = State.fromRun(run)
-    }
+    }, Date.now())
     schedule()
   }
 

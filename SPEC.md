@@ -820,14 +820,26 @@ is. With `failed`, it shows `reason`.
 
 A release chosen by hand never changes the bar: the icon, the count and the tooltip
 follow the user's own channel only, as an update wouldn't deliver that release. The
-panel says at the top which release it shows, that it was chosen by hand, and that
-the bar follows the user's channel. "Back", or closing the panel, returns to the
-user's own result. The timer and "Check again" check the user's own release only,
-and the chosen report stays in memory until then, or until the shell restarts. On
-it, "Mark reviewed" runs `--ack` with its tag, so the review counts for that release
-only, and its document replaces the chosen report. "Ask agent" hands over the chosen
-report, and "Open report" opens that tag in the terminal. A chosen check that fails
-shows "couldn't check" for that release in the panel, and leaves the bar alone.
+tooltip adds "Checking…" only for a run on the user's own release. While a chosen
+check runs, the panel names the release it is checking and says whether it
+downloads. Then it says at the top which release it shows, that it was chosen by
+hand, and that the bar follows the user's channel. "Back", or closing the panel,
+returns to the user's own result. "Back" takes the place of "Check again", and `r`
+does nothing on a chosen report. The timer and "Check again" check the user's own
+release only, and the chosen report stays in memory until then, or until the shell
+restarts. A check of the user's own that runs meanwhile leaves the chosen report on
+screen. On it, "Mark reviewed" runs `--ack` with its tag, so the review counts for
+that release only, and its document replaces the chosen report. "Ask agent" hands
+over the chosen report, and its prompt names the tag in the command to run. "Open
+report" opens that tag in the terminal. A chosen check that fails shows "couldn't
+check" for that release in the panel, and leaves the bar alone. So does a document
+on a release other than the tag, as the plugin can't tell which part is wrong.
+
+There is one run at a time, as before. A chosen check, or an `--ack` on one, that is
+still running after "Back" finishes, and its result is dropped. "Check" on that
+release while it still runs shows that run again, and its result lands in the panel,
+so it isn't started twice. `State.js` holds what the service keeps: the user's own
+result, the chosen report, and the run going. The tests run it under `node`.
 
 A left click opens it. "Check again" checks now, as `r` does while it is open.
 "Open report" runs the same bundled command in
@@ -836,8 +848,8 @@ A left click opens it. "Check again" checks now, as `r` does while it is open.
 
 Each finding under Needs attention has "Mark reviewed". A click asks "Mark
 reviewed?" in place, and nothing is written until Yes. Yes runs the bundled command
-with `--json --ack <id>`, for the release the bar shows, and its document replaces
-the last result, so the finding moves to Reviewed and the count drops. A run already
+with `--json --ack <id>`, for the release the panel shows, and its document replaces
+that result, so the finding moves to Reviewed and the count drops. A run already
 going isn't started twice. An `--ack` that fails leaves the last result and shows its
 reason. That is a `failed` document with exit 2, which wrote nothing. Output that
 can't be read is "couldn't check", as for a check, since whether it wrote is unknown.

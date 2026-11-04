@@ -97,9 +97,11 @@ omarchy plugin add https://github.com/Frestina/omaupdateimpact.git --enable
   Read what the agent proposes before you agree to it. What the agent sends to its
   model is up to the agent.
 - When you are up to date and another channel has a newer release, "Check" beside
-  it shows that release's report in a terminal. It downloads the release first,
-  about 200 MB, unless it is already in the cache. The icon stays on your own
-  channel.
+  it shows that release's report in the panel. It downloads the release first,
+  about 200 MB, unless it is already in the cache. "Mark reviewed" and "Ask agent"
+  work on it too, and "Open report" opens it in a terminal. The icon stays on your
+  own channel, as an update wouldn't bring that release. "Back", or closing the
+  panel, returns to your own result.
 - It runs the command in its own folder with `--json`, never one on your `PATH`, and
   holds no rules of its own. It checks 2 minutes after login, then every 6 hours.
   "Check every" in the panel changes that: only when asked, 1, 6, 12 or 24 hours.

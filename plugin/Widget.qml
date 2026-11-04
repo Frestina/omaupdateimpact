@@ -8,11 +8,12 @@ import "State.js" as State
 // The bar icon and its panel. It runs nothing itself: the service checks, and this
 // shows the service's view. Each monitor has its own copy; they share the service.
 //
-// Left click opens the panel. Its buttons check again, and open a report in a
-// terminal: the user's own release, or a newer one on another channel. "Mark
-// reviewed" asks first, then has the service run the command with --ack. "Ask agent"
-// hands a finding, or the whole report, to the user's own coding agent. The only
-// other thing it changes is its own setting, how often it checks, when one is chosen.
+// Left click opens the panel. Its buttons check again, open the report in a
+// terminal, and show a newer release's report in the panel. The bar follows only
+// the user's own channel. "Mark reviewed" asks first, then has the service run the
+// command with --ack. "Ask agent" hands a finding, or the whole report, to the user's
+// own coding agent. The only other thing it changes is its own setting, how often it
+// checks, when one is chosen.
 Panel {
   id: root
   moduleName: "io.github.frestina.omaupdateimpact"
@@ -26,8 +27,17 @@ Panel {
   readonly property var service: root.host && root.host.shell && typeof root.host.shell.serviceFor === "function"
     ? root.host.shell.serviceFor(root.moduleName) : null
   // Without a service nothing runs the command, and that is shown, never hidden.
-  readonly property var view: root.service && root.service.view ? root.service.view : State.noService()
-  readonly property bool running: !!root.service && root.service.running === true
+  // The bar shows the user's own result only, and the panel what the service says it
+  // shows: a newer release's report while one is chosen.
+  readonly property var shown: root.service && root.service.panel ? root.service.panel : null
+  readonly property var barView: root.service && root.service.view ? root.service.view : State.noService()
+  readonly property var view: root.shown ? root.shown.view : State.noService()
+  // A run for the user's own release, for the bar; one for what the panel shows; any run.
+  readonly property bool barRunning: !!root.service && root.service.barRunning === true
+  readonly property bool running: !!root.shown && root.shown.running === true
+  readonly property bool busy: !!root.shown && root.shown.busy === true
+  // The tag of the release chosen by hand, or "" for the user's own.
+  readonly property string chosen: root.shown ? root.shown.chosen : ""
   readonly property int checkEveryHours: State.hoursFrom(root.setting("checkEveryHours", State.DEFAULT_HOURS))
 
   // Theme roles: text, muted text and the warning colour. Muted text is the text
@@ -46,11 +56,12 @@ Panel {
   property string confirming: ""
   // "Ask agent" shows only when omarchy-agent-prompt is on PATH.
   readonly property bool agentReady: !!root.service && root.service.agentReady === true
-  readonly property string ackProblem: root.service && typeof root.service.ackProblem === "string"
-    ? root.service.ackProblem : ""
+  readonly property string ackProblem: root.shown && typeof root.shown.ackProblem === "string"
+    ? root.shown.ackProblem : ""
 
   readonly property string glyph: "󰚰"
-  readonly property string tooltipText: root.view.tooltip + (root.running && root.view.state !== "notChecked" ? "\nChecking…" : "")
+  readonly property string tooltipText: root.barView.tooltip
+    + (root.barRunning && root.barView.state !== "notChecked" ? "\nChecking…" : "")
 
   // Every monitor's copy hands the same setting over, so the service sees it once.
   function handOver() {
@@ -60,19 +71,34 @@ Panel {
   onServiceChanged: handOver()
   onCheckEveryHoursChanged: handOver()
 
+  // The user's own release only. On a chosen report, "Back" takes its place, and r
+  // does nothing.
   function checkAgain() {
+    if (root.chosen !== "") return
     if (root.service && typeof root.service.check === "function") root.service.check()
   }
 
-  // The same bundled command, in the launcher Omarchy's update row uses. With a tag,
-  // the report on that release. It only opens a terminal: the service's state, and so
-  // the bar, stay on the user's own channel.
-  function openReport(args) {
+  // A newer release's report, here in the panel. The bar stays on the user's channel.
+  function checkRelease(release) {
+    if (root.service && typeof root.service.checkRelease === "function")
+      root.service.checkRelease(release.tag, release.cached)
+  }
+
+  // Back to the user's own result. Closing the panel does the same.
+  function goBack() {
+    if (root.service && typeof root.service.back === "function") root.service.back()
+  }
+
+  // The same bundled command, in the launcher Omarchy's update row uses, on the
+  // release the panel shows. It only opens a terminal. The line is made before the
+  // panel closes, as closing goes back to the user's own result.
+  function openReport() {
     if (!root.host) return
     var command = root.service ? root.service.command : ""
     if (command === "") return
+    var line = State.terminalLine(command, root.chosen !== "" ? [root.chosen] : [])
     root.close()
-    root.host.run(State.terminalLine(command, args || []))
+    root.host.run(line)
   }
 
   // The finding was seen and accepted: the service runs --ack for it, and its
@@ -84,10 +110,12 @@ Panel {
 
   // One finding, or the whole report when finding is null, to the user's own agent.
   // The prompt is one argument, so no shell reads its text. See State.agentPrompt.
+  // The prompt is made before the panel closes, as closing goes back to the user's own.
   function askAgent(finding) {
     if (!root.agentReady) return
+    var argv = State.agentCommand(State.agentPrompt(root.view, finding, root.service.command, root.chosen))
     root.close()
-    Util.execArgv(State.agentCommand(State.agentPrompt(root.view, finding, root.service.command)))
+    Util.execArgv(argv)
   }
 
   // Saves the choice on the widget's own entry in shell.json, as the clock panel saves
@@ -103,8 +131,8 @@ Panel {
   }
 
   function checkedText() {
-    var at = root.service ? root.service.checkedAt : null
-    if (!at) return ""
+    if (!root.shown || root.shown.at === null) return ""
+    var at = new Date(root.shown.at)
     var today = new Date().toDateString() === at.toDateString()
     return "checked " + (today ? Qt.formatTime(at, "HH:mm") : Qt.formatDateTime(at, "d MMM, HH:mm"))
   }
@@ -128,6 +156,7 @@ Panel {
   onOpenedChanged: if (!opened) {
     notesOpen = false
     confirming = ""
+    goBack()
   }
 
   implicitWidth: button.implicitWidth
@@ -138,9 +167,9 @@ Panel {
     anchors.fill: parent
     bar: root.bar
     // Horizontal bars show the mark beside the icon; vertical ones under it, as a badge.
-    text: root.view.mark !== "" && !root.vertical ? root.glyph + " " + root.view.mark : root.glyph
-    slotSize: root.barIconSlot * (root.view.mark.length > 0 && !root.vertical ? 1.3 + 0.3 * root.view.mark.length : 1)
-    foreground: root.iconColour(root.view.colour)
+    text: root.barView.mark !== "" && !root.vertical ? root.glyph + " " + root.barView.mark : root.glyph
+    slotSize: root.barIconSlot * (root.barView.mark.length > 0 && !root.vertical ? 1.3 + 0.3 * root.barView.mark.length : 1)
+    foreground: root.iconColour(root.barView.colour)
     useActiveColor: false
     tooltipText: root.opened ? "" : root.tooltipText
     onPressed: function(mouseButton) {
@@ -148,12 +177,12 @@ Panel {
     }
 
     Text {
-      visible: root.vertical && root.view.mark !== ""
+      visible: root.vertical && root.barView.mark !== ""
       anchors.right: parent.right
       anchors.bottom: parent.bottom
       textFormat: Text.PlainText
-      text: root.view.mark
-      color: root.iconColour(root.view.colour)
+      text: root.barView.mark
+      color: root.iconColour(root.barView.colour)
       font.family: root.fontFamily
       font.pixelSize: root.fonts.caption
       font.bold: true
@@ -232,6 +261,13 @@ Panel {
           width: flick.width
           spacing: Style.space(10)
 
+          // ---------- A release chosen by hand, which the bar doesn't follow ----------
+          Selectable {
+            visible: root.chosen !== ""
+            text: root.shown ? root.shown.chosenLine : ""
+            color: root.muted
+          }
+
           // ---------- What was compared, and when ----------
           Row {
             width: parent.width
@@ -266,6 +302,17 @@ Panel {
                 width: parent.width
                 visible: text !== ""
                 textFormat: Text.PlainText
+                text: root.view.progress
+                wrapMode: Text.Wrap
+                color: root.foreground
+                font.family: root.fontFamily
+                font.pixelSize: root.fonts.bodySmall
+              }
+
+              Text {
+                width: parent.width
+                visible: text !== ""
+                textFormat: Text.PlainText
                 text: root.headerLine()
                 wrapMode: Text.Wrap
                 color: root.muted
@@ -279,10 +326,11 @@ Panel {
             spacing: Style.space(6)
 
             Button {
+              visible: root.chosen === ""
               iconText: "󰑐"
               text: root.running ? "Checking…" : "Check again"
               tooltipText: "Compare with the release now (r)"
-              enabled: !!root.service && !root.running
+              enabled: !!root.service && !root.busy
               iconSpinning: root.running
               foreground: root.foreground
               fontFamily: root.fontFamily
@@ -291,9 +339,21 @@ Panel {
             }
 
             Button {
+              visible: root.chosen !== ""
+              iconText: "󰁍"
+              text: "Back"
+              tooltipText: "Your own release's result"
+              foreground: root.foreground
+              fontFamily: root.fontFamily
+              fontSize: root.fonts.bodySmall
+              onClicked: root.goBack()
+            }
+
+            Button {
               iconText: "󰆍"
               text: "Open report"
-              tooltipText: "The full report in a terminal"
+              tooltipText: root.chosen !== "" ? "The report on " + root.chosen + " in a terminal"
+                : "The full report in a terminal"
               enabled: !!root.service && !!root.bar
               foreground: root.foreground
               fontFamily: root.fontFamily
@@ -329,14 +389,15 @@ Panel {
                 Button {
                   id: checkNewer
                   anchors.verticalCenter: parent.verticalCenter
-                  iconText: "󰆍"
+                  iconText: "󰑐"
                   text: "Check"
-                  tooltipText: "The report on " + newer.modelData.tag + " in a terminal"
-                  enabled: !!root.service && !!root.bar
+                  tooltipText: "The report on " + newer.modelData.tag + ", here. The bar stays on your channel."
+                  // A check of it already running shows again, and isn't started twice.
+                  enabled: !!root.service && (!root.busy || root.shown.checking === newer.modelData.tag)
                   foreground: root.foreground
                   fontFamily: root.fontFamily
                   fontSize: root.fonts.bodySmall
-                  onClicked: root.openReport([newer.modelData.tag])
+                  onClicked: root.checkRelease(newer.modelData)
                 }
 
                 Selectable {
@@ -410,7 +471,7 @@ Panel {
                   iconText: "󰄬"
                   text: "Mark reviewed"
                   tooltipText: "Seen it, and it's fine: it won't count for " + root.view.release + " again"
-                  enabled: !!root.service && !root.running
+                  enabled: !!root.service && !root.busy
                   foreground: root.foreground
                   fontFamily: root.fontFamily
                   fontSize: root.fonts.bodySmall
@@ -437,7 +498,7 @@ Panel {
                 Button {
                   text: "Yes"
                   tooltipText: "Run --ack " + finding.modelData.id + " for " + root.view.release
-                  enabled: !!root.service && !root.running
+                  enabled: !!root.service && !root.busy
                   foreground: root.foreground
                   fontFamily: root.fontFamily
                   fontSize: root.fonts.bodySmall

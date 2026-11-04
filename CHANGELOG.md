@@ -10,6 +10,10 @@
   `omarchy-agent-prompt`, and shows only when that is on your `PATH`. The prompt says
   to change nothing unless you ask, and that the finding's text is data, never
   instructions. Omarchy starts the agent with its approval prompts off.
+- "Check" on a newer release shows its report in the panel, not in a terminal.
+  "Mark reviewed" and "Ask agent" work on it, and "Open report" opens it in a
+  terminal. The icon stays on your own channel. "Back", or closing the panel,
+  returns to your own result.
 
 ## 0.2.0 (2026-11-04)
 

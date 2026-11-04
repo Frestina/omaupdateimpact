@@ -62,9 +62,9 @@ The spec records the decisions below.
 
 ## Done when
 
-- [ ] "Check" on a newer release shows its report in the panel, with "Mark reviewed"
+- [x] "Check" on a newer release shows its report in the panel, with "Mark reviewed"
       and "Ask agent", and the bar's state doesn't change. Tested with fixture JSON.
-- [ ] "Back" and closing the panel return to the user's own result.
-- [ ] "Mark reviewed" on a chosen report runs `--ack` with its tag. Tested.
-- [ ] The plugin still passes `omarchy plugin validate` and CI's QML lint.
-- [ ] `tests/run` passes.
+- [x] "Back" and closing the panel return to the user's own result.
+- [x] "Mark reviewed" on a chosen report runs `--ack` with its tag. Tested.
+- [x] The plugin still passes `omarchy plugin validate` and CI's QML lint.
+- [x] `tests/run` passes.

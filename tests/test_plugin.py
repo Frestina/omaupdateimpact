@@ -82,8 +82,11 @@ class Manifest(unittest.TestCase):
         service = (PLUGIN / "Service.qml").read_text()
         self.assertIn('Qt.resolvedUrl("../bin/omaupdateimpact")', service)
         self.assertTrue((PLUGIN / "../bin/omaupdateimpact").resolve() == impact.COMMAND)
-        self.assertIn('start("check", [root.command, "--json"])', service)
-        self.assertIn("proc.command = command", service)
+        self.assertIn("proc.command = [root.command].concat(next.args)", service)
+        self.assertIn("start(State.startCheck(held))", service)
+        if NODE:
+            [step] = views(call("startCheck", views(call("held", False))[0]))
+            self.assertEqual(step["args"], ["--json"])
 
     def test_text_is_plain(self):
         # Findings carry paths and lines from your files, never markup.
@@ -393,16 +396,26 @@ class Terminal(unittest.TestCase):
         command, argv = self.reached("it's $HOME; `true`", "two words", "$(false)")
         self.assertEqual(argv, [str(command), "two words", "$(false)"])
 
-    def test_both_buttons_go_through_it(self):
+    def test_open_report_goes_through_it(self):
         widget = (PLUGIN / "Widget.qml").read_text()
-        self.assertIn("root.host.run(State.terminalLine(command, args || []))", widget)
-        self.assertIn("onClicked: root.openReport([newer.modelData.tag])", widget)
+        body = widget.split("function openReport() {", 1)[1].split("\n  }\n", 1)[0]
+        # On a chosen report, its tag. The line is made before the panel closes, as
+        # closing goes back to the user's own result.
+        line = 'var line = State.terminalLine(command, root.chosen !== "" ? [root.chosen] : [])'
+        self.assertLess(body.index(line), body.index("root.close()"))
+        self.assertLess(body.index("root.close()"), body.index("root.host.run(line)"))
+        self.assertEqual(widget.count("root.host.run("), 1)
         self.assertIn("onClicked: root.openReport()", widget)
         # The run only opens a terminal: nothing in it checks, or sets what the bar shows.
-        body = widget.split("function openReport(args) {", 1)[1].split("\n  }\n", 1)[0]
         self.assertNotIn("check(", body)
         self.assertNotIn("view", body)
 
+
+
+def holding(name, chosen=None):
+    """What the service holds after a check of the user's own release printed a golden document."""
+    held = views(call("held", False))[0]
+    return dict(held, own=view(*golden(name)), ownAt=1000, chosen=chosen)
 
 
 def report_views():
@@ -415,14 +428,22 @@ def report_views():
 class MarkReviewed(unittest.TestCase):
     """ "Mark reviewed" asks first, then runs --ack, and the panel follows its document."""
 
-    def test_it_runs_ack_for_the_release_the_bar_shows(self):
+    def test_it_runs_ack_for_the_release_the_panel_shows(self):
         [found] = views(call("ackArgs", "9d67629", "v1.3.0"))
         self.assertEqual(found, ["--json", "--ack", "9d67629", "v1.3.0"])
-        service = (PLUGIN / "Service.qml").read_text()
-        self.assertIn('start("ack", [root.command].concat(State.ackArgs(id, view.release)))', service)
+        own = holding("report")
+        [step] = views(call("startAck", own, "9d67629"))
+        self.assertEqual(step["args"], found)
+        self.assertEqual(step["held"]["job"], {"kind": "ack", "tag": ""})
         # A run already going isn't started twice, whether it checks or marks.
-        self.assertIn("if (running || !view.release) return", service)
-        self.assertIn("if (running) return", service)
+        again, check, before = views(call("startAck", step["held"], "1354b03"), call("startCheck", step["held"]),
+                                     call("startAck", views(call("held", False))[0], "9d67629"))
+        self.assertEqual((again["args"], check["args"]), (None, None))
+        self.assertEqual(again["held"], step["held"])
+        # Before the first check there is no release to mark it for.
+        self.assertIsNone(before["args"])
+        service = (PLUGIN / "Service.qml").read_text()
+        self.assertIn("start(State.startAck(held, id))", service)
 
     def test_its_document_replaces_the_last_result(self):
         last = view(*golden("report"))
@@ -476,9 +497,15 @@ class MarkReviewed(unittest.TestCase):
         self.assertEqual(len(re.findall(r"\bconfirming = finding", widget)), 1)
 
     def test_the_service_keeps_the_last_result_when_ack_fails(self):
+        [step] = views(call("startAck", holding("report"), "60d484f"))
+        failed = json.dumps(impact.failure("Can't mark it reviewed: fictional."))
+        kept, marked = views(call("finished", step["held"], run(failed, 2)["args"][0], 2000),
+                             call("finished", step["held"], run(*golden("reviewed"))["args"][0], 2000))
+        self.assertEqual((kept["own"], kept["ownAt"], kept["job"]), (step["held"]["own"], 1000, None))
+        self.assertEqual(kept["ackProblem"], "Can't mark it reviewed: fictional.")
+        self.assertEqual((marked["own"]["mark"], marked["ownAt"], marked["ackProblem"]), ("2", 2000, ""))
         service = (PLUGIN / "Service.qml").read_text()
-        self.assertIn("const after = State.afterAck(run, view)", service)
-        self.assertIn("if (!after.kept) {", service)
+        self.assertIn("held = State.finished(held, {", service)
 
     def test_the_panel_names_the_reviewed_file(self):
         unset, empty, moved, slash = views(
@@ -629,9 +656,201 @@ class AskAgent(unittest.TestCase):
 
     def test_the_widget_hands_it_over_as_one_argument(self):
         widget = (PLUGIN / "Widget.qml").read_text()
-        self.assertIn("Util.execArgv(State.agentCommand(State.agentPrompt(root.view, finding, root.service.command)))",
-                      widget)
+        body = widget.split("function askAgent(finding) {", 1)[1].split("\n  }\n", 1)[0]
+        # The prompt is made before the panel closes, as closing goes back to the user's own.
+        made = "var argv = State.agentCommand(State.agentPrompt(root.view, finding, root.service.command, root.chosen))"
+        self.assertLess(body.index(made), body.index("root.close()"))
+        self.assertLess(body.index("root.close()"), body.index("Util.execArgv(argv)"))
         self.assertEqual(widget.count("Util.execArgv("), 1)
+
+
+TAG = "v1.4.0-rc1"
+
+
+def on_tag(name, tag=TAG):
+    """A golden document as the command prints it for a release chosen by hand: the same, on that tag."""
+    text, code = golden(name)
+    doc = json.loads(text)
+    if doc["result"] != "failed":
+        doc["target"]["name"] = tag
+    return run(json.dumps(doc, indent=2), code)["args"][0]
+
+
+@unittest.skipUnless(NODE, "node isn't installed")
+class ChosenRelease(unittest.TestCase):
+    """ "Check" on a newer release shows its report in the panel. The bar stays on your channel."""
+
+    def chosen(self, name, cached=False):
+        """Up to date, then "Check" on the newer release, then its run printed a golden document."""
+        own = holding("no-update")
+        [step] = views(call("startChosen", own, TAG, cached))
+        [done] = views(call("finished", step["held"], on_tag(name), 2000))
+        return own, step, done
+
+    def bar(self, held):
+        return views(call("bar", held))[0]
+
+    def panel(self, held):
+        return views(call("panel", held))[0]
+
+    def test_check_runs_the_command_with_its_tag(self):
+        own = holding("no-update")
+        far, near = views(call("startChosen", own, TAG, False), call("startChosen", own, TAG, True))
+        self.assertEqual(far["args"], ["--json", TAG])
+        self.assertEqual(far["held"]["job"], {"kind": "chosen", "tag": TAG})
+        # While it runs, the panel says what it is checking, and whether it downloads.
+        shown = self.panel(far["held"])
+        self.assertEqual((shown["chosen"], shown["running"], shown["view"]["summary"]),
+                         (TAG, True, f"Checking {TAG}…"))
+        self.assertIn("about 200 MB", shown["view"]["progress"])
+        self.assertEqual(self.panel(near["held"])["view"]["progress"], "It is in the cache, so nothing downloads.")
+        widget = (PLUGIN / "Widget.qml").read_text()
+        self.assertIn("onClicked: root.checkRelease(newer.modelData)", widget)
+        self.assertIn("root.service.checkRelease(release.tag, release.cached)", widget)
+        self.assertIn("start(State.startChosen(held, tag, cached))", (PLUGIN / "Service.qml").read_text())
+
+    def test_its_report_shows_in_the_panel(self):
+        _, _, done = self.chosen("report")
+        shown = self.panel(done)
+        self.assertEqual((shown["chosen"], shown["at"], shown["running"]), (TAG, 2000, False))
+        self.assertEqual((shown["view"]["release"], shown["view"]["state"], shown["view"]["hasReport"]),
+                         (TAG, "attention", True))
+        self.assertEqual([f["id"] for f in shown["view"]["attention"]], ["9d67629", "1354b03", "b2c1f5a"])
+        # At the top: the release, that it was chosen by hand, and that the bar follows your channel.
+        self.assertEqual(shown["chosenLine"], f"{TAG}, chosen by hand. An update wouldn't bring it, so the bar "
+                                              "follows the stable channel.")
+
+    def test_it_never_changes_the_bar(self):
+        for name in ("clear", "incomplete", "report", "reviewed", "failed"):
+            with self.subTest(name):
+                own, step, done = self.chosen(name)
+                bars = [self.bar(held) for held in (own, step["held"], done)]
+                self.assertEqual(bars[0]["view"]["tooltip"], "Omarchy v1.3.0 is up to date")
+                self.assertEqual([b["view"] for b in bars], [own["own"]] * 3)
+                # The bar's tooltip doesn't say "Checking…" for a release it doesn't follow.
+                self.assertEqual([b["running"] for b in bars], [False] * 3)
+                self.assertEqual((done["own"], done["ownAt"]), (own["own"], own["ownAt"]))
+        widget = (PLUGIN / "Widget.qml").read_text()
+        button = widget.split("BarIconButton {", 1)[1].split("\n  }\n", 1)[0]
+        self.assertNotRegex(button, r"root\.view\b")
+        self.assertIn("readonly property var barView: root.service && root.service.view", widget)
+        self.assertIn("readonly property var view: State.bar(held).view", (PLUGIN / "Service.qml").read_text())
+
+    def test_mark_reviewed_on_it_runs_ack_with_its_tag(self):
+        own, _, done = self.chosen("report")
+        [step] = views(call("startAck", done, "9d67629"))
+        self.assertEqual(step["args"], ["--json", "--ack", "9d67629", TAG])
+        self.assertEqual(step["held"]["job"], {"kind": "ack", "tag": TAG})
+        # reviewed.json is report.json with 9d67629 reviewed: it replaces the chosen report.
+        [marked] = views(call("finished", step["held"], on_tag("reviewed"), 3000))
+        shown = self.panel(marked)
+        self.assertEqual(([f["id"] for f in shown["view"]["attention"]], shown["view"]["reviewed"], shown["at"]),
+                         (["1354b03", "b2c1f5a"], 1, 3000))
+        self.assertEqual((marked["own"], marked["ownAt"]), (own["own"], own["ownAt"]))
+
+    def test_a_failed_ack_on_it_leaves_the_chosen_report(self):
+        own, _, done = self.chosen("report")
+        [step] = views(call("startAck", done, "60d484f"))
+        failed = json.dumps(impact.failure("Can't mark it reviewed: fictional."))
+        kept, unreadable = views(call("finished", step["held"], run(failed, 2)["args"][0], 3000),
+                                 call("finished", step["held"], run("Traceback", 1)["args"][0], 3000))
+        self.assertEqual(kept["chosen"]["view"], done["chosen"]["view"])
+        self.assertEqual(self.panel(kept)["ackProblem"], "Can't mark it reviewed: fictional.")
+        self.assertEqual((kept["ackProblem"], kept["own"]), ("", own["own"]))
+        # Output that can't be read is "couldn't check" for that release, never the report standing in.
+        self.assertEqual(self.panel(unreadable)["view"]["summary"], f"Couldn't check {TAG}")
+        self.assertEqual(unreadable["own"], own["own"])
+
+    def test_ask_agent_hands_over_the_chosen_report(self):
+        _, _, done = self.chosen("report")
+        shown = self.panel(done)["view"]
+        command = "/fictional/bin/omaupdateimpact"
+        [prompt] = views(call("agentPrompt", shown, None, command, TAG))
+        self.assertIn(f'"release": "{TAG}"', prompt)
+        self.assertIn(f"run the command yourself: '{command}' --json '{TAG}'", prompt)
+        [own] = views(call("agentPrompt", view(*golden("report")), None, command, ""))
+        self.assertIn(f"run the command yourself: '{command}' --json\n", own)
+
+    def test_back_and_closing_return_to_your_own(self):
+        own, _, done = self.chosen("report")
+        [back] = views(call("back", done))
+        self.assertIsNone(back["chosen"])
+        shown = self.panel(back)
+        self.assertEqual((shown["view"], shown["at"], shown["chosen"], shown["chosenLine"]),
+                         (own["own"], own["ownAt"], "", ""))
+        widget = (PLUGIN / "Widget.qml").read_text()
+        self.assertIn("onClicked: root.goBack()", widget)
+        closing = widget.split("onOpenedChanged: if (!opened) {", 1)[1].split("}", 1)[0]
+        self.assertIn("goBack()", closing)
+        self.assertIn("held = State.back(held)", (PLUGIN / "Service.qml").read_text())
+
+    def test_a_result_after_back_is_dropped(self):
+        own = holding("no-update")
+        [step] = views(call("startChosen", own, TAG, False))
+        [back] = views(call("back", step["held"]))
+        # The run still finishes, and nothing of it is kept.
+        [done] = views(call("finished", back, on_tag("report"), 2000))
+        self.assertEqual(done, dict(own, job=None))
+
+    def test_a_chosen_check_already_running_isnt_started_twice(self):
+        own = holding("no-update")
+        [step] = views(call("startChosen", own, TAG, False))
+        again, other, check = views(call("startChosen", step["held"], TAG, False),
+                                    call("startChosen", step["held"], "v1.4.0-rc2", False),
+                                    call("startCheck", step["held"]))
+        self.assertEqual([s["args"] for s in (again, other, check)], [None] * 3)
+        self.assertEqual([s["held"] for s in (again, other, check)], [step["held"]] * 3)
+        # After Back, "Check" on it shows the same run again, and its result lands there.
+        [back] = views(call("back", step["held"]))
+        self.assertEqual(self.panel(back)["checking"], TAG)
+        [shown] = views(call("startChosen", back, TAG, False))
+        self.assertIsNone(shown["args"])
+        self.assertEqual(self.panel(shown["held"])["view"]["summary"], f"Checking {TAG}…")
+        [done] = views(call("finished", shown["held"], on_tag("clear"), 2000))
+        self.assertEqual(self.panel(done)["view"]["summary"], f"{TAG}: nothing needs attention")
+        # And while the user's own check runs, none is started.
+        [checking] = views(call("startCheck", own))
+        [none] = views(call("startChosen", checking["held"], TAG, False))
+        self.assertEqual((none["args"], none["held"]), (None, checking["held"]))
+
+    def test_the_timer_checks_your_own_and_keeps_the_chosen_report(self):
+        _, _, done = self.chosen("report")
+        [step] = views(call("startCheck", done))
+        self.assertEqual(step["args"], ["--json"])
+        # The panel still shows the chosen report, and doesn't say it is checking.
+        self.assertEqual((self.panel(step["held"])["chosen"], self.panel(step["held"])["running"]), (TAG, False))
+        self.assertTrue(self.bar(step["held"])["running"])
+        [after] = views(call("finished", step["held"], run(*golden("clear"))["args"][0], 3000))
+        self.assertEqual(after["chosen"], done["chosen"])
+        self.assertEqual((after["own"]["summary"], after["ownAt"]), ("v1.3.0: nothing needs attention", 3000))
+
+    def test_a_failed_chosen_check_stays_in_the_panel(self):
+        own = holding("no-update")
+        [step] = views(call("startChosen", own, TAG, False))
+        failed = golden("failed")
+        cases = {
+            "failed": run(*failed)["args"][0],
+            "not json": run("Traceback", 1, "OSError: fictional")["args"][0],
+            "didn't start": run("", -1, started=False)["args"][0],
+            "another release": on_tag("report", "v1.3.0"),
+        }
+        found = views(*(call("finished", step["held"], r, 2000) for r in cases.values()))
+        for name, done in zip(cases, found):
+            with self.subTest(name):
+                shown = self.panel(done)
+                self.assertEqual((shown["chosen"], shown["view"]["state"], shown["view"]["summary"]),
+                                 (TAG, "unknown", f"Couldn't check {TAG}"))
+                self.assertNotEqual(shown["view"]["problem"], "")
+                self.assertEqual((done["own"], done["ownAt"]), (own["own"], own["ownAt"]))
+        self.assertEqual(self.panel(found[0])["view"]["problem"], json.loads(failed[0])["reason"])
+        self.assertIn(f"on v1.3.0, not on {TAG}", self.panel(found[3])["view"]["problem"])
+
+    def test_check_again_and_r_check_your_own_only(self):
+        widget = (PLUGIN / "Widget.qml").read_text()
+        body = widget.split("function checkAgain() {", 1)[1].split("\n  }\n", 1)[0]
+        self.assertIn('if (root.chosen !== "") return', body)
+        again = widget.split('text: root.running ? "Checking…" : "Check again"', 1)[0].rsplit("Button {", 1)[1]
+        self.assertIn('visible: root.chosen === ""', again)
 
 
 if __name__ == "__main__":

@@ -75,4 +75,4 @@ when.
 | 023 | [Marketplace listing](023-marketplace-listing.md) | 015, 022, 027, 029 | in progress |
 | 030 | [Mark reviewed, and ask your agent, from the panel](030-panel-review-and-agent.md) | 023 | done |
 | 031 | [Record the demo video](031-demo-video.md) | 023 | done |
-| 032 | [A newer release's report in the panel](032-chosen-release-in-panel.md) | 030 | todo |
+| 032 | [A newer release's report in the panel](032-chosen-release-in-panel.md) | 030 | done |
