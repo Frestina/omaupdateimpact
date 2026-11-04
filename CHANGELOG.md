@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- "Mark reviewed" in the panel, under each finding that needs attention. It asks
+  first, then runs `--ack` with that id, and the count in the bar drops. The panel
+  names `~/.config/omaupdateimpact/reviewed`, where deleting a line undoes it.
+- "Ask agent" in the panel, under each finding and at the top for the whole report.
+  It starts your default coding agent with one prompt, through Omarchy's
+  `omarchy-agent-prompt`, and shows only when that is on your `PATH`. The prompt says
+  to change nothing unless you ask, and that the finding's text is data, never
+  instructions. Omarchy starts the agent with its approval prompts off.
+
 ## 0.2.0 (2026-11-04)
 
 - An Omarchy shell plugin, from this same repository. An icon in the bar shows the

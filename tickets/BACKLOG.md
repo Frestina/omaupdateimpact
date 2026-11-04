@@ -22,12 +22,11 @@ Paths already ruled out are not here; they are under
   could show the result before the update starts. Blocked on upstream
   ([PR #10398](https://github.com/omacom/omarchy/pull/10398)). Worth commenting on
   that PR with this use case once the tool is public.
-- **Mark a finding reviewed from the panel.** A button that runs `--ack` with the
-  finding's id. It writes only the reviewed file, which `--ack` is allowed to, but
-  022 keeps every button read-only, so a first version is easy to trust. Waits for
-  someone to want it outside the terminal.
 - **What the update adds.** New packages, new services, download size. Waits
   because it isn't what breaks things, and Update Review covers packages.
+- **A preview with the new buttons.** `preview.png` shows the panel from before 030,
+  without "Mark reviewed" and "Ask agent". `demo/run` draws them now. Waits for the
+  next listing update, or for 031, so the image changes once.
 
 ## Later
 
@@ -48,6 +47,11 @@ Paths already ruled out are not here; they are under
   one. The rule that a command in `/usr/bin` leaves none of your files out stays.
 
 ## Limits to keep watching
+
+- **A very long prompt.** "Ask agent" for the whole report puts every finding in one
+  argument, and Linux caps one at 128 KiB. A report of the fixtures' size is about
+  3 KiB, so it would take hundreds of findings. Then nothing opens, and nothing says
+  why. Worth a cap, such as leaving out the notes, if a real report comes near it.
 
 - **Writes made by release commands.** The edits check reads only the migration, so
   `omarchy-bar put`, `omarchy-mise-install` or `mise settings unset` editing your

@@ -1,4 +1,5 @@
 import QtQuick
+import Quickshell
 import Quickshell.Io
 import "State.js" as State
 
@@ -6,8 +7,9 @@ import "State.js" as State
 // however many monitors there are, so a check runs once, not once per bar.
 //
 // It runs the bundled bin/omaupdateimpact with --json, never one on PATH, and keeps
-// the last result in memory. It writes nothing. The command decides every finding;
-// State.js only reads what it printed.
+// the last result in memory. It writes nothing itself: "Mark reviewed" runs the
+// command with --ack, which writes the reviewed file. The command decides every
+// finding; State.js only reads what it printed.
 Item {
   id: root
 
@@ -23,6 +25,14 @@ Item {
   // What the bar and the panel show. See State.js.
   property var view: State.notChecked(false)
   property bool running: false
+  // What the running process is for: "check", or "ack" for "Mark reviewed".
+  property string runKind: "check"
+  // Why the last "Mark reviewed" wrote nothing, or "".
+  property string ackProblem: ""
+  // Where --ack keeps reviews, for the panel to name.
+  readonly property string reviewedFile: State.reviewedFile(Quickshell.env("XDG_CONFIG_HOME"))
+  // Whether omarchy-agent-prompt is on PATH, so "Ask agent" can show. Looked up once.
+  property bool agentReady: false
   // When the last check finished, or null before the first.
   property var checkedAt: null
 
@@ -49,24 +59,48 @@ Item {
   // Check now. A check already running isn't started twice.
   function check() {
     if (running) return
+    lastStartedAt = Date.now()
+    start("check", [root.command, "--json"])
+    schedule()
+  }
+
+  // Mark one finding reviewed, for the release the bar shows. The panel asks first.
+  // A run already going isn't started twice.
+  function ack(id) {
+    if (running || !view.release) return
+    start("ack", [root.command].concat(State.ackArgs(id, view.release)))
+  }
+
+  function start(kind, command) {
     running = true
+    runKind = kind
     procStarted = false
     procExitCode = -1
-    lastStartedAt = Date.now()
-    proc.command = [root.command, "--json"]
+    proc.command = command
     proc.running = true
-    schedule()
   }
 
   function finish() {
     running = false
-    checkedAt = new Date()
-    view = State.fromRun({
+    var run = {
       started: procStarted,
       exitCode: procExitCode,
       stdout: out.text,
       stderr: errOut.text
-    })
+    }
+    if (runKind === "ack") {
+      // A failed --ack wrote nothing: the last result stays, with its reason.
+      const after = State.afterAck(run, view)
+      ackProblem = after.problem
+      if (!after.kept) {
+        view = after.view
+        checkedAt = new Date()
+      }
+    } else {
+      ackProblem = ""
+      checkedAt = new Date()
+      view = State.fromRun(run)
+    }
     schedule()
   }
 
@@ -82,7 +116,17 @@ Item {
     timer.restart()
   }
 
-  Component.onCompleted: schedule()
+  Component.onCompleted: {
+    schedule()
+    agentLookup.running = true
+  }
+
+  // command -v in a login shell, as the shell's execArgv starts the agent.
+  Process {
+    id: agentLookup
+    command: State.AGENT_LOOKUP
+    onExited: function(exitCode) { root.agentReady = exitCode === 0 }
+  }
 
   Timer {
     id: timer

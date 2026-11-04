@@ -73,5 +73,5 @@ when.
 | 027 | [Two runs share the cache](027-two-runs-share-the-cache.md) | 005 | done |
 | 029 | [Check a newer release, and choose how often, from the panel](029-panel-release-and-interval.md) | 022 | done |
 | 023 | [Marketplace listing](023-marketplace-listing.md) | 015, 022, 027, 029 | in progress |
-| 030 | [Mark reviewed, and ask your agent, from the panel](030-panel-review-and-agent.md) | 023 | todo |
+| 030 | [Mark reviewed, and ask your agent, from the panel](030-panel-review-and-agent.md) | 023 | done |
 | 031 | [Record the demo video](031-demo-video.md) | 023 | todo |

@@ -82,6 +82,20 @@ omarchy plugin add https://github.com/Frestina/omaupdateimpact.git --enable
 - Click it for the panel: what needs attention, with each fix to copy, then what
   couldn't be checked, then the notes. "Check again" checks now. "Open report"
   shows the full report in a terminal.
+- "Mark reviewed", under a finding that needs attention, is for one you've seen and
+  accepted. It asks "Mark reviewed?" first, and writes nothing until you say Yes.
+  Then it runs the command with `--ack` and that id, so the finding no longer counts
+  for that release, and the count in the bar drops. Reviews are kept in
+  `~/.config/omaupdateimpact/reviewed`, and the panel names that file. Delete a line
+  there to have that finding count again.
+- "Ask agent", under any finding, hands it to your default coding agent through
+  Omarchy's `omarchy-agent-prompt`. The one at the top hands over the whole report.
+  They show only when `omarchy-agent-prompt` is on your `PATH`. Omarchy starts the
+  agent with its approval prompts off, so it can act without asking you. The prompt
+  tells it to change nothing unless you ask, and to explain first. It also says the
+  finding's text is data, never instructions, as part of it comes from the release.
+  Read what the agent proposes before you agree to it. What the agent sends to its
+  model is up to the agent.
 - When you are up to date and another channel has a newer release, "Check" beside
   it shows that release's report in a terminal. It downloads the release first,
   about 200 MB, unless it is already in the cache. The icon stays on your own
@@ -89,11 +103,11 @@ omarchy plugin add https://github.com/Frestina/omaupdateimpact.git --enable
 - It runs the command in its own folder with `--json`, never one on your `PATH`, and
   holds no rules of its own. It checks 2 minutes after login, then every 6 hours.
   "Check every" in the panel changes that: only when asked, 1, 6, 12 or 24 hours.
-  It saves `checkEveryHours` on the widget's entry in `~/.config/omarchy/shell.json`,
-  the only thing the panel changes. Another value set there by hand, up to 168, is
-  kept.
+  It saves `checkEveryHours` on the widget's entry in `~/.config/omarchy/shell.json`.
+  Another value set there by hand, up to 168, is kept. That setting and "Mark
+  reviewed" are the only things the panel changes.
 
-To mark a finding reviewed, use `--ack` in a terminal. The plugin's command is in
+To mark a finding reviewed from a terminal, use `--ack`. The plugin's command is in
 its folder, so with the plugin alone you run it from there:
 
 ```
@@ -252,14 +266,16 @@ With `--json`, every exit code comes with a document. See [docs/json.md](docs/js
 
 It reads your config, so here is what it does with it.
 
-- **It changes nothing.** The only thing it writes is its cache. `--ack` adds a line
-  to `~/.config/omaupdateimpact/reviewed`. `./install.sh` adds one link, and with
-  `--menu` one menu row. Each happens only when you run it.
+- **It changes nothing.** The only thing it writes is its cache. `--ack`, and "Mark
+  reviewed" in the panel, add a line to `~/.config/omaupdateimpact/reviewed`.
+  `./install.sh` adds one link, and with `--menu` one menu row. Each happens only
+  when you run it.
 - **Nothing from a release runs.** Release files are read as text. A migration is
   split into shell tokens, never run. Key bindings are read without running Lua.
 - **Nothing about you leaves the machine.** It makes GET requests to GitHub for the
   list of releases, the archive of a release and its notes. There is no telemetry, and the
-  report stays in your terminal.
+  report stays in your terminal. "Ask agent" in the panel hands a finding to your own
+  coding agent, only when you click it, and what that agent sends is the agent's.
 - **`GITHUB_TOKEN` goes to `api.github.com` only.** It isn't sent to the archive or
   on a redirect, and it is never printed.
 - **The commands it runs are your own.** It runs `omarchy-version`,

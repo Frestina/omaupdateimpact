@@ -85,14 +85,14 @@ The spec records the decisions below.
 
 ## Done when
 
-- [ ] "Mark reviewed" asks first, then runs `--json --ack <id>` with the bundled
+- [x] "Mark reviewed" asks first, then runs `--json --ack <id>` with the bundled
       command, and the panel and the count follow its document. Tested with fixture
       JSON, and with an `--ack` that fails.
-- [ ] "Ask agent" shows only when `omarchy-agent-prompt` is on `PATH`, and passes one
+- [x] "Ask agent" shows only when `omarchy-agent-prompt` is on `PATH`, and passes one
       prompt that starts with "change nothing unless the user asks". Tested.
-- [ ] Release text sits between the markers, and quotes, `$`, backticks and
+- [x] Release text sits between the markers, and quotes, `$`, backticks and
       newlines reach the launcher intact.
-- [ ] The README names both buttons, the reviewed file, and that the agent runs with
+- [x] The README names both buttons, the reviewed file, and that the agent runs with
       approvals off.
-- [ ] The plugin still passes `omarchy plugin validate` and CI's QML lint.
-- [ ] `tests/run` passes.
+- [x] The plugin still passes `omarchy plugin validate` and CI's QML lint.
+- [x] `tests/run` passes.

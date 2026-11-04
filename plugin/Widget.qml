@@ -9,8 +9,10 @@ import "State.js" as State
 // shows the service's view. Each monitor has its own copy; they share the service.
 //
 // Left click opens the panel. Its buttons check again, and open a report in a
-// terminal: the user's own release, or a newer one on another channel. The one thing
-// it changes is its own setting, how often it checks, when one is chosen.
+// terminal: the user's own release, or a newer one on another channel. "Mark
+// reviewed" asks first, then has the service run the command with --ack. "Ask agent"
+// hands a finding, or the whole report, to the user's own coding agent. The only
+// other thing it changes is its own setting, how often it checks, when one is chosen.
 Panel {
   id: root
   moduleName: "io.github.frestina.omaupdateimpact"
@@ -40,6 +42,12 @@ Panel {
   readonly property var barStyle: Style.bar
   readonly property real barIconSlot: root.barStyle.iconSlot
   property bool notesOpen: false
+  // The id of the finding whose "Mark reviewed?" is open, or "".
+  property string confirming: ""
+  // "Ask agent" shows only when omarchy-agent-prompt is on PATH.
+  readonly property bool agentReady: !!root.service && root.service.agentReady === true
+  readonly property string ackProblem: root.service && typeof root.service.ackProblem === "string"
+    ? root.service.ackProblem : ""
 
   readonly property string glyph: "󰚰"
   readonly property string tooltipText: root.view.tooltip + (root.running && root.view.state !== "notChecked" ? "\nChecking…" : "")
@@ -65,6 +73,21 @@ Panel {
     if (command === "") return
     root.close()
     root.host.run(State.terminalLine(command, args || []))
+  }
+
+  // The finding was seen and accepted: the service runs --ack for it, and its
+  // document replaces the last result. Only after Yes on "Mark reviewed?".
+  function markReviewed(id) {
+    root.confirming = ""
+    if (root.service && typeof root.service.ack === "function") root.service.ack(id)
+  }
+
+  // One finding, or the whole report when finding is null, to the user's own agent.
+  // The prompt is one argument, so no shell reads its text. See State.agentPrompt.
+  function askAgent(finding) {
+    if (!root.agentReady) return
+    root.close()
+    Util.execArgv(State.agentCommand(State.agentPrompt(root.view, finding, root.service.command)))
   }
 
   // Saves the choice on the widget's own entry in shell.json, as the clock panel saves
@@ -102,7 +125,10 @@ Panel {
     return role === "text" ? text : Util.alpha(text, 0.45)
   }
 
-  onOpenedChanged: if (!opened) notesOpen = false
+  onOpenedChanged: if (!opened) {
+    notesOpen = false
+    confirming = ""
+  }
 
   implicitWidth: button.implicitWidth
   implicitHeight: button.implicitHeight
@@ -151,6 +177,20 @@ Panel {
   component Heading: PanelSectionHeader {
     foreground: root.foreground
     fontFamily: root.fontFamily
+  }
+
+  // "Ask agent" for one finding, or for the whole report when finding is null.
+  component AgentButton: Button {
+    id: agentButton
+    property var about: null
+    visible: root.agentReady
+    iconText: "󰚩"
+    text: "Ask agent"
+    tooltipText: agentButton.about ? "Ask your coding agent about this finding" : "Ask your coding agent about the report"
+    foreground: root.foreground
+    fontFamily: root.fontFamily
+    fontSize: root.fonts.bodySmall
+    onClicked: root.askAgent(agentButton.about)
   }
 
   KeyboardPanel {
@@ -260,6 +300,10 @@ Panel {
               fontSize: root.fonts.bodySmall
               onClicked: root.openReport()
             }
+
+            AgentButton {
+              visible: root.agentReady && root.view.hasReport
+            }
           }
 
           // ---------- Why it couldn't check ----------
@@ -323,6 +367,12 @@ Panel {
             text: "NEEDS ATTENTION"
           }
 
+          // Why the last "Mark reviewed" wrote nothing. The last result stays.
+          Selectable {
+            visible: root.ackProblem !== ""
+            text: root.ackProblem
+          }
+
           Repeater {
             model: root.view.attention
             delegate: Column {
@@ -350,6 +400,57 @@ Panel {
                 text: finding.modelData.evidence.join("\n") + "\n[" + finding.modelData.id + "]"
                 color: root.muted
                 font.pixelSize: root.fonts.caption
+              }
+
+              Row {
+                visible: root.confirming !== finding.modelData.id
+                spacing: Style.space(6)
+
+                Button {
+                  iconText: "󰄬"
+                  text: "Mark reviewed"
+                  tooltipText: "Seen it, and it's fine: it won't count for " + root.view.release + " again"
+                  enabled: !!root.service && !root.running
+                  foreground: root.foreground
+                  fontFamily: root.fontFamily
+                  fontSize: root.fonts.bodySmall
+                  onClicked: root.confirming = finding.modelData.id
+                }
+
+                AgentButton { about: finding.modelData }
+              }
+
+              // In place, and nothing is written until Yes.
+              Row {
+                visible: root.confirming === finding.modelData.id
+                spacing: Style.space(6)
+
+                Text {
+                  anchors.verticalCenter: parent.verticalCenter
+                  textFormat: Text.PlainText
+                  text: "Mark reviewed?"
+                  color: root.foreground
+                  font.family: root.fontFamily
+                  font.pixelSize: root.fonts.bodySmall
+                }
+
+                Button {
+                  text: "Yes"
+                  tooltipText: "Run --ack " + finding.modelData.id + " for " + root.view.release
+                  enabled: !!root.service && !root.running
+                  foreground: root.foreground
+                  fontFamily: root.fontFamily
+                  fontSize: root.fonts.bodySmall
+                  onClicked: root.markReviewed(finding.modelData.id)
+                }
+
+                Button {
+                  text: "No"
+                  foreground: root.foreground
+                  fontFamily: root.fontFamily
+                  fontSize: root.fonts.bodySmall
+                  onClicked: root.confirming = ""
+                }
               }
             }
           }
@@ -388,6 +489,7 @@ Panel {
                 color: root.muted
                 font.pixelSize: root.fonts.caption
               }
+              AgentButton { about: unknown.modelData }
             }
           }
 
@@ -420,18 +522,16 @@ Panel {
                 color: root.muted
                 font.pixelSize: root.fonts.caption
               }
+              AgentButton { about: note.modelData }
             }
           }
 
-          // ---------- Reviewed, a count ----------
-          Text {
+          // ---------- Reviewed, a count, and the file that undoes one ----------
+          Selectable {
             visible: root.view.reviewed > 0
-            width: parent.width
-            textFormat: Text.PlainText
-            text: State.plural(root.view.reviewed, "finding", "findings") + " reviewed with --ack."
-            wrapMode: Text.Wrap
+            text: State.reviewedLine(root.view.reviewed,
+              root.service ? root.service.reviewedFile : State.reviewedFile(""))
             color: root.muted
-            font.family: root.fontFamily
             font.pixelSize: root.fonts.caption
           }
 

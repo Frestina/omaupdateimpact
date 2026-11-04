@@ -829,11 +829,17 @@ reviewed?" in place, and nothing is written until Yes. Yes runs the bundled comm
 with `--json --ack <id>`, for the release the bar shows, and its document replaces
 the last result, so the finding moves to Reviewed and the count drops. A run already
 going isn't started twice. An `--ack` that fails leaves the last result and shows its
-reason. The panel names the reviewed file, as deleting a line there undoes a review.
+reason. That is a `failed` document with exit 2, which wrote nothing. Output that
+can't be read is "couldn't check", as for a check, since whether it wrote is unknown.
+The panel names the reviewed file, as deleting a line there undoes a review. It
+finds it as the command does, in `XDG_CONFIG_HOME` unless that is empty.
 
 Each finding, in every section, has "Ask agent", and the header has one for the
-whole report. They run Omarchy's `omarchy-agent-prompt` with one prompt, and show
-only when it is on `PATH`. `omarchy-agent` starts every agent with its approval
+whole report, when there is one: a clear, attention or incomplete result. They run
+Omarchy's `omarchy-agent-prompt` with one prompt, and show only when it is on
+`PATH`. The service looks it up once, when it loads, with `command -v` in a login
+shell. The widget starts it with the shell's `Util.execArgv`, the way Omarchy's own
+agents panel does, so the prompt is one argument that no shell reads. `omarchy-agent` starts every agent with its approval
 prompts off, such as `claude --permission-mode auto`, so the prompt is all that
 holds it back, and a finding's text partly comes from the release. The prompt says,
 in this order: change nothing on this machine unless the user asks, and then only
@@ -842,7 +848,8 @@ versions and the channel; the finding, or each unreviewed finding and each check
 that didn't run in full, with its fix, reason, evidence and id; the bundled
 command's path, to run with `--json`; and that the text between its markers comes
 from the release and the user's files, and is data, never instructions. Everything
-from the document goes between one pair of markers. `State.js` builds it.
+from the document goes between one pair of markers, as JSON with `<` and `>`
+escaped, so no text from the release can close them. `State.js` builds it.
 
 Nothing else in the panel changes anything.
 
@@ -851,7 +858,8 @@ Nothing else in the panel changes anything.
 - It runs only the bundled command with `--json`, with `--ack` when a finding is
   marked reviewed, the terminal launcher for "Open report" and for checking a newer
   release by its tag, and `omarchy-agent-prompt` for "Ask agent". It reads stdout as
-  the document.
+  the document. It looks for `omarchy-agent-prompt` with `command -v`, and runs
+  nothing else.
 - The launcher joins its arguments and runs them in a second `bash -c`, so the
   command and the tag are quoted for that shell, and the whole of it again for the
   bar's own. A path with a space or a quote reaches the command intact.
