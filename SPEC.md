@@ -839,9 +839,9 @@ whole report, when there is one: a clear, attention or incomplete result. They r
 Omarchy's `omarchy-agent-prompt` with one prompt, and show only when it is on
 `PATH`. The service looks it up once, when it loads, with `command -v` in a login
 shell. The widget starts it with the shell's `Util.execArgv`, the way Omarchy's own
-agents panel does, so the prompt is one argument that no shell reads. `omarchy-agent` starts every agent with its approval
-prompts off, such as `claude --permission-mode auto`, so the prompt is all that
-holds it back, and a finding's text partly comes from the release. The prompt says,
+agents panel does, so the prompt is one argument that no shell reads.
+`omarchy-agent` starts every agent with its approval prompts off, such as
+`claude --permission-mode auto`, so the prompt is all that holds it back, and a finding's text partly comes from the release. The prompt says,
 in this order: change nothing on this machine unless the user asks, and then only
 what they asked, and explain first; what this tool is, and that it only reads; the
 versions and the channel; the finding, or each unreviewed finding and each check
