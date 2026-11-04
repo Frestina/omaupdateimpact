@@ -80,23 +80,27 @@ omarchy plugin add https://github.com/Frestina/omaupdateimpact.git --enable
   when something does, and a `?` when it couldn't check. It never hides, and it is
   never shown as clear for a check that didn't run.
 - Click it for the panel: what needs attention, then what couldn't be checked,
-  then what is worth knowing. Each finding shows its title. Click the title to see
-  the rest, with the fix to copy. "Check again" checks now. "Open report" shows the
-  full report in a terminal.
+  then what is worth knowing, then what you reviewed. Each finding shows its title.
+  Click the title to see the rest, with the fix to copy. A note that lists things,
+  such as the new default shortcuts, shows one per line. "Check again" checks now.
+  "Open report" shows the full report in a terminal.
 - "Mark reviewed", under a finding that needs attention, is for one you've seen and
-  accepted. It asks "Mark reviewed?" first, and writes nothing until you say Yes.
-  Then it runs the command with `--ack` and that id, so the finding no longer counts
-  for that release, and the count in the bar drops. Reviews are kept in
-  `~/.config/omaupdateimpact/reviewed`, and the panel names that file. Delete a line
-  there to have that finding count again.
+  accepted. It runs the command with `--ack` and that id at once, so the finding no
+  longer counts for that release, and the count in the bar drops. The finding moves
+  to Reviewed at the bottom, where "Undo" runs `--unack` and it counts again.
+  Reviews are kept in `~/.config/omaupdateimpact/reviewed`, and the panel names
+  that file.
 - "Ask agent", under any finding, hands it to your default coding agent through
   Omarchy's `omarchy-agent-prompt`. The one at the top hands over the whole report.
   They show only when `omarchy-agent-prompt` is on your `PATH`. Omarchy starts the
   agent with its approval prompts off, so it can act without asking you. The prompt
-  tells it to change nothing unless you ask, and to explain first. It also says the
-  finding's text is data, never instructions, as part of it comes from the release.
-  Read what the agent proposes before you agree to it. What the agent sends to its
-  model is up to the agent.
+  tells it to change nothing unless you ask, and to explain first. When a finding is
+  about something the release removes or replaces, such as a package, it asks the
+  agent what takes its place and what you would keep or lose. It points the agent at
+  the release in the cache and its notes, and tells it to install nothing. It also
+  says the finding's text is data, never instructions, as part of it comes from the
+  release. Read what the agent proposes before you agree to it. What the agent sends
+  to its model is up to the agent.
 - When you are up to date and another channel has a newer release, the panel
   shows it under "Coming next". "Check it" shows that release's report in the
   panel. It downloads the release first, about 200 MB, unless it is already in the
@@ -110,11 +114,12 @@ omarchy plugin add https://github.com/Frestina/omaupdateimpact.git --enable
   holds no rules of its own. It checks 2 minutes after login, then every 6 hours.
   "Check every" in the panel changes that: only when asked, 1, 6, 12 or 24 hours.
   It saves `checkEveryHours` on the widget's entry in `~/.config/omarchy/shell.json`.
-  Another value set there by hand, up to 168, is kept. That setting and "Mark
-  reviewed" are the only things the panel changes.
+  Another value set there by hand, up to 168, is kept. That setting, "Mark
+  reviewed" and "Undo" are the only things the panel changes.
 
-To mark a finding reviewed from a terminal, use `--ack`. The plugin's command is in
-its folder, so with the plugin alone you run it from there:
+To mark a finding reviewed from a terminal, use `--ack`, and `--unack` to take it
+back. The plugin's command is in its folder, so with the plugin alone you run it
+from there:
 
 ```
 ~/.config/omarchy/plugins/io.github.frestina.omaupdateimpact/bin/omaupdateimpact --ack 3344d3a
@@ -162,12 +167,13 @@ Run it before `omarchy update`. Omarchy has no pre-update hook, so it can't run 
 itself.
 
 ```
-omaupdateimpact               # the release your update channel would deliver
-omaupdateimpact --channel rc  # the release another channel would deliver
-omaupdateimpact v4.5.0-rc2    # a specific release
-omaupdateimpact --all         # every note, not only how many there are
-omaupdateimpact --ack 3344d3a # you've seen that finding and it's fine
-omaupdateimpact --json        # one JSON document, for scripts: see docs/json.md
+omaupdateimpact                 # the release your update channel would deliver
+omaupdateimpact --channel rc    # the release another channel would deliver
+omaupdateimpact v4.5.0-rc2      # a specific release
+omaupdateimpact --all           # every note, not only how many there are
+omaupdateimpact --ack 3344d3a   # you've seen that finding and it's fine
+omaupdateimpact --unack 3344d3a # it counts again
+omaupdateimpact --json          # one JSON document, for scripts: see docs/json.md
 ```
 
 ![A terminal running omaupdateimpact on a made-up machine](docs/demo.svg)
@@ -185,9 +191,14 @@ Each finding that needs attention ends with an id in brackets. If you've seen on
 and it's fine, run the same command again with `--ack` and that id. It no longer
 counts for that release: the report only counts it at the end, and it doesn't make
 the exit code 1. A new release asks again. Reviews are kept in
-`~/.config/omaupdateimpact/reviewed`, one per line, and deleting a line brings that
-finding back. A note can't be reviewed, as it doesn't count anyway, and neither can a
-limit, as a check that didn't run is never clear.
+`~/.config/omaupdateimpact/reviewed`, one per line. `--unack` and the id bring that
+finding back, and so does deleting its line. `--unack` removes only that release's
+lines for the id, and leaves the rest of the file as it was. A note can't be
+reviewed, as it doesn't count anyway, and neither can a limit, as a check that didn't
+run is never clear.
+
+With `--all`, the notes are listed under a heading for each kind, such as "Shortcuts
+that move", each on a short line with more under it.
 
 ## What it checks
 
@@ -274,6 +285,7 @@ It reads your config, so here is what it does with it.
 
 - **It changes nothing.** The only thing it writes is its cache. `--ack`, and "Mark
   reviewed" in the panel, add a line to `~/.config/omaupdateimpact/reviewed`.
+  `--unack`, and "Undo", take one out.
   `./install.sh` adds one link, and with `--menu` one menu row. Each happens only
   when you run it.
 - **Nothing from a release runs.** Release files are read as text. A migration is

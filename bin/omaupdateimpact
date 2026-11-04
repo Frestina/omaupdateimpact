@@ -218,12 +218,16 @@ class Finding:
     title: str
     evidence: list
     detail: str = ""
+    # What a finding that lists things lists, one string each, such as each new default shortcut.
+    items: list = field(default_factory=list)
     fix: str = ""
     # An unknown that leaves the rest of its check standing.
     partial: bool = False
     reason: Reason | None = None
     # Seen by the user for this release, so it no longer counts. Only attention can be.
     reviewed: bool = False
+    # A note's heading for its kind, such as "Shortcuts that move". Other levels have none.
+    group: str = ""
     # What it is about, as (kind, name) pairs, for finding its reason. It isn't in the document.
     about: tuple = field(default=(), compare=False, repr=False)
 
@@ -237,10 +241,21 @@ class Finding:
         return hashlib.sha256(said).hexdigest()[:ID_LENGTH]
 
     def data(self):
-        """The finding as the --json document holds it. What it is about isn't copied, as a Word can't be."""
+        """The finding as the --json document holds it. What it is about isn't copied, as a Word can't be.
+
+        Only a finding that lists things has items, and only a note has a group.
+        """
         data = dataclasses.asdict(dataclasses.replace(self, about=()))
         del data["about"]
-        return {"id": self.id, **data}
+        group, items = data.pop("group"), data.pop("items")
+        ordered = {"id": self.id}
+        for key, value in data.items():
+            if key == "title" and group:
+                ordered["group"] = group
+            ordered[key] = value
+            if key == "detail" and items:
+                ordered["items"] = items
+        return ordered
 
 
 class UnusableTree(Exception):
@@ -261,6 +276,10 @@ class NoRelease(Exception):
 
 class ShellUnread(Exception):
     """A script this reader lost its place in."""
+
+
+class NoReview(Exception):
+    """An --unack with no review to take back, or a reviewed file it couldn't write."""
 
 
 class NotReviewable(Exception):
@@ -574,8 +593,11 @@ def compare_computed(current, target, user):
         findings.append(Finding(
             "bindings",
             NOTE,
-            f"{same.total()} key bindings use computed keys and weren't compared.",
+            f"{counted(same.total(), 'computed key')} not compared.",
             sorted(evidence),
+            detail=f"{'Its key is' if same.total() == 1 else 'Their keys are'} worked out when Lua runs, and "
+            f"{'its' if same.total() == 1 else 'each'} expression is the same in both versions.",
+            group="Computed keys",
         ))
     return findings
 
@@ -631,57 +653,77 @@ def compare_bindings(current, target, user):
             findings.append(Finding(
                 "bindings",
                 NOTE,
-                f"{chord}: your unbind no longer does anything, the default is gone.",
+                f"{chord}: your unbind does nothing now",
                 [*unbound, *sources(cur[chord])],
+                detail=f'The default it turned off, "{label(cur[chord])}", is gone.',
+                group="Your bindings",
                 about=keys(chord),
             ))
         elif chord in arrived and chord in user.binds and turned_off(chord, tgt[chord]):
             findings.append(Finding(
                 "bindings",
                 NOTE,
-                f'{chord}: your binding now replaces "{label(tgt[chord])}", '
-                f'not "{label(cur[chord])}".',
+                f'{chord}: yours replaces "{label(tgt[chord])}" now',
                 sources(user.binds[chord], tgt[chord]),
+                detail=f'It replaced "{label(cur[chord])}".',
+                group="Your bindings",
                 about=keys(chord),
             ))
 
     # A move is one change, with what it replaced and what took its place. A key that
     # another move accounts for is told there.
     for chord, other in sorted(moved.items()):
-        title, evidence = f'Moved: "{label(cur[chord])}" from {chord} to {other}', [cur[chord], tgt[other]]
+        evidence, also = [cur[chord], tgt[other]], []
         if other in taken_over and other not in moved:
-            title += f', replacing "{label(cur[other])}"'
+            also.append(f'Replaces "{label(cur[other])}".')
             evidence.append(cur[other])
-        title += "."
         if chord in taken_over and chord not in moved.values():
-            title += f' {chord} is now "{label(tgt[chord])}".'
+            also.append(f'{chord} is now "{label(tgt[chord])}".')
             evidence.append(tgt[chord])
-        findings.append(Finding("bindings", NOTE, title, sources(*evidence), about=keys(chord, other)))
+        findings.append(Finding(
+            "bindings",
+            NOTE,
+            f"{label(cur[chord])}: {chord} -> {other}",
+            sources(*evidence),
+            detail=" ".join(also),
+            group="Shortcuts that move",
+            about=keys(chord, other),
+        ))
 
     for chord in sorted(taken_over - set(moved) - set(moved.values())):
         findings.append(Finding(
             "bindings",
             NOTE,
-            f'{chord} is now "{label(tgt[chord])}", it was "{label(cur[chord])}".',
+            f'{chord}: "{label(cur[chord])}" -> "{label(tgt[chord])}"',
             sources(cur[chord], tgt[chord]),
+            group="Shortcuts that change",
             about=keys(chord),
         ))
 
+    # A list isn't about any one key, so it has no reason. Each shortcut is an item.
     fresh = sorted(
         c for c in arrived
         if c not in cur and c not in moved.values() and c not in user.binds and not c.startswith("SWITCH:")
     )
     if fresh:
-        lines = ", ".join(f'{c} ("{label(tgt[c])}")' for c in fresh)
         findings.append(Finding(
-            "bindings", NOTE, f"New default shortcuts: {lines}.", sources(*(tgt[c] for c in fresh))
+            "bindings",
+            NOTE,
+            f"{counted(len(fresh), 'new default shortcut')}.",
+            sources(*(tgt[c] for c in fresh)),
+            items=[f"{c}: {label(tgt[c])}" for c in fresh],
+            group="New default shortcuts",
         ))
 
     gone = sorted(c for c in changed if c not in moved and c not in tgt and not turned_off(c, cur[c]))
     if gone:
-        lines = ", ".join(f'{c} ("{label(cur[c])}")' for c in gone)
         findings.append(Finding(
-            "bindings", NOTE, f"Default shortcuts removed: {lines}.", sources(*(cur[c] for c in gone))
+            "bindings",
+            NOTE,
+            f"{counted(len(gone), 'default shortcut')} removed.",
+            sources(*(cur[c] for c in gone)),
+            items=[f"{c}: {label(cur[c])}" for c in gone],
+            group="Default shortcuts removed",
         ))
 
     for name, source in sorted({**current.helpers, **target.helpers}.items()):
@@ -1648,30 +1690,42 @@ def edit_finding(migration, places, lines, removes, changed, home):
     shown = str(place).replace(str(home), "~", 1)
     verb = "removes" if removes else "edits"
     evidence = [f"{migration}:{line}" for line in sorted(lines)]
-    detail = "It is read, not run, so the result isn't known. omaforecast can show it by running the migration in a sandbox."
-    where = f"{migration}, {on_lines(sorted(lines))}, looks like it {verb}"
+    sandbox = "It is read, not run, so the result isn't known. omaforecast can show it by running the migration in a sandbox."
+    where = on_lines(sorted(lines))
     if len(places) > 1:
-        title = f"{where} {len(changed)} files of yours that aren't Omarchy's default."
+        what = f"{len(changed)} files of yours"
         names = listed(str(path).replace(str(home), "~", 1) for path, _ in changed)
-        detail = f"They are {names}. It may {verb[:-1]} only some. {detail}"
+        detail = (
+            f"They are {names}, and none is Omarchy's default. It looks like it {verb} them on {where}, "
+            f"and may {verb[:-1]} only some. {sandbox}"
+        )
     elif wildcard(place, home):
         folder = next(parent for parent in place.parents if not wildcard(parent, home))
         names = listed(str(path.relative_to(folder)) for path, _ in changed)
-        title = (
-            f"{where} files that match {shown}, and {len(changed)} of them "
-            f"{'is' if len(changed) == 1 else 'are'}n't Omarchy's default."
-        )
         shown_folder = str(folder).replace(str(home), "~", 1)
-        detail = f"{'It is' if len(changed) == 1 else 'They are'} {names}, in {shown_folder}. It may {verb[:-1]} only some. {detail}"
-    elif place.is_dir():
-        title = f"{where} the folder {shown}."
-    elif changed[0][1]:
-        title = f"{where} {shown}, which differs from Omarchy's default."
+        what = f"files that match {shown}"
+        detail = (
+            f"{len(changed)} of them {'is' if len(changed) == 1 else 'are'}n't Omarchy's default: {names}, in "
+            f"{shown_folder}. It looks like it {verb} them on {where}, and may {verb[:-1]} only some. {sandbox}"
+        )
     else:
-        title = f"{where} {shown}, which Omarchy has no default for."
+        what = f"the folder {shown}" if place.is_dir() else shown
+        state = (
+            "" if place.is_dir() else
+            " It differs from Omarchy's default." if changed[0][1] else " Omarchy has no default for it."
+        )
+        detail = f"It looks like it {verb} the {'folder' if place.is_dir() else 'file'} on {where}.{state} {sandbox}"
     for path, default in changed:
         evidence += [str(path).replace(str(home), "~", 1), *([default] if default else [])]
-    return Finding("edits", NOTE, title, evidence, detail=detail, about=(("migration", migration),))
+    return Finding(
+        "edits",
+        NOTE,
+        f"{migration} may {verb[:-1]} {what}",
+        evidence,
+        detail=detail,
+        group="Files a migration may edit",
+        about=(("migration", migration),),
+    )
 
 
 def compare_edits(current, target, home, checked):
@@ -1880,8 +1934,16 @@ def compare_commands(current, target, home, checked):
         title = f"{shown} calls {command}, which the release deletes."
         about = (("command", command),)
         if original:
-            detail = "It's Omarchy's own file, unchanged, so there's nothing for you to fix."
-            findings.append(Finding("commands", NOTE, title, [*lines, original], detail=detail, about=about))
+            detail = f"The release deletes {command}. It's Omarchy's own file, unchanged, so there's nothing for you to fix."
+            findings.append(Finding(
+                "commands",
+                NOTE,
+                f"{shown} calls {command}",
+                [*lines, original],
+                detail=detail,
+                group="Deleted commands in Omarchy's own files",
+                about=about,
+            ))
         else:
             where = f"line {numbers[0]}" if len(numbers) == 1 else f"lines {', '.join(map(str, numbers))}"
             fix = f"Change or remove {where}. This tool can't tell what replaces the command."
@@ -2014,8 +2076,10 @@ def compare_plugins(current, target, home, checked):
             findings.append(Finding(
                 "plugins",
                 NOTE,
-                f"{plugin.name}: {counted(count, 'new qmllint warning')}, such as {sample[0]}: {sample[1]}",
+                f"{plugin.name}: {counted(count, 'new qmllint warning')}",
                 [f"{shown}/{plugin.name}/{sample[0]}"],
+                detail=f"{'It is' if count == 1 else 'Such as'} {sample[0]}: {sample[1]}",
+                group="Plugins",
             ))
     if linted:
         checked["plugins"] = {"linted": linted}
@@ -2024,8 +2088,10 @@ def compare_plugins(current, target, home, checked):
         findings.append(Finding(
             "plugins",
             NOTE,
-            "qmllint can't prove a plugin works. Most plugin breaks only show when the shell runs them.",
+            "qmllint can't prove a plugin works.",
             [shown],
+            detail="Most plugin breaks only show when the shell runs them.",
+            group="Plugins",
         ))
     return findings
 
@@ -2141,6 +2207,49 @@ def record_reviews(path, name, findings, ids, seen):
     except (OSError, UnicodeError) as error:
         raise NotReviewable(f"couldn't write {path}: {error}") from error
     print(f"Marked {counted(len(wanted), 'finding')} reviewed for {name}, in {path}.", file=sys.stderr)
+    return set(wanted)
+
+
+def remove_reviews(path, name, ids):
+    """Take back the reviews with these ids, for this release, and give their ids.
+
+    Each must have a line for this release, or nothing is written. Only those lines
+    go, and every other byte stays as it was. The file is written whole beside the
+    one a link points to, then moved into place, so a file kept as a link stays one.
+    """
+    wanted = list(dict.fromkeys(given.lower() for given in ids))
+    try:
+        data = path.read_bytes()
+    except FileNotFoundError:
+        data = None
+    except OSError as error:
+        raise NoReview(f"couldn't read {path}: {error}") from error
+    # Split on newlines alone, as reading the reviews does, each line with its own.
+    lines = re.findall(rb"[^\n]*\n|[^\n]+$", data or b"")
+
+    def taken(line):
+        text = line.decode(errors="replace")
+        words = text.split()
+        return not text.lstrip().startswith("#") and len(words) >= 2 and words[0] == name and words[1].lower() in wanted
+
+    found = {line.decode(errors="replace").split()[1].lower() for line in lines if taken(line)}
+    for given in wanted:
+        if given not in found:
+            raise NoReview(f"{path} has no review of {given} for {name}.")
+    place = path.resolve()
+    try:
+        with tempfile.NamedTemporaryFile(dir=place.parent, prefix=f".{place.name}.", delete=False) as out:
+            try:
+                out.write(b"".join(line for line in lines if not taken(line)))
+                out.flush()
+                os.fchmod(out.fileno(), place.stat().st_mode & 0o7777)
+                os.replace(out.name, place)
+            except BaseException:
+                os.unlink(out.name)
+                raise
+    except OSError as error:
+        raise NoReview(f"couldn't write {path}: {error}") from error
+    print(f"Took back {counted(len(wanted), 'review')} for {name}, in {path}.", file=sys.stderr)
     return set(wanted)
 
 
@@ -2421,8 +2530,11 @@ def check_states(findings):
     return {check: DIDNT_RUN if check in not_run else RAN_IN_PART if check in in_part else RAN for check in CHECKS}
 
 
-def compared(version, channel, name, checked, findings):
-    """The document for a comparison. A count that wasn't looked at is None, so it can't read as zero."""
+def compared(version, channel, name, path, checked, findings):
+    """The document for a comparison. A count that wasn't looked at is None, so it can't read as zero.
+
+    The target's path is the unpacked release it read, so an agent can read its files and notes.
+    """
     # A reviewed finding no longer counts.
     levels = {finding.level for finding in findings if not finding.reviewed}
     result = "attention" if ATTENTION in levels else "incomplete" if UNKNOWN in levels else "clear"
@@ -2431,7 +2543,9 @@ def compared(version, channel, name, checked, findings):
         check: {"state": states[check], "checked": {count: checked.get(check, {}).get(count) for count in counts}}
         for check, counts in CHECKS.items()
     }
-    return document(result, version, channel, name, checks=checks, findings=findings)
+    found = document(result, version, channel, name, checks=checks, findings=findings)
+    found["target"]["path"] = str(Path(path).absolute())
+    return found
 
 
 def counted(number, noun):
@@ -2481,19 +2595,50 @@ def checked_line(checks):
     return wrapped(f"Checked {', '.join(parts)}.")
 
 
+def print_finding(finding, indent="  "):
+    """One finding, then its items one per line, its reason and its fix. One that can be reviewed shows its id.
+
+    A note's title is a short line of its own, never split, with its detail under it.
+    """
+    under = indent + "  "
+    if finding.level == NOTE:
+        print(f"{indent}- {' '.join(finding.title.split())}")
+        if finding.detail:
+            print(wrapped(finding.detail, under, under))
+    else:
+        text = f"{finding.text()} [{finding.id}]" if finding.level == ATTENTION else finding.text()
+        print(wrapped(text, f"{indent}- ", under))
+    for item in finding.items:
+        print(wrapped(item, under, under + "  "))
+    if finding.reason:
+        why = f"{finding.reason.text.rstrip('.')} ({finding.reason.reference})."
+        print(wrapped(why, f"{under}Why: ", under + " " * 5))
+    if finding.fix:
+        # Painted after filling, because colour codes would count as width.
+        print(wrapped(finding.fix, f"{under}Fix: ", under + " " * 5).replace("Fix:", painted("Fix:", GREEN), 1))
+
+
 def print_section(title, found, colour, hint=""):
-    """A section of findings. One that can be reviewed shows its id."""
+    """A section of findings."""
     if found:
         print(f"\n{painted(title, colour)}{hint}")
         for finding in found:
-            text = f"{finding.text()} [{finding.id}]" if finding.level == ATTENTION else finding.text()
-            print(wrapped(text, "  - ", "    "))
-            if finding.reason:
-                why = f"{finding.reason.text.rstrip('.')} ({finding.reason.reference})."
-                print(wrapped(why, "    Why: ", " " * 9))
-            if finding.fix:
-                # Painted after filling, because colour codes would count as width.
-                print(wrapped(finding.fix, "    Fix: ", " " * 9).replace("Fix:", painted("Fix:", GREEN), 1))
+            print_finding(finding)
+
+
+def print_notes(notes):
+    """Every note, under its group's heading, in the order the groups first come."""
+    if notes:
+        print(f"\n{painted('Worth knowing', BOLD)}")
+        groups = {}
+        for note in notes:
+            groups.setdefault(note.group or "Other", []).append(note)
+        for index, (group, found) in enumerate(groups.items()):
+            if index:
+                print()
+            print(f"  {group}")
+            for note in found:
+                print_finding(note, "    ")
 
 
 def print_closing(document):
@@ -2521,7 +2666,7 @@ def print_report(document, everything):
     print_section("Needs attention", attention, RED, ". Seen one, and it's fine? Run this again with --ack and its id.")
     notes = [finding for finding in findings if finding.level == NOTE]
     if everything:
-        print_section("Worth knowing", notes, BOLD)
+        print_notes(notes)
     elif notes:
         print(f"\n{painted('Worth knowing', BOLD)}: {counted(len(notes), 'note')}. Add --all to see them.")
     print_section("Limits of this check", [finding for finding in findings if finding.level == UNKNOWN], YELLOW)
@@ -2588,6 +2733,8 @@ def check(options, held):
             if own_tree and installed and installed == wanted:
                 if options.ack:
                     raise NotReviewable("there is no update, so there is nothing to review.")
+                if options.unack:
+                    raise NoReview("there is no update, so there is no review to take back.")
                 return no_update(version, tag, channel, cache)
             target = fetch_release(tag, cache, held)
             fetch_notes(tag, target)
@@ -2616,9 +2763,11 @@ def check(options, held):
     seen = read_reviews(reviews, name)
     if options.ack:
         seen |= record_reviews(reviews, name, findings, options.ack, seen)
+    if options.unack:
+        seen -= remove_reviews(reviews, name, options.unack)
     for finding in findings:
         finding.reviewed = finding.level == ATTENTION and finding.id in seen
-    return compared(version, channel, name, checked, findings)
+    return compared(version, channel, name, target, checked, findings)
 
 
 class Parser(argparse.ArgumentParser):
@@ -2652,9 +2801,17 @@ def main():
         metavar="ID",
         help="mark the finding with this id as reviewed, so it doesn't count for this release again",
     )
+    parser.add_argument(
+        "--unack",
+        action="append",
+        metavar="ID",
+        help="take back the review of the finding with this id, so it counts for this release again",
+    )
     parser.add_argument("--json", action="store_true", help="print one JSON document instead (see docs/json.md)")
     parser.add_argument("--debug", action="store_true", help="show the traceback when something fails")
     options = parser.parse_args()
+    if options.ack and options.unack:
+        parser.error("--ack and --unack can't be used together")
     try:
         # Anything else printed goes to stderr, so stdout holds the document alone.
         with contextlib.redirect_stdout(sys.stderr) if options.json else contextlib.nullcontext():
@@ -2667,6 +2824,8 @@ def main():
         document = fail("Can't pick a release", error, options.debug)
     except NotReviewable as error:
         document = fail("Can't mark it reviewed", error, options.debug)
+    except NoReview as error:
+        document = fail("Can't take the review back", error, options.debug)
     except Exception as error:  # noqa: BLE001
         document = fail(f"Unexpected {type(error).__name__}", error, options.debug)
     print_document(document, options)

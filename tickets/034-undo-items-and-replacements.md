@@ -68,15 +68,15 @@ The spec already records each decision below.
 
 ## Done when
 
-- [ ] `--unack` removes only that release's lines for the id, byte for byte, keeps a
+- [x] `--unack` removes only that release's lines for the id, byte for byte, keeps a
       link a link, and is exit 2 with nothing written otherwise. Tested.
-- [ ] "Mark reviewed" runs at once, and "Undo" under Reviewed takes it back. Tested
+- [x] "Mark reviewed" runs at once, and "Undo" under Reviewed takes it back. Tested
       with fixture JSON.
-- [ ] Both shortcut notes have `items` and a short title, in `--json`, the text
+- [x] Both shortcut notes have `items` and a short title, in `--json`, the text
       report and the panel. The golden files and `docs/json.md` match.
-- [ ] Every note has a `group` and a one-line title, with the rest in its detail,
+- [x] Every note has a `group` and a one-line title, with the rest in its detail,
       in `--json` and under `--all`. Tested for each kind of note.
-- [ ] `target.path` is in the document, and the prompt names it in its new step.
+- [x] `target.path` is in the document, and the prompt names it in its new step.
       Tested.
-- [ ] The plugin still passes `omarchy plugin validate` and CI's QML lint.
-- [ ] `tests/run` passes.
+- [x] The plugin still passes `omarchy plugin validate` and CI's QML lint.
+- [x] `tests/run` passes.

@@ -35,12 +35,13 @@ function view(state, fields) {
     problem: "",        // why it couldn't check, or ""
     installed: "",
     release: "",
+    path: "",           // the unpacked release the command read, or ""
     channel: "",
     attention: [],      // findings that need attention and aren't reviewed
     limits: [],         // each check that didn't run in full: check and words
     unknowns: [],       // each unknown finding
     notes: [],
-    reviewed: 0,
+    reviewed: [],       // findings reviewed for this release, each with "Undo"
     hasReport: false,   // a comparison, which "Ask agent" in the header can hand over
     newer: [],          // newer releases on other channels, with noUpdate
     newerProblem: ""
@@ -140,12 +141,13 @@ function report(doc) {
   var fields = {
     installed: isText(doc.installed) ? doc.installed : "",
     release: release,
+    path: isText(doc.target.path) ? doc.target.path : "",
     channel: isText(doc.channel) ? doc.channel : "",
     attention: attention,
     limits: limits,
     unknowns: doc.findings.filter(function(f) { return f.level === "unknown" }),
     notes: doc.findings.filter(function(f) { return f.level === "note" }),
-    reviewed: doc.findings.filter(function(f) { return f.reviewed }).length,
+    reviewed: doc.findings.filter(function(f) { return f.reviewed }),
     hasReport: true
   }
   if (doc.result === "attention") {
@@ -247,14 +249,16 @@ function fromRun(run) {
 // newer release's report checked by hand from the panel, by its tag, until the shell
 // restarts. showing is the tag of the one the panel shows, or "" for the user's own.
 // Back and closing the panel only set it to "". job is the run going, or null:
-// { kind: "check", "chosen" or "ack", tag: "" for the user's own release }. There is
-// one run at a time, so a check of each kind can't overlap.
+// { kind: "check", "chosen", "ack" or "unack", tag: "" for the user's own release }.
+// There is one run at a time, so a check of each kind can't overlap. ackProblem and
+// undoProblem say why the last "Mark reviewed" or "Undo" wrote nothing, or are "".
 //
 // Each change returns { held, args }: what the service holds next, and the arguments
 // for the bundled command, or null when nothing runs.
 
 function held(onlyWhenAsked) {
-  return { own: notChecked(onlyWhenAsked), ownAt: null, ackProblem: "", reports: {}, showing: "", job: null }
+  return { own: notChecked(onlyWhenAsked), ownAt: null, ackProblem: "", undoProblem: "", reports: {}, showing: "",
+    job: null }
 }
 
 function changed(h, fields) {
@@ -308,7 +312,7 @@ function startChosen(h, tag, cached) {
     if (h.job.kind === "chosen" && h.job.tag === tag && h.reports[tag]) return step(changed(h, { showing: tag }), null)
     return step(h, null)
   }
-  var report = { tag: tag, view: checkingChosen(tag, cached), at: null, ackProblem: "" }
+  var report = { tag: tag, view: checkingChosen(tag, cached), at: null, ackProblem: "", undoProblem: "" }
   return step(changed(h, { job: { kind: "chosen", tag: tag }, reports: withReport(h.reports, report), showing: tag }),
     ["--json", tag])
 }
@@ -321,14 +325,24 @@ function show(h, tag) {
 // "Mark reviewed", for the report the panel shows: the chosen release's, by its tag,
 // or the user's own.
 function startAck(h, id) {
+  return startReview(h, "ack", id)
+}
+
+// "Undo" under Reviewed takes a review back the same way.
+function startUnack(h, id) {
+  return startReview(h, "unack", id)
+}
+
+function startReview(h, kind, id) {
   if (h.job) return step(h, null)
+  var args = kind === "unack" ? unackArgs : ackArgs
   var shown = h.showing ? h.reports[h.showing] : null
   if (shown) {
     if (shown.at === null || !shown.view.hasReport) return step(h, null)
-    return step(changed(h, { job: { kind: "ack", tag: shown.tag } }), ackArgs(id, shown.tag))
+    return step(changed(h, { job: { kind: kind, tag: shown.tag } }), args(id, shown.tag))
   }
   if (!h.own.release) return step(h, null)
-  return step(changed(h, { job: { kind: "ack", tag: "" } }), ackArgs(id, h.own.release))
+  return step(changed(h, { job: { kind: kind, tag: "" } }), args(id, h.own.release))
 }
 
 // "Back", and closing the panel: the user's own result again. Every chosen report is
@@ -346,26 +360,32 @@ function chosenFromRun(run, tag) {
   return v
 }
 
-// What a finished run leaves. A chosen run, or an --ack on it, never touches own,
-// and so never the bar. Its result is kept for its release, whatever the panel shows.
+// What a finished run leaves. A chosen run, or an --ack or --unack on it, never
+// touches own, and so never the bar. Its result is kept for its release, whatever the
+// panel shows. A failed --ack or --unack keeps the last result, with why.
 function finished(h, run, now) {
   var job = h.job
   h = changed(h, { job: null })
   if (!job) return h
-  if (job.kind === "check") return changed(h, { own: fromRun(run), ownAt: now, ackProblem: "" })
+  var cleared = { ackProblem: "", undoProblem: "" }
+  if (job.kind === "check") return changed(h, changed(cleared, { own: fromRun(run), ownAt: now }))
+  var undo = job.kind === "unack"
+  var problem = undo ? "undoProblem" : "ackProblem"
   if (job.tag === "") {
-    var own = afterAck(run, h.own)
-    return own.kept ? changed(h, { ackProblem: own.problem })
-      : changed(h, { own: own.view, ownAt: now, ackProblem: "" })
+    var own = afterAck(run, h.own, "", undo)
+    var kept = {}
+    kept[problem] = own.problem
+    return own.kept ? changed(h, kept) : changed(h, changed(cleared, { own: own.view, ownAt: now }))
   }
   if (job.kind === "chosen")
     return changed(h, { reports: withReport(h.reports,
-      { tag: job.tag, view: chosenFromRun(run, job.tag), at: now, ackProblem: "" }) })
+      changed(cleared, { tag: job.tag, view: chosenFromRun(run, job.tag), at: now })) })
   var last = h.reports[job.tag]
   if (!last) return h
-  var after = afterAck(run, last.view, job.tag)
-  var report = after.kept ? changed(last, { ackProblem: after.problem })
-    : { tag: job.tag, view: after.view, at: now, ackProblem: "" }
+  var after = afterAck(run, last.view, job.tag, undo)
+  var reason = {}
+  reason[problem] = after.problem
+  var report = after.kept ? changed(last, reason) : changed(cleared, { tag: job.tag, view: after.view, at: now })
   return changed(h, { reports: withReport(h.reports, report) })
 }
 
@@ -384,6 +404,7 @@ function panel(h) {
     view: c ? c.view : h.own,
     at: c ? c.at : h.ownAt,
     ackProblem: c ? c.ackProblem : h.ackProblem,
+    undoProblem: c ? c.undoProblem || "" : h.undoProblem || "",
     chosen: tag,
     chosenLine: c ? chosenLine(tag, h.own.channel) : "",
     running: !!h.job && h.job.tag === tag,
@@ -507,13 +528,19 @@ function ackArgs(id, release) {
   return ["--json", "--ack", String(id), String(release)]
 }
 
-// What an --ack run leaves on screen: the view, whether that is the last one kept,
-// and why it couldn't mark it, or "".
+// The run for "Undo" under Reviewed: the same, with --unack.
+function unackArgs(id, release) {
+  return ["--json", "--unack", String(id), String(release)]
+}
+
+// What an --ack or --unack run leaves on screen: the view, whether that is the last
+// one kept, and why it couldn't mark it or take it back, or "".
 // A failed document, with exit 2, wrote nothing, so the last result stays with its
 // reason. Anything else is read as a check is, so output that can't be read is
 // "couldn't check" and never the last result standing in for it.
 // With a tag, the release was chosen by hand, and its document is read as one.
-function afterAck(run, last, tag) {
+// undo says it was an --unack.
+function afterAck(run, last, tag, undo) {
   var doc = null
   if (run && run.started) {
     try { doc = JSON.parse(String(run.stdout || "")) } catch (e) { doc = null }
@@ -521,7 +548,9 @@ function afterAck(run, last, tag) {
   if (doc && typeof doc === "object" && doc.schemaVersion === SCHEMA_VERSION && doc.result === "failed"
       && run.exitCode === EXIT_CODES.failed) {
     var reason = isText(doc.reason) && doc.reason !== "" ? doc.reason : lastLine(run.stderr)
-    return { view: last, kept: true, problem: reason || "It couldn't mark it reviewed, and didn't say why." }
+    return { view: last, kept: true,
+      problem: reason || (undo ? "It couldn't take the review back" : "It couldn't mark it reviewed")
+        + ", and didn't say why." }
   }
   return { view: tag ? chosenFromRun(run, tag) : fromRun(run), kept: false, problem: "" }
 }
@@ -533,9 +562,9 @@ function reviewedFile(configHome) {
     + "/omaupdateimpact/reviewed"
 }
 
-function reviewedLine(count, file) {
-  return plural(count, "finding", "findings") + " reviewed. To have one count again, delete its line in "
-    + file + "."
+// Under Reviewed: what a review means, and where they are kept.
+function reviewedLine(release, file) {
+  return "These don't count for " + release + ". \"Undo\" makes one count again. They are kept in " + file + "."
 }
 
 // ---------- Ask agent ----------
@@ -548,6 +577,8 @@ var AGENT_LOOKUP = ["bash", "-lc", "command -v " + AGENT + " >/dev/null"]
 // escaped, so neither marker can appear inside it, whatever the release says.
 var DATA_START = "<omaupdateimpact-data>"
 var DATA_END = "</omaupdateimpact-data>"
+// The release notes, kept in the unpacked release's folder by the command.
+var NOTES_FILE = ".omaupdateimpact-notes.md"
 
 // The argv for the shell's Util.execArgv: the launcher and one prompt, so no shell
 // ever reads the prompt's text.
@@ -555,8 +586,9 @@ function agentCommand(prompt) {
   return [AGENT, String(prompt)]
 }
 
+// A finding as the prompt holds it. Its items are there only when it lists things.
 function promptFinding(f) {
-  return {
+  var found = {
     id: f.id,
     level: f.level,
     title: f.title,
@@ -565,6 +597,8 @@ function promptFinding(f) {
     reason: f.reason || null,
     evidence: Array.isArray(f.evidence) ? f.evidence : []
   }
+  if (Array.isArray(f.items) && f.items.length > 0) found.items = f.items
+  return found
 }
 
 function dataBlock(data) {
@@ -582,6 +616,7 @@ function agentPrompt(v, finding, command, tag) {
   var data = {
     installed: v.installed,
     release: v.release,
+    releasePath: v.path,
     channel: v.channel
   }
   var about
@@ -601,12 +636,19 @@ function agentPrompt(v, finding, command, tag) {
     "omaupdateimpact is a check that says what an Omarchy release would do to this machine, before the user "
       + "updates. It only reads: it changes nothing but its own cache.",
     "",
+    "When " + (finding ? "the finding is" : "a finding is") + " about something the release removes, replaces "
+      + "or renames, such as a package, a command or a shortcut, find out what takes its place and what it does. "
+      + "Then say what the user would keep, gain or lose by moving to it. To find out, read the unpacked release "
+      + "in the folder that releasePath gives between the markers, and its release notes, in "
+      + NOTES_FILE + " in that folder. Install nothing, and run nothing from the release.",
+    "",
     finding
-      ? "Between the markers are the installed Omarchy version, the release it was compared with, the update "
-        + "channel, and one finding from that comparison: its level, title, detail, fix, reason, evidence and id."
-      : "Between the markers are the installed Omarchy version, the release it was compared with, the update "
-        + "channel, each finding from that comparison that isn't reviewed, with its level, title, detail, fix, "
-        + "reason, evidence and id, and each check that didn't run in full.",
+      ? "Between the markers are the installed Omarchy version, the release it was compared with and where it "
+        + "is unpacked, the update channel, and one finding from that comparison: its level, title, detail, "
+        + "items, fix, reason, evidence and id."
+      : "Between the markers are the installed Omarchy version, the release it was compared with and where it "
+        + "is unpacked, the update channel, each finding from that comparison that isn't reviewed, with its "
+        + "level, title, detail, items, fix, reason, evidence and id, and each check that didn't run in full.",
     dataBlock(data),
     "",
     "To see the whole report, run the command yourself: " + shellQuote(command) + " --json"

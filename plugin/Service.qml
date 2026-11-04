@@ -9,8 +9,8 @@ import "State.js" as State
 // It runs the bundled bin/omaupdateimpact with --json, never one on PATH, and keeps
 // the last result in memory, with each newer release's report checked in the panel,
 // by its tag, until the shell restarts.
-// It writes nothing itself: "Mark reviewed" runs the command with --ack, which writes
-// the reviewed file. The command decides every finding; State.js only reads what it
+// It writes nothing itself: "Mark reviewed" runs the command with --ack, and "Undo"
+// with --unack, which write the reviewed file. The command decides every finding; State.js only reads what it
 // printed.
 Item {
   id: root
@@ -33,7 +33,7 @@ Item {
   readonly property bool barRunning: State.bar(held).running
   // What the panel shows: a chosen report while it shows one, else the user's own.
   readonly property var panel: State.panel(held)
-  // Where --ack keeps reviews, for the panel to name.
+  // Where --ack and --unack keep reviews, for the panel to name.
   readonly property string reviewedFile: State.reviewedFile(Quickshell.env("XDG_CONFIG_HOME"))
   // Whether omarchy-agent-prompt is on PATH, so "Ask agent" can show. Looked up once.
   property bool agentReady: false
@@ -74,10 +74,15 @@ Item {
     held = State.show(held, tag)
   }
 
-  // Mark one finding reviewed, for the report the panel shows. The panel asks first.
+  // Mark one finding reviewed, for the report the panel shows. "Undo" takes it back.
   // A run already going isn't started twice.
   function ack(id) {
     start(State.startAck(held, id))
+  }
+
+  // Take a review back, for the report the panel shows, so the finding counts again.
+  function unack(id) {
+    start(State.startUnack(held, id))
   }
 
   // Back to the user's own result, from "Back" or a closed panel. Chosen reports are

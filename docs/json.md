@@ -36,12 +36,14 @@ change, so ignore keys you don't know.
 | --- | --- |
 | `installed` | The installed version, as `omarchy-version` prints it, or `unknown`. |
 | `channel` | The update channel, or `unknown`. |
-| `target` | The release compared with: `name` and `prerelease`. |
+| `target` | The release compared with: `name`, `prerelease` and `path`. |
 | `checks` | Each check, with its `state` and what it `checked`. |
 | `findings` | Every finding, check by check. The report groups them by level. |
 
 `target.name` is the tag. With `--target` and no tag, it is the folder's name.
 `target.prerelease` is `true`, `false` or `null` when the name isn't a tag.
+`target.path` is the unpacked release the command read, as an absolute path, so a
+reader can open its files. Its notes are there too, as `.omaupdateimpact-notes.md`.
 
 ### Checks
 
@@ -69,22 +71,50 @@ wasn't looked at, so it can never read as zero.
 
 ### Findings
 
-Each finding has every field, even an empty one.
+Each finding has every field below, even an empty one.
 
 | Field | Value |
 | --- | --- |
 | `id` | Seven hex digits. It stays the same while what the finding says does. |
 | `check` | Which check found it. |
 | `level` | `attention`, `note` or `unknown`. |
-| `title` | What was found, in one sentence. |
+| `title` | What was found. A note's is one short line. |
 | `evidence` | The files or lines behind it. Never empty. |
 | `detail` | More about it, or `""`. |
 | `fix` | What to do, or `""`. Every `attention` finding has one. |
 | `partial` | On an `unknown`, `true` when the rest of its check still stood. |
 | `reason` | The change in the release notes it comes from, or `null`. |
-| `reviewed` | `true` when you marked it with `--ack` for this release. Only `attention` can be. |
+| `reviewed` | `true` when you marked it with `--ack` for this release, and `--unack` hasn't taken it back. Only `attention` can be. |
+
+Two fields are there only on the findings they fit.
+
+| Field | Value |
+| --- | --- |
+| `group` | On every note, a short heading for its kind, such as `Shortcuts that move`. Other levels have none. |
+| `items` | On a finding that lists things, one string per thing, such as `SUPER + M: Minimize window to the dock`. Its title says how many. |
 
 The report shows `title` and `detail` together, then the `reason`, then the `fix`.
+With `--all` it lists the notes under their `group` headings, each title on a line
+of its own and its detail under it. A finding's `items` are printed one per line
+under its title.
+
+The command names the groups, in the order they first come, so a reader needs no
+rules to sort the notes:
+
+| `group` | What its notes are |
+| --- | --- |
+| `Your bindings` | Your unbinds and bindings that now meet another default. |
+| `Shortcuts that move` | A default that moves to another key, such as `Calculator: SUPER + CTRL + Q -> SUPER + SHIFT + Q`. |
+| `Shortcuts that change` | A key whose default does something else, such as `SUPER + ALT + SPACE: "Apps menu" -> "Apps"`. |
+| `New default shortcuts` | The new defaults, as `items`. |
+| `Default shortcuts removed` | The defaults that go, as `items`. |
+| `Computed keys` | Keys worked out when Lua runs, the same in both versions. |
+| `Deleted commands in Omarchy's own files` | Omarchy's own files, unchanged, that call a deleted command. |
+| `Plugins` | New `qmllint` warnings, and what `qmllint` can't prove. |
+| `Files a migration may edit` | Your files that a pending migration looks like it writes. |
+
+A new group isn't a breaking change. Put a note in a group you don't know under a
+heading of your own.
 
 A reviewed finding doesn't count for `result`, so `attention` means one that isn't
 reviewed. The report counts reviewed findings at the end, and `--all` lists them.
@@ -113,7 +143,8 @@ This report is from small fictional trees:
   "channel": "stable",
   "target": {
     "name": "v1.3.0",
-    "prerelease": false
+    "prerelease": false,
+    "path": "/fictional/v1.3.0"
   },
   "checks": {
     "bindings": {
@@ -166,14 +197,18 @@ This report is from small fictional trees:
       "reviewed": false
     },
     {
-      "id": "60d484f",
+      "id": "61e5cbb",
       "check": "bindings",
       "level": "note",
-      "title": "New default shortcuts: SUPER + N (\"Notifications\").",
+      "group": "New default shortcuts",
+      "title": "1 new default shortcut.",
       "evidence": [
         "default/hypr/bindings.lua"
       ],
       "detail": "",
+      "items": [
+        "SUPER + N: Notifications"
+      ],
       "fix": "",
       "partial": false,
       "reason": null,
@@ -226,15 +261,16 @@ This report is from small fictional trees:
       "reviewed": false
     },
     {
-      "id": "e2e0746",
+      "id": "16c9791",
       "check": "edits",
       "level": "note",
-      "title": "migrations/1700000003.sh, line 1, looks like it edits ~/.config/fictional-app/theme.conf, which Omarchy has no default for.",
+      "group": "Files a migration may edit",
+      "title": "migrations/1700000003.sh may edit ~/.config/fictional-app/theme.conf",
       "evidence": [
         "migrations/1700000003.sh:1",
         "~/.config/fictional-app/theme.conf"
       ],
-      "detail": "It is read, not run, so the result isn't known. omaforecast can show it by running the migration in a sandbox.",
+      "detail": "It looks like it edits the file on line 1. Omarchy has no default for it. It is read, not run, so the result isn't known. omaforecast can show it by running the migration in a sandbox.",
       "fix": "",
       "partial": false,
       "reason": null,

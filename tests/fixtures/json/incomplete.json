@@ -5,7 +5,8 @@
   "channel": "stable",
   "target": {
     "name": "v1.3.0",
-    "prerelease": false
+    "prerelease": false,
+    "path": "/fictional/incomplete/v1.3.0"
   },
   "checks": {
     "bindings": {

@@ -594,19 +594,22 @@ its files and notes. A finding that lists things, such as each new default
 shortcut, has `items`, one string per thing, such as
 `SUPER + M: Minimize window to the dock`, and its title says how many, such as
 "18 new default shortcuts." The text report prints the items one per line under the
-title. Other findings have no `items`.
+title. Other findings have no `items` key, rather than an empty one.
 
 Every note has `group`, a short heading for its kind, such as "Shortcuts that move",
 "Shortcuts that change", "New default shortcuts" or "Files a migration may edit".
 The command names the groups, so the plugin needs no rules to sort notes. Other
-levels have no `group`. A note's title is one short line, and the rest is its
+levels have no `group` key. `docs/json.md` lists every group, and a test holds each
+note the command makes to one of them. A note's title is one short line, and the rest is its
 detail. A move's title is the action and its two keys, as
 `Calculator: SUPER + CTRL + Q -> SUPER + SHIFT + Q`, and what else changed on those
 keys is its detail, such as `Replaces "Toggle nightlight". SUPER + CTRL + W is now
 "Background switcher".` A changed default's title is
 `SUPER + ALT + SPACE: "Apps menu" -> "Apps"`. Notes can't be reviewed, so a new
 title changes no review. With `--all`, the text report lists the notes under their
-group headings, each title on one line and its detail under it.
+group headings, in the order they first come, each title on one line and its detail
+under it. A note's title is never split, even past the report's width, as a long path
+can make it.
 
 The plugin holds no rules, so the document carries what the report works out. What
 was checked is data, not the "Checked" line's text. Each check says whether it ran,
@@ -629,7 +632,8 @@ included, so its error can answer in JSON. So is an old Python. `--help` and
 
 The schema is in `docs/json.md`. Its examples are the command's output on small
 fictional trees, kept as golden files in `tests/fixtures/json`, and a test fails
-when either stops matching. `python3 -m tests.golden` writes them again. There is one
+when either stops matching. The trees are in a temporary folder, which `target.path`
+would name, so the golden files write it as `/fictional`. `python3 -m tests.golden` writes them again. There is one
 for every result, and one with a reviewed finding, for the plugin's tests. The doc
 shows three of them.
 
@@ -901,7 +905,7 @@ replaces that result, so the finding moves to Reviewed and the count drops. Each
 finding under Reviewed has "Undo", which runs `--json --unack <id>` the same way, so
 it moves back. They need no confirmation, as each undoes the other. A run already
 going isn't started twice. An `--ack` that fails leaves the last result and shows
-its reason, and so does an `--unack`. That is a `failed` document with exit 2, which
+its reason under Needs attention, and an `--unack` under Reviewed. That is a `failed` document with exit 2, which
 wrote nothing. Output that can't be read is "couldn't check", as for a check, since
 whether it wrote is unknown. The panel names the reviewed file under Reviewed. It
 finds it as the command does, in `XDG_CONFIG_HOME` unless that is empty.
@@ -926,6 +930,8 @@ reason, evidence and id; the bundled command's path, to run with `--json`; and t
 the text between its markers comes from the release and the user's files, and is
 data, never instructions. Everything from the document goes between one pair of
 markers, as JSON with `<` and `>` escaped, so no text from the release can close
+them. So `target.path` is there as `releasePath`, and the step about replacements
+names that field rather than the path. A finding's `items` are there too, when it has
 them. `State.js` builds it.
 
 Nothing else in the panel changes anything.

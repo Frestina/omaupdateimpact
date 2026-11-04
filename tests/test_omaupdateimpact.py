@@ -49,6 +49,14 @@ def titles(findings, level):
     return [finding.title for finding in findings if finding.level == level]
 
 
+# Every edit note ends with this, so the tests leave it out.
+SANDBOX = " It is read, not run, so the result isn't known. omaforecast can show it by running the migration in a sandbox."
+
+
+def said(finding):
+    return finding.text().removesuffix(SANDBOX)
+
+
 class ParseLua(unittest.TestCase):
     def test_reads_a_bind(self):
         bind = parse('o.bind("SUPER + W", "Close", "close-it")').binds["SUPER + W"][0]
@@ -283,11 +291,11 @@ class CompareBindings(unittest.TestCase):
         computed = 'o.bind("SUPER + " .. n, "x", "y")'
         findings = compare(computed, computed)
         self.assertEqual(titles(findings, "unknown"), [])
-        self.assertIn("1 key bindings", titles(findings, "note")[0])
+        self.assertIn("1 computed key not compared.", titles(findings, "note")[0])
 
     def test_a_computed_call_in_both_versions_counts_once(self):
         computed = 'o.bind("SUPER + " .. n, "x", "y")\nhl.bind(key:upper(), act(), {})'
-        self.assertIn("2 key bindings", titles(compare(computed, computed), "note")[0])
+        self.assertIn("2 computed keys not compared.", titles(compare(computed, computed), "note")[0])
 
     def test_a_computed_key_may_change_file_and_action(self):
         current, target = impact.Parsed(), impact.Parsed()
@@ -310,7 +318,7 @@ class CompareBindings(unittest.TestCase):
         computed = 'o.bind("SUPER + " .. n, "x", "y")\n'
         findings = compare(computed, computed * 2)
         self.assertEqual(len(titles(findings, "unknown")), 1)
-        self.assertIn("1 key bindings", titles(findings, "note")[0])
+        self.assertIn("1 computed key not compared.", titles(findings, "note")[0])
 
     def test_a_computed_key_of_the_users_is_unknown(self):
         findings = compare("", "", 'o.bind("SUPER + " .. n, "x", "y")')
@@ -375,17 +383,16 @@ class CompareBindings(unittest.TestCase):
     def test_a_press_alone_is_not_a_press_and_release_pair(self):
         current = 'o.bind_hold("F9", "Start", "a", "Stop", "b")'
         findings = compare(current, 'o.bind("F9", "Start", "a")')
-        self.assertIn('F9 is now "Start", it was "Start / Stop".', titles(findings, "note"))
+        self.assertIn('F9: "Start / Stop" -> "Start"', titles(findings, "note"))
 
     def test_a_press_that_becomes_a_press_and_release_pair_is_a_change(self):
         findings = compare('o.bind("F9", "Start", "a")', 'o.bind_hold("F9", "Start", "a", "Stop", "b")')
-        self.assertIn('F9 is now "Start / Stop", it was "Start".', titles(findings, "note"))
+        self.assertIn('F9: "Start" -> "Start / Stop"', titles(findings, "note"))
 
     def test_a_removed_default_you_turned_off_is_not_listed_as_removed(self):
         findings = compare('o.bind("SUPER + Q", "Calc", "c")', "", 'hl.unbind("SUPER + Q")')
-        self.assertEqual(
-            titles(findings, "note"), ["SUPER + Q: your unbind no longer does anything, the default is gone."]
-        )
+        self.assertEqual(titles(findings, "note"), ["SUPER + Q: your unbind does nothing now"])
+        self.assertEqual([f.detail for f in findings if f.level == "note"], ['The default it turned off, "Calc", is gone.'])
 
     def test_no_replaces_note_on_a_chord_you_did_not_turn_off(self):
         findings = compare(
@@ -398,12 +405,13 @@ class CompareBindings(unittest.TestCase):
 
     def test_a_default_that_unbinds_its_own_key_is_gone(self):
         findings = compare('o.bind("SUPER + Q", "Calc", "c")', 'o.bind("SUPER + Q", "Calc", "c")\nhl.unbind("SUPER + Q")')
-        self.assertIn('Default shortcuts removed: SUPER + Q ("Calc").', titles(findings, "note"))
+        self.assertIn("1 default shortcut removed.", titles(findings, "note"))
+        self.assertIn(["SUPER + Q: Calc"], [f.items for f in findings])
 
     def test_a_default_rebind_is_a_new_action(self):
         target = 'o.bind("SUPER + Q", "Calc", "c")\no.rebind("SUPER + Q", "Quit", "q")'
         findings = compare('o.bind("SUPER + Q", "Calc", "c")', target)
-        self.assertIn('SUPER + Q is now "Quit", it was "Calc".', titles(findings, "note"))
+        self.assertIn('SUPER + Q: "Calc" -> "Quit"', titles(findings, "note"))
 
     def test_no_clash_when_the_user_unbinds_first(self):
         user = 'hl.unbind("SUPER + M")\no.bind("SUPER + M", "Mail", "mail")'
@@ -416,20 +424,23 @@ class CompareBindings(unittest.TestCase):
 
     def test_reports_a_moved_shortcut(self):
         findings = compare('o.bind("SUPER + Q", "Calc", "c")', 'o.bind("SUPER + SHIFT + Q", "Calc", "c")')
-        self.assertIn('Moved: "Calc" from SUPER + Q to SUPER + SHIFT + Q.', titles(findings, "note"))
+        self.assertIn('Calc: SUPER + Q -> SUPER + SHIFT + Q', titles(findings, "note"))
 
     def test_a_move_names_the_default_it_replaces(self):
         findings = compare(
             'o.bind("SUPER + A", "Calc", "c")\no.bind("SUPER + B", "Night", "n")',
             'o.bind("SUPER + B", "Calc", "c")',
         )
-        self.assertEqual(titles(findings, "note")[0], 'Moved: "Calc" from SUPER + A to SUPER + B, replacing "Night".')
-        self.assertFalse([title for title in titles(findings, "note") if " is now " in title])
+        self.assertEqual(titles(findings, "note")[0], "Calc: SUPER + A -> SUPER + B")
+        self.assertEqual(next(f.detail for f in findings if f.level == "note"), 'Replaces "Night".')
+        # The move tells it, so nothing else does.
+        self.assertEqual(len(titles(findings, "note")), 1)
 
     def test_a_move_names_what_takes_its_place(self):
         findings = compare('o.bind("SUPER + A", "Calc", "c")', 'o.bind("SUPER + B", "Calc", "c")\no.bind("SUPER + A", "Fresh", "f")')
-        self.assertEqual(titles(findings, "note")[0], 'Moved: "Calc" from SUPER + A to SUPER + B. SUPER + A is now "Fresh".')
-        self.assertFalse([title for title in titles(findings, "note") if "it was" in title])
+        self.assertEqual(titles(findings, "note")[0], "Calc: SUPER + A -> SUPER + B")
+        self.assertEqual(next(f.detail for f in findings if f.level == "note"), 'SUPER + A is now "Fresh".')
+        self.assertEqual(len(titles(findings, "note")), 1)
 
     def test_a_merged_move_names_every_file_behind_it(self):
         current, target = impact.Parsed(), impact.Parsed()
@@ -446,8 +457,8 @@ class CompareBindings(unittest.TestCase):
             'o.bind("SUPER + B", "Calc", "c")\no.bind("SUPER + A", "Night", "n")',
         )
         self.assertEqual(titles(findings, "note"), [
-            'Moved: "Calc" from SUPER + A to SUPER + B.',
-            'Moved: "Night" from SUPER + B to SUPER + A.',
+            'Calc: SUPER + A -> SUPER + B',
+            'Night: SUPER + B -> SUPER + A',
         ])
 
     def test_a_default_that_moved_on_isnt_replaced(self):
@@ -456,8 +467,8 @@ class CompareBindings(unittest.TestCase):
             'o.bind("SUPER + B", "Calc", "c")\no.bind("SUPER + C", "Night", "n")',
         )
         self.assertEqual(titles(findings, "note"), [
-            'Moved: "Calc" from SUPER + A to SUPER + B.',
-            'Moved: "Night" from SUPER + B to SUPER + C.',
+            'Calc: SUPER + A -> SUPER + B',
+            'Night: SUPER + B -> SUPER + C',
         ])
 
     def test_a_move_onto_your_key_says_nothing_about_the_old_default(self):
@@ -466,7 +477,7 @@ class CompareBindings(unittest.TestCase):
             'o.bind("SUPER + B", "Calc", "c")',
             'o.bind("SUPER + B", "Mine", "m")',
         )
-        self.assertIn('Moved: "Calc" from SUPER + A to SUPER + B.', titles(findings, "note"))
+        self.assertIn('Calc: SUPER + A -> SUPER + B', titles(findings, "note"))
 
     def test_a_turned_off_shortcut_that_moves_comes_back(self):
         findings = compare(
@@ -483,7 +494,7 @@ class CompareBindings(unittest.TestCase):
             'hl.unbind("SUPER + Q")\nhl.unbind("SUPER + SHIFT + Q")',
         )
         self.assertEqual(titles(findings, "attention"), [])
-        self.assertEqual(titles(findings, "note"), ['Moved: "Calc" from SUPER + Q to SUPER + SHIFT + Q.'])
+        self.assertEqual(titles(findings, "note"), ['Calc: SUPER + Q -> SUPER + SHIFT + Q'])
 
     def test_a_shortcut_comes_back_when_its_new_keys_are_unbound_in_another_spelling(self):
         findings = compare(
@@ -552,7 +563,7 @@ class CompareBindings(unittest.TestCase):
 
     def test_reports_a_shortcut_taken_over_by_another_action(self):
         findings = compare('o.bind("SUPER + N", "Night", "n")', 'o.bind("SUPER + N", "Network", "w")')
-        self.assertIn('SUPER + N is now "Network", it was "Night".', titles(findings, "note"))
+        self.assertIn('SUPER + N: "Night" -> "Network"', titles(findings, "note"))
 
     def test_reworded_description_with_the_same_command_is_not_a_change(self):
         self.assertEqual(compare('o.bind("SUPER + N", "Old", "n")', 'o.bind("SUPER + N", "New", "n")'), [])
@@ -991,7 +1002,8 @@ class Edits(unittest.TestCase):
         return impact.compare_edits(self.base / "current", self.base / "target", self.home, {} if checked is None else checked)
 
     def notes(self, migration):
-        return titles(self.findings(migration), "note")
+        """Each note's title and detail, without what every one of them says."""
+        return [said(finding) for finding in self.findings(migration) if finding.level == "note"]
 
     def unknown(self, migration):
         return titles(self.findings(migration), "unknown")
@@ -1000,10 +1012,11 @@ class Edits(unittest.TestCase):
         self.write(".config/app/app.conf")
         findings = self.findings("echo Recolour\nsed -i 's/blue/green/' ~/.config/app/app.conf\n")
         self.assertEqual([(f.check, f.level) for f in findings], [("edits", "note")])
-        self.assertEqual(
-            findings[0].title,
-            "migrations/1.sh, line 2, looks like it edits ~/.config/app/app.conf, which differs from Omarchy's default.",
-        )
+        self.assertEqual(findings[0].title, "migrations/1.sh may edit ~/.config/app/app.conf")
+        self.assertEqual(findings[0].group, "Files a migration may edit")
+        self.assertTrue(findings[0].detail.startswith(
+            "It looks like it edits the file on line 2. It differs from Omarchy's default. It is read, not run,"
+        ))
         self.assertEqual(findings[0].evidence, ["migrations/1.sh:2", "~/.config/app/app.conf", "config/app/app.conf"])
         self.assertIn("omaforecast", findings[0].detail)
 
@@ -1026,7 +1039,7 @@ class Edits(unittest.TestCase):
     def test_a_file_with_no_default_says_so(self):
         self.write(".config/other.conf")
         self.assertEqual(self.notes("sed -i s/a/b/ ~/.config/other.conf\n"), [
-            "migrations/1.sh, line 1, looks like it edits ~/.config/other.conf, which Omarchy has no default for.",
+            "migrations/1.sh may edit ~/.config/other.conf It looks like it edits the file on line 1. Omarchy has no default for it.",
         ])
 
     def test_a_launcher_is_compared_with_omarchys_applications(self):
@@ -1034,7 +1047,7 @@ class Edits(unittest.TestCase):
         self.write(".local/share/applications/Notes.desktop", "[Desktop Entry]\n")
         self.assertEqual(self.findings("rm -f ~/.local/share/applications/Notes.desktop\n"), [])
         self.write(".local/share/applications/Notes.desktop", "[Desktop Entry]\nName=Mine\n")
-        self.assertIn("which differs from Omarchy's default", self.notes("rm -f ~/.local/share/applications/Notes.desktop\n")[0])
+        self.assertIn("It differs from Omarchy's default.", self.notes("rm -f ~/.local/share/applications/Notes.desktop\n")[0])
 
     def test_sed_without_in_place_writes_nothing(self):
         self.write(".config/app/app.conf")
@@ -1072,14 +1085,14 @@ class Edits(unittest.TestCase):
         ):
             with self.subTest(command):
                 self.assertEqual(self.notes(command + "\n"), [
-                    "migrations/1.sh, line 1, looks like it edits ~/.config/app/app.conf, which differs from Omarchy's default.",
+                    "migrations/1.sh may edit ~/.config/app/app.conf It looks like it edits the file on line 1. It differs from Omarchy's default.",
                 ])
 
     def test_removing_and_moving_away_remove(self):
         self.write(".config/app/app.conf")
         for command in ("rm -f -- ~/.config/app/app.conf", "mv ~/.config/app/app.conf /tmp/old"):
             with self.subTest(command):
-                self.assertIn("looks like it removes ~/.config/app/app.conf", self.notes(command + "\n")[0])
+                self.assertIn("may remove ~/.config/app/app.conf It looks like it removes", self.notes(command + "\n")[0])
 
     def test_what_a_command_only_reads_isnt_written(self):
         self.write(".config/app/app.conf")
@@ -1116,11 +1129,10 @@ class Edits(unittest.TestCase):
         self.write(".config/other.conf")
         text = 'for file in "$HOME"/.config/{app/app,other,missing}.conf; do\n  echo x >>"$file"\ndone\n'
         findings = self.findings(text)
-        self.assertEqual(titles(findings, "note"), [
-            "migrations/1.sh, line 2, looks like it edits 2 files of yours that aren't Omarchy's default.",
-        ])
+        self.assertEqual(titles(findings, "note"), ["migrations/1.sh may edit 2 files of yours"])
         self.assertTrue(findings[0].detail.startswith(
-            "They are ~/.config/app/app.conf and ~/.config/other.conf. It may edit only some."
+            "They are ~/.config/app/app.conf and ~/.config/other.conf, and none is Omarchy's default. "
+            "It looks like it edits them on line 2, and may edit only some."
         ))
         self.assertEqual(findings[0].evidence, [
             "migrations/1.sh:2", "~/.config/app/app.conf", "config/app/app.conf", "~/.config/other.conf",
@@ -1168,7 +1180,7 @@ class Edits(unittest.TestCase):
         self.write(".config/app/app.conf")
         text = 'tmp=$(mktemp)\njq . ~/.config/app/app.conf >"$tmp"\nmv "$tmp" ~/.config/app/app.conf\n'
         self.assertEqual(self.notes(text), [
-            "migrations/1.sh, line 3, looks like it edits ~/.config/app/app.conf, which differs from Omarchy's default.",
+            "migrations/1.sh may edit ~/.config/app/app.conf It looks like it edits the file on line 3. It differs from Omarchy's default.",
         ])
         self.assertEqual(self.findings('staged=$(mktemp "$HOME/.config/app/app.conf.XXXXXX")\necho x >"$staged"\n'), [])
 
@@ -1184,11 +1196,11 @@ class Edits(unittest.TestCase):
         self.write(".local/share/applications/Yours.desktop")
         text = 'for desktop in ~/.local/share/applications/*.desktop; do\n  echo x >>"$desktop"\ndone\n'
         findings = self.findings(text)
-        self.assertEqual(titles(findings, "note"), [(
-            "migrations/1.sh, line 2, looks like it edits files that match ~/.local/share/applications/*.desktop, "
-            "and 2 of them aren't Omarchy's default."
-        )])
-        self.assertTrue(findings[0].detail.startswith("They are Mine.desktop and Yours.desktop, in ~/.local/share/applications."))
+        self.assertEqual(titles(findings, "note"), ["migrations/1.sh may edit files that match ~/.local/share/applications/*.desktop"])
+        self.assertTrue(findings[0].detail.startswith(
+            "2 of them aren't Omarchy's default: Mine.desktop and Yours.desktop, in ~/.local/share/applications. "
+            "It looks like it edits them on line 2, and may edit only some."
+        ))
         self.assertEqual(findings[0].evidence, [
             "migrations/1.sh:2", "~/.local/share/applications/Mine.desktop", "~/.local/share/applications/Yours.desktop",
         ])
@@ -1202,8 +1214,8 @@ class Edits(unittest.TestCase):
         ):
             with self.subTest(command):
                 self.assertEqual(self.notes(command + "\n"), [(
-                    f"migrations/1.sh, line {command.count(chr(10)) + 1}, looks like it edits ~/.config/app/app.conf, "
-                    "which differs from Omarchy's default."
+                    "migrations/1.sh may edit ~/.config/app/app.conf It looks like it edits the file on "
+                    f"line {command.count(chr(10)) + 1}. It differs from Omarchy's default."
                 )])
 
     def test_a_copy_into_a_folder_of_a_file_only_known_when_it_runs_is_unknown(self):
@@ -1221,11 +1233,11 @@ class Edits(unittest.TestCase):
         self.write(".config/app/app.conf")
         wrapper = 'as_root() {\n  if (( EUID == 0 )); then\n    "$@"\n  else\n    sudo "$@"\n  fi\n}\n'
         self.assertEqual(self.notes(wrapper + "as_root rm -f ~/.config/app/app.conf\n"), [
-            "migrations/1.sh, line 8, looks like it removes ~/.config/app/app.conf, which differs from Omarchy's default.",
+            "migrations/1.sh may remove ~/.config/app/app.conf It looks like it removes the file on line 8. It differs from Omarchy's default.",
         ])
         retry = 'retry() {\n  local times=$1\n  shift\n  "$@" || "$@"\n}\n'
         self.assertEqual(self.notes(retry + "retry 3 rm -f ~/.config/app/app.conf\n"), [
-            "migrations/1.sh, line 6, looks like it removes ~/.config/app/app.conf, which differs from Omarchy's default.",
+            "migrations/1.sh may remove ~/.config/app/app.conf It looks like it removes the file on line 6. It differs from Omarchy's default.",
         ])
 
     def test_a_writer_behind_a_command_that_runs_its_arguments_is_read(self):
@@ -1257,8 +1269,8 @@ class Edits(unittest.TestCase):
         fix = 'fix() {\n  local config="$1"\n  [[ -f $config ]] || return 0\n  sed -i s/a/b/ "$config"\n}\n'
         for call in ('fix "$HOME/.config/app/app.conf"', "fix ~/.config/app/app.conf", 'file=~/.config/app/app.conf\nfix "$file"'):
             with self.subTest(call):
-                self.assertEqual(titles(self.findings(fix + call + "\n"), "note"), [
-                    "migrations/1.sh, line 4, looks like it edits ~/.config/app/app.conf, which differs from Omarchy's default.",
+                self.assertEqual(self.notes(fix + call + "\n"), [
+                    "migrations/1.sh may edit ~/.config/app/app.conf It looks like it edits the file on line 4. It differs from Omarchy's default.",
                 ])
         self.write(".config/app/app.conf", "colour = blue\n")
         self.assertEqual(self.findings(fix + "fix ~/.config/app/app.conf\n"), [])
@@ -1271,8 +1283,8 @@ class Edits(unittest.TestCase):
             'gone() { rm -f "$@"; }\ngone ~/.config/other.conf\n'
         )
         self.assertEqual(self.notes(text), [
-            "migrations/1.sh, line 1, looks like it edits ~/.config/app/app.conf, which differs from Omarchy's default.",
-            "migrations/1.sh, line 4, looks like it removes ~/.config/other.conf, which Omarchy has no default for.",
+            "migrations/1.sh may edit ~/.config/app/app.conf It looks like it edits the file on line 1. It differs from Omarchy's default.",
+            "migrations/1.sh may remove ~/.config/other.conf It looks like it removes the file on line 4. Omarchy has no default for it.",
         ])
 
     def test_a_function_called_for_several_files_of_yours_is_one_note(self):
@@ -1285,11 +1297,10 @@ class Edits(unittest.TestCase):
             "drop ~/.local/bin/missing\ndrop ~/.config/app/app.conf\n"
         )
         findings = self.findings(text)
-        self.assertEqual(titles(findings, "note"), [
-            "migrations/1.sh, line 2, looks like it removes 3 files of yours that aren't Omarchy's default.",
-        ])
+        self.assertEqual(titles(findings, "note"), ["migrations/1.sh may remove 3 files of yours"])
         self.assertTrue(findings[0].detail.startswith(
-            "They are ~/.local/bin/one, ~/.local/bin/three and ~/.local/bin/two. It may remove only some."
+            "They are ~/.local/bin/one, ~/.local/bin/three and ~/.local/bin/two, and none is Omarchy's default. "
+            "It looks like it removes them on line 2, and may remove only some."
         ))
 
     def test_an_argument_passed_on_to_another_function_is_followed(self):
@@ -1300,7 +1311,7 @@ class Edits(unittest.TestCase):
             'for path in ~/.config/app/app.conf ~/.config/missing.conf; do\n  fix "$path"\ndone\n'
         )
         self.assertEqual(self.notes(text), [
-            "migrations/1.sh, line 3, looks like it edits ~/.config/app/app.conf, which differs from Omarchy's default.",
+            "migrations/1.sh may edit ~/.config/app/app.conf It looks like it edits the file on line 3. It differs from Omarchy's default.",
         ])
 
     def test_an_argument_only_known_when_it_runs_is_unknown(self):
@@ -1349,7 +1360,7 @@ class Edits(unittest.TestCase):
             )
             with self.subTest(word):
                 self.assertEqual(self.notes(text), [
-                    "migrations/1.sh, line 7, looks like it removes ~/.config/app/app.conf, which differs from Omarchy's default.",
+                    "migrations/1.sh may remove ~/.config/app/app.conf It looks like it removes the file on line 7. It differs from Omarchy's default.",
                 ])
 
     def test_the_shortest_and_longest_matches_differ(self):
@@ -1378,7 +1389,7 @@ class Edits(unittest.TestCase):
         ):
             with self.subTest(command):
                 self.assertEqual(self.notes(command + "\n"), [
-                    "migrations/1.sh, line 1, looks like it edits ~/.config/app/app.conf, which differs from Omarchy's default.",
+                    "migrations/1.sh may edit ~/.config/app/app.conf It looks like it edits the file on line 1. It differs from Omarchy's default.",
                 ])
 
     def test_a_link_without_force_writes_nothing(self):
@@ -1396,7 +1407,7 @@ class Edits(unittest.TestCase):
         (self.home / "skills").mkdir()
         (self.home / "current").symlink_to(self.home / "skills")
         self.assertEqual(self.notes("ln -sfn /usr/share/x ~/current\n"), [
-            "migrations/1.sh, line 1, looks like it edits the folder ~/current.",
+            "migrations/1.sh may edit the folder ~/current It looks like it edits the folder on line 1.",
         ])
 
     def test_find_that_changes_what_it_finds_in_your_files_is_unknown(self):
@@ -1425,7 +1436,7 @@ class Edits(unittest.TestCase):
 
     def test_a_folder_says_so(self):
         self.write(".config/app/app.conf")
-        self.assertEqual(self.notes("rm -rf ~/.config/app\n"), ["migrations/1.sh, line 1, looks like it removes the folder ~/.config/app."])
+        self.assertEqual(self.notes("rm -rf ~/.config/app\n"), ["migrations/1.sh may remove the folder ~/.config/app It looks like it removes the folder on line 1."])
 
     def test_a_migration_it_cant_read_is_unknown(self):
         self.assertEqual(self.unknown("echo 'never closed\n"), ["Couldn't read which files migrations/1.sh writes, so check it by hand."])
@@ -1827,7 +1838,9 @@ class Plugins(unittest.TestCase):
             findings = impact.compare_plugins(Path("current"), Path("target"), home, {})
             notes = titles(findings, "note")
             self.assertEqual(len(notes), 2)
-            self.assertIn("1 new qmllint warning, such as a.qml: new", notes[0])
+            self.assertEqual(notes[0], "demo: 1 new qmllint warning")
+            self.assertEqual(findings[0].detail, "It is a.qml: new")
+            self.assertEqual({finding.group for finding in findings}, {"Plugins"})
             self.assertEqual(
                 [finding.evidence for finding in findings],
                 [["~/.config/omarchy/plugins/demo/a.qml"], ["~/.config/omarchy/plugins"]],
@@ -1860,7 +1873,8 @@ class Plugins(unittest.TestCase):
             with mock.patch.object(impact, "lint", side_effect=found), \
                     mock.patch.object(impact, "find_qmllint", return_value=("/bin/true", [])):
                 findings = impact.compare_plugins(Path("current"), Path("target"), home, {})
-        self.assertIn("2 new qmllint warnings, such as", findings[0].title)
+        self.assertIn("2 new qmllint warnings", findings[0].title)
+        self.assertTrue(findings[0].detail.startswith("Such as "))
 
 
 class Lint(unittest.TestCase):
@@ -1944,7 +1958,8 @@ class Lint(unittest.TestCase):
         )
         findings = self.findings(qmllint)
         self.assertEqual(len(titles(findings, "note")), 2)
-        self.assertIn("demo: 2 new qmllint warnings, such as Demo.qml", findings[0].title)
+        self.assertEqual("demo: 2 new qmllint warnings", findings[0].title)
+        self.assertTrue(findings[0].detail.startswith("Such as Demo.qml"))
 
     def assert_unknown(self, qmllint, reason):
         findings = self.findings(qmllint)
@@ -2087,7 +2102,7 @@ class Lint(unittest.TestCase):
     def test_evidence_names_a_file_in_a_subfolder(self):
         (self.base / "current/shell/Palette").mkdir()
         findings = self.findings(self.new_warning_in("panel/Demo.qml"))
-        self.assertIn("such as panel/Demo.qml: gone", findings[0].title)
+        self.assertIn("It is panel/Demo.qml: gone", findings[0].detail)
         self.assertEqual(findings[0].evidence, ["~/.config/omarchy/plugins/demo/panel/Demo.qml"])
 
     def test_two_files_with_one_name_stay_apart(self):
@@ -2113,7 +2128,7 @@ class Lint(unittest.TestCase):
             absolute = impact.compare_plugins(self.base / "current", self.base / "target", self.home, {})
             with contextlib.chdir(self.base):
                 relative = impact.compare_plugins(Path("current"), Path("target"), self.home, {})
-        self.assertIn("1 new qmllint warning, such as Demo.qml: Palette is gone", absolute[0].title)
+        self.assertIn("It is Demo.qml: Palette is gone", absolute[0].detail)
         self.assertEqual(relative, absolute)
 
 
@@ -2422,7 +2437,7 @@ class Program(ProgramCase):
         (self.base / "target/migrations/1.sh").write_text("sed -i s/a/b/ ~/.config/app/app.conf\n")
         code, out, _ = self.check("--all")
         self.assertEqual(code, 0)
-        self.assertIn("migrations/1.sh, line 1, looks like it edits ~/.config/app/app.conf", " ".join(out.split()))
+        self.assertIn("migrations/1.sh may edit ~/.config/app/app.conf It looks like it edits the file on line 1.", " ".join(out.split()))
         self.assertIn("Nothing found", out)
 
     def test_a_write_it_cant_place_exits_3_and_names_the_line(self):
@@ -2572,8 +2587,28 @@ class Json(ProgramCase):
         code, document, err = self.document()
         self.assertEqual((code, document["result"], err), (0, "clear", ""))
         self.assertEqual(document["schemaVersion"], 1)
-        self.assertEqual(document["target"], {"name": "target", "prerelease": None})
+        self.assertEqual(document["target"], {"name": "target", "prerelease": None, "path": str(self.base / "target")})
         self.assertEqual({check["state"] for check in document["checks"].values()}, {"ran"})
+
+    def test_the_target_has_the_path_of_the_release_it_read(self):
+        # A relative --target is made absolute, so an agent can read it from anywhere.
+        with contextlib.chdir(self.base):
+            code, out, _ = self.run_main("--json", "--target", "target")
+        self.assertEqual((code, json.loads(out)["target"]["path"]), (0, str(self.base / "target")))
+        cached = self.cache / "omaupdateimpact/v1.2.3"
+        shutil.copytree(self.base / "target", cached)
+        (cached / impact.NOTES).touch()
+        with mock.patch.object(impact, "installed_packages", return_value=frozenset()), \
+                mock.patch.object(impact, "ask", return_value="1.2.2"):
+            code, out, _ = self.run_main("--json", "v1.2.3", "--channel", "stable")
+        self.assertEqual(json.loads(out)["target"], {"name": "v1.2.3", "prerelease": False, "path": str(cached)})
+        # A document that compares nothing has no path.
+        with mock.patch.object(impact, "ask", return_value="1.2.3"), \
+                mock.patch.object(impact, "newer_releases", return_value=[]), \
+                mock.patch.dict(os.environ, OMARCHY_PATH=str(self.base / "current")):
+            code, out, _ = self.run_argv("--json", "v1.2.3", "--channel", "stable", "--home", str(self.home))
+        self.assertEqual(json.loads(out)["result"], "noUpdate")
+        self.assertEqual(json.loads(out)["target"], {"name": "v1.2.3", "prerelease": False})
 
     def test_stdout_holds_the_document_alone_even_when_something_else_prints(self):
         def stray(*args):
@@ -2797,7 +2832,7 @@ class Reasons(ProgramCase):
         (self.base / "target/default/hypr/bindings.lua").write_text('o.bind("SUPER + SHIFT + C", "Calc", "calc")')
         self.notes(change("Move Calculator to Super + Shift + C", 105))
         _, findings = self.findings("--all", packages=frozenset())
-        self.assertEqual(findings[0]["title"], 'Moved: "Calc" from SUPER + C to SUPER + SHIFT + C.')
+        self.assertEqual(findings[0]["title"], 'Calc: SUPER + C -> SUPER + SHIFT + C')
         self.assertEqual(findings[0]["reason"]["reference"], "#105")
 
     def test_a_list_of_new_shortcuts_takes_no_reason(self):
@@ -3050,7 +3085,7 @@ class Bindings(ProgramCase):
             (self.base / tree / "default/hypr/keys.lua").write_text('o.bind("SUPER + " .. key, "x", "y")')
         code, out, _ = self.check()
         self.assertEqual(code, 0)
-        self.assertIn("1 key bindings use computed keys", self.check("--all")[1])
+        self.assertIn("1 computed key not compared.", self.check("--all")[1])
         self.assertIn("Nothing found", out)
 
     def test_a_computed_key_of_the_users_exits_3(self):
@@ -3640,7 +3675,7 @@ class SharedCache(ProgramCase):
     def start(self, tag):
         options = argparse.Namespace(
             tag=tag, channel=None, target=None, root=self.base / "current", home=self.home,
-            ack=None, debug=False, all=False, json=False,
+            ack=None, unack=None, debug=False, all=False, json=False,
         )
         return self.pool.submit(impact.run, options)
 

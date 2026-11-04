@@ -11,10 +11,11 @@ import "State.js" as State
 // Left click opens the panel, always on the user's own result. Its buttons check
 // again, open the report in a terminal, and check a newer release, whose report shows
 // in the panel and is kept until the shell restarts. The bar follows only the user's
-// own channel. Each finding starts closed, and its title opens it. "Mark reviewed" asks first, then has the service run the
-// command with --ack. "Ask agent" hands a finding, or the whole report, to the user's
-// own coding agent. The only other thing it changes is its own setting, how often it
-// checks, when one is chosen.
+// own channel. Each finding starts closed, and its title opens it. "Mark reviewed" has
+// the service run the command with --ack at once, and "Undo" under Reviewed with
+// --unack, as each undoes the other. "Ask agent" hands a finding, or the whole report,
+// to the user's own coding agent. The only other thing it changes is its own setting,
+// how often it checks, when one is chosen.
 Panel {
   id: root
   moduleName: "io.github.frestina.omaupdateimpact"
@@ -56,12 +57,12 @@ Panel {
   // The findings opened by a click on their title. Each starts closed, in every
   // section, and they close again with the panel or another report.
   property var openFindings: ({})
-  // The id of the finding whose "Mark reviewed?" is open, or "".
-  property string confirming: ""
   // "Ask agent" shows only when omarchy-agent-prompt is on PATH.
   readonly property bool agentReady: !!root.service && root.service.agentReady === true
   readonly property string ackProblem: root.shown && typeof root.shown.ackProblem === "string"
     ? root.shown.ackProblem : ""
+  readonly property string undoProblem: root.shown && typeof root.shown.undoProblem === "string"
+    ? root.shown.undoProblem : ""
 
   readonly property string glyph: "󰚰"
   readonly property string tooltipText: root.barView.tooltip
@@ -120,10 +121,14 @@ Panel {
   }
 
   // The finding was seen and accepted: the service runs --ack for it, and its
-  // document replaces the last result. Only after Yes on "Mark reviewed?".
+  // document replaces the last result. "Undo" takes it back, so nothing asks first.
   function markReviewed(id) {
-    root.confirming = ""
     if (root.service && typeof root.service.ack === "function") root.service.ack(id)
+  }
+
+  // "Undo" under Reviewed: the service runs --unack for it, and the finding counts again.
+  function undoReview(id) {
+    if (root.service && typeof root.service.unack === "function") root.service.unack(id)
   }
 
   // One finding, or the whole report when finding is null, to the user's own agent.
@@ -173,7 +178,6 @@ Panel {
 
   onOpenedChanged: if (!opened) {
     notesOpen = false
-    confirming = ""
     openFindings = {}
     goBack()
   }
@@ -181,7 +185,6 @@ Panel {
   onChosenChanged: {
     notesOpen = false
     openFindings = {}
-    confirming = ""
   }
 
   implicitWidth: button.implicitWidth
@@ -272,17 +275,23 @@ Panel {
     }
   }
 
-  // The rest of an open finding: its detail, why, fix, evidence and id, all selectable.
+  // The rest of an open finding: its detail, its items one per line, why, fix,
+  // evidence and id, all selectable.
   component FindingBody: Column {
     id: findingBody
     property var about: null
     readonly property var f: findingBody.about || ({})
+    readonly property var items: Array.isArray(findingBody.f.items) ? findingBody.f.items : []
     width: parent ? parent.width : implicitWidth
     spacing: Style.space(3)
 
     Selectable {
       visible: !!findingBody.f.detail
       text: findingBody.f.detail || ""
+    }
+    Selectable {
+      visible: findingBody.items.length > 0
+      text: findingBody.items.join("\n")
     }
     Selectable {
       visible: !!findingBody.f.reason
@@ -595,41 +604,15 @@ Panel {
 
                 FindingBody { about: finding.modelData }
 
+                // At once: "Undo" under Reviewed takes it back.
                 Row {
-                  visible: root.confirming !== finding.modelData.id
                   spacing: Style.space(6)
 
                   Button {
                     iconText: "󰄬"
                     text: "Mark reviewed"
-                    tooltipText: "Seen it, and it's fine: it won't count for " + root.view.release + " again"
-                    enabled: !!root.service && !root.busy
-                    foreground: root.foreground
-                    fontFamily: root.fontFamily
-                    fontSize: root.fonts.bodySmall
-                    onClicked: root.confirming = finding.modelData.id
-                  }
-
-                  AgentButton { about: finding.modelData }
-                }
-
-                // In place, and nothing is written until Yes.
-                Row {
-                  visible: root.confirming === finding.modelData.id
-                  spacing: Style.space(6)
-
-                  Text {
-                    anchors.verticalCenter: parent.verticalCenter
-                    textFormat: Text.PlainText
-                    text: "Mark reviewed?"
-                    color: root.foreground
-                    font.family: root.fontFamily
-                    font.pixelSize: root.fonts.bodySmall
-                  }
-
-                  Button {
-                    text: "Yes"
-                    tooltipText: "Run --ack " + finding.modelData.id + " for " + root.view.release
+                    tooltipText: "Seen it, and it's fine: it won't count for " + root.view.release
+                      + " again. Undo is under Reviewed."
                     enabled: !!root.service && !root.busy
                     foreground: root.foreground
                     fontFamily: root.fontFamily
@@ -637,13 +620,7 @@ Panel {
                     onClicked: root.markReviewed(finding.modelData.id)
                   }
 
-                  Button {
-                    text: "No"
-                    foreground: root.foreground
-                    fontFamily: root.fontFamily
-                    fontSize: root.fonts.bodySmall
-                    onClicked: root.confirming = ""
-                  }
+                  AgentButton { about: finding.modelData }
                 }
               }
             }
@@ -722,10 +699,59 @@ Panel {
             }
           }
 
-          // ---------- Reviewed, a count, and the file that undoes one ----------
+          // ---------- Reviewed, each with "Undo", and the file they are kept in ----------
+          PanelSeparator { visible: root.view.reviewed.length > 0; foreground: root.foreground }
+          Heading {
+            visible: root.view.reviewed.length > 0
+            text: "REVIEWED"
+          }
+
+          // Why the last "Undo" wrote nothing. The last result stays.
           Selectable {
-            visible: root.view.reviewed > 0
-            text: State.reviewedLine(root.view.reviewed,
+            visible: root.undoProblem !== ""
+            text: root.undoProblem
+          }
+
+          Repeater {
+            model: root.view.reviewed
+            delegate: Column {
+              id: reviewed
+              required property var modelData
+              width: body.width
+              spacing: Style.space(3)
+
+              FindingTitle { about: reviewed.modelData }
+
+              Column {
+                visible: root.isOpen(reviewed.modelData)
+                width: parent.width
+                spacing: Style.space(3)
+
+                FindingBody { about: reviewed.modelData }
+
+                Row {
+                  spacing: Style.space(6)
+
+                  Button {
+                    iconText: "󰕌"
+                    text: "Undo"
+                    tooltipText: "It counts for " + root.view.release + " again"
+                    enabled: !!root.service && !root.busy
+                    foreground: root.foreground
+                    fontFamily: root.fontFamily
+                    fontSize: root.fonts.bodySmall
+                    onClicked: root.undoReview(reviewed.modelData.id)
+                  }
+
+                  AgentButton { about: reviewed.modelData }
+                }
+              }
+            }
+          }
+
+          Selectable {
+            visible: root.view.reviewed.length > 0
+            text: State.reviewedLine(root.view.release,
               root.service ? root.service.reviewedFile : State.reviewedFile(""))
             color: root.muted
             font.pixelSize: root.fonts.caption

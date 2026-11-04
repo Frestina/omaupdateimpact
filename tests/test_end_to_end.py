@@ -234,10 +234,10 @@ class Report(RealCommand):
     def test_a_typical_report_fits_on_one_screen(self):
         self.assertLessEqual(len(self.result.stdout.splitlines()), 40)
         self.assertIn("Worth knowing: 12 notes. Add --all to see them.", self.result.stdout)
-        self.assertNotIn("Moved:", self.result.stdout)
+        self.assertNotIn("Calculator: SUPER + CTRL + Q -> SUPER + SHIFT + Q", self.result.stdout)
 
     def test_all_shows_the_notes_and_keeps_the_rest(self):
-        self.assertIn("Moved:", self.everything.stdout)
+        self.assertIn("Calculator: SUPER + CTRL + Q -> SUPER + SHIFT + Q", self.everything.stdout)
         self.assertNotIn("--all", self.everything.stdout)
         self.assertEqual(self.everything.returncode, self.result.returncode)
         section = self.everything.stdout.partition("Needs attention")[2].partition("Worth knowing")[0]
@@ -287,15 +287,38 @@ class Report(RealCommand):
 
     def test_a_move_and_what_it_displaced_are_one_finding(self):
         self.assertIn(
-            'Moved: "Network" from SUPER + CTRL + W to SUPER + CTRL + N, replacing "Toggle nightlight". '
-            'SUPER + CTRL + W is now "Background switcher".',
-            self.output,
+            "    - Network: SUPER + CTRL + W -> SUPER + CTRL + N\n"
+            '      Replaces "Toggle nightlight". SUPER + CTRL + W is now "Background switcher".\n',
+            self.everything.stdout,
         )
         self.assertNotIn("SUPER + CTRL + N is now", self.output)
-        self.assertNotIn('it was "Network"', self.output)
+        self.assertNotIn('-> "Network"', self.output)
 
     def test_a_change_with_no_move_keeps_its_line(self):
-        self.assertIn('SUPER + ALT + SPACE is now "Apps", it was "Apps menu".', self.output)
+        self.assertIn('    - SUPER + ALT + SPACE: "Apps menu" -> "Apps"\n', self.everything.stdout)
+
+    def test_all_lists_the_notes_under_their_groups(self):
+        notes = self.everything.stdout.partition("\nWorth knowing\n")[2].partition("\nLimits of this check")[0]
+        headings = [line.strip() for line in notes.splitlines() if line.startswith("  ") and not line.startswith("   ")]
+        self.assertEqual(headings, [
+            "Shortcuts that move", "Shortcuts that change", "New default shortcuts", "Computed keys",
+            "Deleted commands in Omarchy's own files", "Plugins", "Files a migration may edit",
+        ])
+        document = json.loads(self.compare(HOME, "--json").stdout)
+        notes_in_document = [f for f in document["findings"] if f["level"] == "note"]
+        self.assertEqual(list(dict.fromkeys(f["group"] for f in notes_in_document)), headings)
+        # Each title on a line of its own, its detail under it, and each item on a line.
+        for finding in notes_in_document:
+            with self.subTest(finding["title"]):
+                self.assertIn(f"\n    - {finding['title']}\n", notes)
+                self.assertNotIn("\n", finding["title"])
+        self.assertIn(
+            "    - 16 new default shortcuts.\n"
+            "      CTRL + SHIFT + SEMICOLON: Zoom in (JIS + key)\n"
+            "      CTRL + SPACE: Direct input for the terminal prefix\n",
+            notes,
+        )
+        self.assertIn("      SUPER + SHIFT + I: Switch input language back\n", notes)
 
     def test_piped_output_has_no_colour(self):
         for result in (self.result, self.everything, self.compare(self.clean_home)):
@@ -360,14 +383,18 @@ class Report(RealCommand):
         self.assertNotIn("omarchy-system-logout", self.output)
 
     def test_a_copy_of_omarchys_own_hook_is_only_a_note(self):
-        title = "install-voxtype.hook calls omarchy-voxtype-install, which the release deletes."
+        title = "install-voxtype.hook calls omarchy-voxtype-install"
         self.assertNotIn(title, self.attention())
-        self.assertIn(f"{title} It's Omarchy's own file, unchanged, so there's nothing for you to fix.", self.output)
+        self.assertIn(
+            f"{title} The release deletes omarchy-voxtype-install. It's Omarchy's own file, unchanged, so there's "
+            "nothing for you to fix.",
+            self.output,
+        )
 
     def test_a_migration_that_edits_a_file_you_changed_is_a_note(self):
         self.assertIn(
-            "migrations/1788129995.sh, line 10, looks like it edits ~/.config/imv/config, which differs from "
-            "Omarchy's default.",
+            "migrations/1788129995.sh may edit ~/.config/imv/config It looks like it edits the file on line 10. "
+            "It differs from Omarchy's default.",
             self.output,
         )
         self.assertNotIn("imv", self.result.stdout)
@@ -379,8 +406,8 @@ class Report(RealCommand):
 
     def test_a_new_lint_warning_is_a_note(self):
         self.assertNotIn("qmllint", self.attention())
-        self.assertIn("demo: 2 new qmllint warnings, such as Demo.qml: Warnings occurred while importing module", self.output)
-        self.assertIn("qmllint can't prove a plugin works.", self.output)
+        self.assertIn("demo: 2 new qmllint warnings Such as Demo.qml: Warnings occurred while importing module", self.output)
+        self.assertIn("qmllint can't prove a plugin works. Most plugin breaks only show when the shell runs them.", self.output)
 
 
 class OwnFiles(RealCommand):
@@ -535,7 +562,7 @@ class JsonOutput(RealCommand):
         self.assertEqual(report.stdout.splitlines()[0], "Omarchy 4.0.6-1 -> v4.5.0-rc2 (stable channel, prerelease). Nothing was changed.")
         self.assertEqual(
             (document["installed"], document["target"], document["channel"]),
-            ("4.0.6-1", {"name": "v4.5.0-rc2", "prerelease": True}, "stable"),
+            ("4.0.6-1", {"name": "v4.5.0-rc2", "prerelease": True, "path": str(NEW)}, "stable"),
         )
         # The report says: Checked 207 default bindings, 3 of yours, 27 pending migrations for
         # packages and 28 for file edits, 7 of your files for 6 deleted commands, 1 plugin linted.
@@ -679,6 +706,99 @@ class Reviewed(RealCommand):
         self.assertEqual([f["id"] for f in later["findings"] if f["level"] == "attention"], self.ids())
         self.assertEqual(len(set(self.ids())), len(self.ids()))
 
+    def unack(self, *ids, home=None):
+        return self.compare(home or self.home, *(arg for given in ids for arg in ("--unack", given)))
+
+    def test_unack_takes_back_only_that_releases_lines(self):
+        first, second = self.ids()[:2]
+        self.reviews.parent.mkdir(parents=True)
+        # Comments, another release, the same id twice, one in capitals, and no newline at the end.
+        before = (
+            f"# mine\n  # v4.5.0-rc2 {first}\nv4.5.0-rc1 {first} Then\n"
+            f"v4.5.0-rc2 {first} One\r\nv4.5.0-rc2 {second} Two\nv4.5.0-rc2  {first.upper()}  Again"
+        )
+        self.reviews.write_bytes(before.encode())
+        result = self.unack(first.upper())
+        self.assert_exit(result, 1)
+        self.assertIn(f"Took back 1 review for v4.5.0-rc2, in {self.reviews}.", result.stderr)
+        after = f"# mine\n  # v4.5.0-rc2 {first}\nv4.5.0-rc1 {first} Then\nv4.5.0-rc2 {second} Two\n"
+        self.assertEqual(self.reviews.read_bytes(), after.encode())
+        self.assertIn(f"[{first}]", result.stdout.partition("Worth knowing")[0])
+        self.assertEqual([f["reviewed"] for f in self.findings() if f["id"] in (first, second)], [False, True])
+        # The last line goes with its newline, and the rest is as it was.
+        self.assert_exit(self.unack(second), 1)
+        self.assertEqual(self.reviews.read_bytes(), f"# mine\n  # v4.5.0-rc2 {first}\nv4.5.0-rc1 {first} Then\n".encode())
+
+    def test_unack_undoes_ack(self):
+        given = self.ids()[0]
+        self.assert_exit(self.ack(given), 1)
+        self.assertEqual(json.loads(self.compare(self.home, "--json", "--unack", given).stdout)["findings"],
+                         self.findings())
+        self.assertEqual([f["reviewed"] for f in self.findings() if f["id"] == given], [False])
+        self.assertEqual(self.reviews.read_text(), impact.REVIEWED_HEADER)
+
+    def test_unack_without_that_review_writes_nothing(self):
+        first, second = self.ids()[:2]
+        self.assert_no_verdict(self.unack(first), f"Can't take the review back: {self.reviews} has no review of {first}")
+        self.assertFalse(self.reviews.parent.exists())
+        self.assert_exit(self.ack(first), 1)
+        with self.reviews.open("a") as out:
+            out.write(f"v4.5.0-rc1 {second} Another release\n# v4.5.0-rc2 {second}\n")
+        before = self.reviews.read_bytes()
+        for ids in ([second], [first, second], ["0000000"]):
+            with self.subTest(ids):
+                missing = ids[-1]
+                self.assert_no_verdict(self.unack(*ids), f"{self.reviews} has no review of {missing} for v4.5.0-rc2.")
+                self.assertEqual(self.reviews.read_bytes(), before)
+                self.assertEqual(os.listdir(self.reviews.parent), ["reviewed"])
+
+    def test_unack_with_no_update_writes_nothing(self):
+        self.assert_exit(self.ack(self.ids()[0]), 1)
+        before = self.reviews.read_bytes()
+        self.stub("omarchy-version", "echo 4.5.0rc2-1")
+        result = self.command("v4.5.0-rc2", "--unack", self.ids()[0], OMARCHY_PATH=NEW, HOME=self.home)
+        self.assert_no_verdict(result, "there is no update, so there is no review to take back.")
+        self.assertEqual(self.reviews.read_bytes(), before)
+
+    def test_ack_and_unack_together_are_bad_usage(self):
+        given = self.ids()[0]
+        result = self.compare(self.home, "--ack", given, "--unack", given)
+        self.assert_exit(result, 2)
+        self.assertIn("--ack and --unack can't be used together", result.stderr)
+        document = json.loads(self.compare(self.home, "--json", "--ack", given, "--unack", given).stdout)
+        self.assertEqual(document, impact.failure("Bad usage: --ack and --unack can't be used together"))
+        self.assertFalse(self.reviews.parent.exists())
+
+    def test_unack_keeps_a_link_a_link(self):
+        given = self.ids()[0]
+        kept = self.base / "dotfiles/omaupdateimpact-reviewed"
+        kept.parent.mkdir()
+        kept.write_text(f"# kept elsewhere\nv4.5.0-rc2 {given} Mine\n")
+        kept.chmod(0o640)
+        self.reviews.parent.mkdir(parents=True)
+        # Through two links, the first relative.
+        (self.base / "dotfiles/link").symlink_to(kept)
+        self.reviews.symlink_to(os.path.relpath(self.base / "dotfiles/link", self.reviews.parent))
+        self.assert_exit(self.unack(given), 1)
+        self.assertTrue(self.reviews.is_symlink())
+        self.assertTrue((self.base / "dotfiles/link").is_symlink())
+        self.assertEqual(kept.read_text(), "# kept elsewhere\n")
+        self.assertEqual(kept.stat().st_mode & 0o777, 0o640)
+        # The file is written beside the one the link points to, and nothing is left there.
+        self.assertEqual(sorted(os.listdir(kept.parent)), ["link", "omaupdateimpact-reviewed"])
+        self.assertEqual(os.listdir(self.reviews.parent), ["reviewed"])
+
+    @unittest.skipIf(os.geteuid() == 0, "root can write a folder without write permission")
+    def test_unack_that_cant_write_changes_nothing(self):
+        given = self.ids()[0]
+        self.assert_exit(self.ack(given), 1)
+        before = self.reviews.read_bytes()
+        self.reviews.parent.chmod(0o500)
+        self.addCleanup(self.reviews.parent.chmod, 0o700)
+        self.assert_no_verdict(self.unack(given), f"Can't take the review back: couldn't write {self.reviews}")
+        self.assertEqual(self.reviews.read_bytes(), before)
+        self.assertEqual(os.listdir(self.reviews.parent), ["reviewed"])
+
 
 class JsonDocs(unittest.TestCase):
     """docs/json.md shows the golden documents, and they are what the command prints."""
@@ -719,6 +839,27 @@ class JsonDocs(unittest.TestCase):
         for name in sorted(names):
             self.assertIn(f"`{name}`", self.doc)
 
+    def test_every_note_has_a_group_the_doc_names(self):
+        # Each place the command makes a note, read from its source, so a new kind can't go without one.
+        calls = [node for node in ast.walk(ast.parse(COMMAND.read_text())) if isinstance(node, ast.Call)
+                 and getattr(node.func, "id", None) == "Finding"]
+        notes = [call for call in calls if len(call.args) > 1 and getattr(call.args[1], "id", None) == "NOTE"]
+        self.assertEqual(len(notes), 11)
+        table = self.doc.partition("| `group` | What its notes are |")[2].partition("\n\n")[0]
+        for call in notes:
+            with self.subTest(line=call.lineno):
+                [group] = [keyword.value for keyword in call.keywords if keyword.arg == "group"]
+                self.assertIsInstance(group.value, str)
+                self.assertIn(f"| `{group.value}` |", table)
+        # And no other level has one. A finding that lists nothing has no items.
+        for call in calls:
+            if call not in notes:
+                self.assertNotIn("group", [keyword.arg for keyword in call.keywords])
+        for finding in json.loads(self.printed["report"])["findings"]:
+            with self.subTest(finding["id"]):
+                self.assertEqual("group" in finding, finding["level"] == "note")
+                self.assertEqual("items" in finding, finding["title"] == "1 new default shortcut.")
+
     def test_the_examples_name_nobody(self):
         for text in self.printed.values():
             for path in ("/home/", tempfile.gettempdir(), str(COMMAND.parent.parent)):
@@ -735,7 +876,7 @@ class BindHold(RealCommand):
 
     def test_a_key_bound_with_the_helper_is_new(self):
         output = flat(self.compare(self.clean_home, "--all").stdout)
-        self.assertIn('ALT + ALT_R ("Start dictation (push-to-talk) / Stop dictation (push-to-talk)")', output)
+        self.assertIn("ALT + ALT_R: Start dictation (push-to-talk) / Stop dictation (push-to-talk)", output)
 
     def test_your_key_clashes_with_the_helper(self):
         self.assertIn(

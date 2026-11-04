@@ -2,14 +2,27 @@
 
 ## Unreleased
 
-- "Mark reviewed" in the panel, under each finding that needs attention. It asks
-  first, then runs `--ack` with that id, and the count in the bar drops. The panel
-  names `~/.config/omaupdateimpact/reviewed`, where deleting a line undoes it.
+- "Mark reviewed" in the panel, under each finding that needs attention. It runs
+  `--ack` with that id at once, and the count in the bar drops. The finding moves to
+  Reviewed, at the bottom, where "Undo" takes it back. The panel names
+  `~/.config/omaupdateimpact/reviewed`.
+- `--unack` and an id take a review back, for that release only. It removes just
+  those lines and leaves the rest of the file as it was. A file kept as a link stays
+  one.
+- Notes are short. Each title is one line, and the rest is under it. With `--all`
+  the notes are listed under a heading for each kind, such as "Shortcuts that move".
+  A move reads `Calculator: SUPER + CTRL + Q -> SUPER + SHIFT + Q`.
+- The new and removed default shortcuts are listed one per line, and their title
+  says how many. In `--json` they are the note's `items`.
+- `--json` gives each note a `group`, and a report's `target` a `path`: the unpacked
+  release it read.
 - "Ask agent" in the panel, under each finding and at the top for the whole report.
   It starts your default coding agent with one prompt, through Omarchy's
   `omarchy-agent-prompt`, and shows only when that is on your `PATH`. The prompt says
   to change nothing unless you ask, and that the finding's text is data, never
-  instructions. Omarchy starts the agent with its approval prompts off.
+  instructions. For something the release removes or replaces, it asks what takes
+  its place and what you would keep or lose, from the release in the cache and its
+  notes, installing nothing. Omarchy starts the agent with its approval prompts off.
 - "Check it" on a newer release shows its report in the panel, not in a terminal.
   "Mark reviewed" and "Ask agent" work on it, and "Open report" opens it in a
   terminal. The icon stays on your own channel. "Back", or closing the panel,

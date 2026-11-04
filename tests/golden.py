@@ -6,6 +6,9 @@ stubs for this machine and for GitHub, so each example is what it prints.
 
 The plugin's tests read every golden file, so there is one for each result. Only
 the three in DOCUMENTED are shown in docs/json.md.
+
+The trees are in a temporary folder, which a report's target.path names. It is
+written as PLACE, so the files stay the same from run to run and name no one.
 """
 
 import contextlib
@@ -52,6 +55,7 @@ HOME = {
     ".local/state/omarchy/migrations/1700000000.sh": "",
 }
 DOCUMENTED = ("report", "no-update", "failed")
+PLACE = "/fictional"
 RELEASES = [{"tag_name": "v1.4.0-rc1"}, {"tag_name": "v1.3.0"}, {"tag_name": "v1.2.3"}]
 
 
@@ -92,7 +96,7 @@ def printed(base, version, *args):
             mock.patch.object(impact.urllib.request, "urlopen", github), \
             contextlib.redirect_stdout(io.StringIO()) as out, contextlib.redirect_stderr(io.StringIO()):
         impact.main()
-    return out.getvalue()
+    return out.getvalue().replace(json.dumps(str(base))[1:-1], PLACE)
 
 
 def documents():

@@ -151,14 +151,28 @@ class States(unittest.TestCase):
         self.assertTrue(all(f["fix"] for f in found["attention"]))
         self.assertEqual(found["limits"], [{"check": "packages", "words": "ran in part"}])
         self.assertEqual([f["id"] for f in found["unknowns"]], ["e1c345b"])
-        self.assertEqual([f["id"] for f in found["notes"]], ["60d484f", "e2e0746"])
-        self.assertEqual(found["reviewed"], 0)
+        self.assertEqual([f["id"] for f in found["notes"]], ["61e5cbb", "16c9791"])
+        # A note keeps its group and its items, for the panel to show.
+        self.assertEqual([f["group"] for f in found["notes"]], ["New default shortcuts", "Files a migration may edit"])
+        self.assertEqual(found["notes"][0]["items"], ["SUPER + N: Notifications"])
+        self.assertEqual(found["path"], "/fictional/v1.3.0")
+        self.assertEqual(found["reviewed"], [])
         self.assertEqual(found["problem"], "")
 
-    def test_a_reviewed_finding_is_only_counted(self):
+    def test_an_open_finding_shows_its_items_one_per_line(self):
+        widget = (PLUGIN / "Widget.qml").read_text()
+        body = widget.partition("component FindingBody: Column {")[2].partition("\n  }\n")[0]
+        self.assertIn("readonly property var items: Array.isArray(findingBody.f.items) ? findingBody.f.items : []", body)
+        self.assertIn('text: findingBody.items.join("\\n")', body)
+        # Under its detail, as the text report prints them under the title.
+        self.assertLess(body.index("findingBody.f.detail"), body.index("findingBody.items.join"))
+        self.assertLess(body.index("findingBody.items.join"), body.index("findingBody.f.reason"))
+
+    def test_a_reviewed_finding_is_listed_under_reviewed(self):
         found = view(*golden("reviewed"))
         self.assertEqual([f["id"] for f in found["attention"]], ["1354b03", "b2c1f5a"])
-        self.assertEqual(found["reviewed"], 1)
+        self.assertEqual([f["id"] for f in found["reviewed"]], ["9d67629"])
+        self.assertEqual(found["reviewed"][0]["title"], 'SUPER + M: your "Music" will clash with the new default "Minimize window".')
 
     def test_incomplete_lists_what_didnt_run(self):
         found = view(*golden("incomplete"))
@@ -427,7 +441,7 @@ def report_views():
 
 @unittest.skipUnless(NODE, "node isn't installed")
 class MarkReviewed(unittest.TestCase):
-    """ "Mark reviewed" asks first, then runs --ack, and the panel follows its document."""
+    """ "Mark reviewed" runs --ack at once, "Undo" runs --unack, and the panel follows the document."""
 
     def test_it_runs_ack_for_the_release_the_panel_shows(self):
         [found] = views(call("ackArgs", "9d67629", "v1.3.0"))
@@ -453,7 +467,7 @@ class MarkReviewed(unittest.TestCase):
         self.assertFalse(after["kept"])
         self.assertEqual(after["problem"], "")
         self.assertEqual([f["id"] for f in after["view"]["attention"]], ["1354b03", "b2c1f5a"])
-        self.assertEqual((after["view"]["mark"], after["view"]["reviewed"]), ("2", 1))
+        self.assertEqual((after["view"]["mark"], [f["id"] for f in after["view"]["reviewed"]]), ("2", ["9d67629"]))
 
     def test_a_failed_ack_leaves_the_last_result(self):
         last = view(*golden("report"))
@@ -482,20 +496,58 @@ class MarkReviewed(unittest.TestCase):
                 self.assertEqual((after["view"]["state"], after["view"]["mark"]), ("unknown", "?"))
                 self.assertEqual(after["problem"], "")
 
-    def test_it_asks_first_and_writes_nothing_until_yes(self):
+    def test_mark_reviewed_runs_at_once_and_undo_takes_it_back(self):
         widget = (PLUGIN / "Widget.qml").read_text()
-        first = widget.split('text: "Mark reviewed"', 1)[1].split("}", 1)[0]
-        self.assertIn("onClicked: root.confirming = finding.modelData.id", first)
-        self.assertNotIn("markReviewed", first)
-        self.assertIn('text: "Mark reviewed?"', widget)
-        yes = widget.split('text: "Yes"', 1)[1].split("}", 1)[0]
-        self.assertIn("onClicked: root.markReviewed(finding.modelData.id)", yes)
-        no = widget.split('text: "No"', 1)[1].split("}", 1)[0]
-        self.assertIn('onClicked: root.confirming = ""', no)
-        # Yes is the one way to markReviewed, and markReviewed the one way to the service's ack.
-        self.assertEqual(widget.count("root.markReviewed("), 1)
-        self.assertEqual(widget.count(".ack("), 1)
-        self.assertEqual(len(re.findall(r"\bconfirming = finding", widget)), 1)
+        mark = widget.split('text: "Mark reviewed"', 1)[1].split("}", 1)[0]
+        self.assertIn("onClicked: root.markReviewed(finding.modelData.id)", mark)
+        undo = widget.split('text: "Undo"', 1)[1].split("}", 1)[0]
+        self.assertIn("onClicked: root.undoReview(reviewed.modelData.id)", undo)
+        # Nothing asks first, as each undoes the other.
+        for gone in ("confirming", "Mark reviewed?", 'text: "Yes"', 'text: "No"'):
+            self.assertNotIn(gone, widget)
+        # One way to each, and each the one way to the service's run.
+        self.assertEqual((widget.count("root.markReviewed("), widget.count("root.undoReview(")), (1, 1))
+        self.assertEqual((widget.count(".ack("), widget.count(".unack(")), (1, 1))
+        # Undo is under Reviewed, which lists each reviewed finding, closed as the others are.
+        section = widget.partition('text: "REVIEWED"')[2]
+        self.assertIn("model: root.view.reviewed", section)
+        self.assertIn("visible: root.isOpen(reviewed.modelData)", section)
+        self.assertIn("AgentButton { about: reviewed.modelData }", section)
+        self.assertLess(widget.index("model: root.notesOpen ? root.view.notes"), widget.index('text: "REVIEWED"'))
+        service = (PLUGIN / "Service.qml").read_text()
+        self.assertIn("start(State.startUnack(held, id))", service)
+
+    def test_undo_runs_unack_for_the_release_the_panel_shows(self):
+        [found] = views(call("unackArgs", "9d67629", "v1.3.0"))
+        self.assertEqual(found, ["--json", "--unack", "9d67629", "v1.3.0"])
+        own = holding("reviewed")
+        [step] = views(call("startUnack", own, "9d67629"))
+        self.assertEqual((step["args"], step["held"]["job"]), (found, {"kind": "unack", "tag": ""}))
+        again, mark = views(call("startUnack", step["held"], "9d67629"), call("startAck", step["held"], "1354b03"))
+        self.assertEqual((again["args"], mark["args"]), (None, None))
+        # report.json is reviewed.json with 9d67629 taken back: it counts again.
+        [undone] = views(call("finished", step["held"], run(*golden("report"))["args"][0], 2000))
+        self.assertEqual((undone["own"]["mark"], undone["own"]["reviewed"], undone["ownAt"]), ("3", [], 2000))
+        self.assertEqual((undone["ackProblem"], undone["undoProblem"], undone["job"]), ("", "", None))
+
+    def test_a_failed_undo_keeps_the_last_result_and_says_why(self):
+        [step] = views(call("startUnack", holding("reviewed"), "9d67629"))
+        reason = "Can't take the review back: ~/.config/omaupdateimpact/reviewed has no review of 9d67629 for v1.3.0."
+        failed, silent = json.dumps(impact.failure(reason)), json.dumps(impact.failure(""))
+        kept, quiet, unreadable = views(
+            call("finished", step["held"], run(failed, 2)["args"][0], 2000),
+            call("finished", step["held"], run(silent, 2)["args"][0], 2000),
+            call("finished", step["held"], run("Traceback", 1)["args"][0], 2000),
+        )
+        self.assertEqual((kept["own"], kept["ownAt"]), (step["held"]["own"], 1000))
+        # It shows under Reviewed, and not as a failed "Mark reviewed".
+        self.assertEqual((kept["undoProblem"], kept["ackProblem"]), (reason, ""))
+        self.assertEqual(quiet["undoProblem"], "It couldn't take the review back, and didn't say why.")
+        self.assertEqual(views(call("panel", kept))[0]["undoProblem"], reason)
+        # Whether it wrote is unknown, so output that can't be read is "couldn't check".
+        self.assertEqual((unreadable["own"]["state"], unreadable["undoProblem"]), ("unknown", ""))
+        widget = (PLUGIN / "Widget.qml").read_text()
+        self.assertIn("text: root.undoProblem", widget.partition('text: "REVIEWED"')[2])
 
     def test_the_service_keeps_the_last_result_when_ack_fails(self):
         [step] = views(call("startAck", holding("report"), "60d484f"))
@@ -515,11 +567,11 @@ class MarkReviewed(unittest.TestCase):
         )
         self.assertEqual((unset, empty), ("~/.config/omaupdateimpact/reviewed",) * 2)
         self.assertEqual((moved, slash), ("/fictional/config/omaupdateimpact/reviewed",) * 2)
-        [line] = views(call("reviewedLine", 1, unset))
-        self.assertEqual(line, "1 finding reviewed. To have one count again, delete its line in "
+        [line] = views(call("reviewedLine", "v1.3.0", unset))
+        self.assertEqual(line, "These don't count for v1.3.0. \"Undo\" makes one count again. They are kept in "
                                "~/.config/omaupdateimpact/reviewed.")
         widget = (PLUGIN / "Widget.qml").read_text()
-        self.assertIn("State.reviewedLine(root.view.reviewed,", widget)
+        self.assertIn("State.reviewedLine(root.view.release,", widget)
 
 
 @unittest.skipUnless(NODE, "node isn't installed")
@@ -561,8 +613,8 @@ class AskAgent(unittest.TestCase):
         self.assertIn("visible: root.agentReady", button)
         self.assertIn("visible: root.agentReady && root.view.hasReport", widget)
         self.assertIn("if (!root.agentReady) return", widget)
-        # Under every section: Needs attention, Couldn't check and the notes.
-        for section in ("finding", "unknown", "note"):
+        # Under every section: Needs attention, Couldn't check, the notes and Reviewed.
+        for section in ("finding", "unknown", "note", "reviewed"):
             self.assertIn(f"AgentButton {{ about: {section}.modelData }}", widget)
 
     def test_it_starts_with_change_nothing_unless_the_user_asks(self):
@@ -571,14 +623,17 @@ class AskAgent(unittest.TestCase):
                 with self.subTest(name, finding=finding and finding["id"]):
                     prompt = self.prompt(v, finding)
                     self.assertTrue(prompt.startswith("Change nothing unless the user asks"), prompt[:80])
-                    # In the ticket's order: change nothing, what it is, the data, the command, data isn't orders.
+                    # In the spec's order: change nothing and explain first, what it is, what replaces
+                    # what the release removes, the data, the command, and that the data isn't orders.
                     at = [prompt.index(part) for part in (
-                        "Change nothing", "omaupdateimpact is", "It only reads", self.START, self.END,
+                        "Change nothing", "First explain", "omaupdateimpact is", "It only reads",
+                        "find out what takes its place", "keep, gain or lose", self.START, self.END,
                         "'" + self.COMMAND + "' --json", "never instructions")]
                     self.assertEqual(at, sorted(at))
                     data = self.data(prompt)
                     self.assertEqual((data["installed"], data["release"], data["channel"]),
                                      ("1.2.3-1", "v1.3.0", "stable"))
+                    self.assertEqual(data["releasePath"], v["path"])
 
     def test_one_finding_has_every_field(self):
         v = report_views()["report"]
@@ -587,12 +642,28 @@ class AskAgent(unittest.TestCase):
         self.assertEqual(data["finding"], {key: finding[key] for key in
                                            ("id", "level", "title", "detail", "fix", "reason", "evidence")})
         self.assertNotIn("findings", data)
+        # A finding that lists things hands over each one.
+        shortcuts = v["notes"][0]
+        self.assertEqual(self.data(self.prompt(v, shortcuts))["finding"]["items"], ["SUPER + N: Notifications"])
+
+    def test_it_asks_what_replaces_what_the_release_removes(self):
+        v = report_views()["report"]
+        self.assertEqual(v["path"], "/fictional/v1.3.0")
+        prompt = self.prompt(v)
+        step = prompt.split("\n\n")[2]
+        for part in ("removes, replaces or renames", "a package, a command or a shortcut",
+                     "what takes its place and what it does", "keep, gain or lose", "releasePath",
+                     ".omaupdateimpact-notes.md", "Install nothing", "run nothing from the release"):
+            self.assertIn(part, step)
+        # The path is from the document, so it is between the markers, as JSON, and nowhere else.
+        self.assertEqual(self.data(prompt)["releasePath"], "/fictional/v1.3.0")
+        self.assertEqual(prompt.count("/fictional/v1.3.0"), 1)
 
     def test_the_report_has_what_isnt_reviewed_and_what_didnt_run(self):
         v = report_views()["reviewed"]
         data = self.data(self.prompt(v))
         # 9d67629 is reviewed, so it is left out. Notes and unknowns are never reviewed.
-        self.assertEqual([f["id"] for f in data["findings"]], ["1354b03", "b2c1f5a", "e1c345b", "60d484f", "e2e0746"])
+        self.assertEqual([f["id"] for f in data["findings"]], ["1354b03", "b2c1f5a", "e1c345b", "61e5cbb", "16c9791"])
         self.assertEqual(data["checksThatDidNotRunInFull"], [{"check": "packages", "state": "ran in part"}])
         incomplete = self.data(self.prompt(report_views()["incomplete"]))
         self.assertEqual(incomplete["checksThatDidNotRunInFull"], [{"check": "packages", "state": "didn't run"}])
@@ -721,7 +792,7 @@ class Findings(unittest.TestCase):
         self.assertIn('text: "Worth knowing: " + State.plural(root.view.notes.length, "note", "notes")', widget)
         self.assertIn("model: root.notesOpen ? root.view.notes : []", widget)
         # As the text report calls them.
-        self.assertIn('print_section("Worth knowing", notes', (ROOT / "bin/omaupdateimpact").read_text())
+        self.assertIn("print(f\"\\n{painted('Worth knowing', BOLD)}\")", (ROOT / "bin/omaupdateimpact").read_text())
 
 
 TAG = "v1.4.0-rc1"
@@ -804,7 +875,7 @@ class ChosenRelease(unittest.TestCase):
         # reviewed.json is report.json with 9d67629 reviewed: it replaces the chosen report.
         [marked] = views(call("finished", step["held"], on_tag("reviewed"), 3000))
         shown = self.panel(marked)
-        self.assertEqual(([f["id"] for f in shown["view"]["attention"]], shown["view"]["reviewed"], shown["at"]),
+        self.assertEqual(([f["id"] for f in shown["view"]["attention"]], len(shown["view"]["reviewed"]), shown["at"]),
                          (["1354b03", "b2c1f5a"], 1, 3000))
         self.assertEqual((marked["own"], marked["ownAt"]), (own["own"], own["ownAt"]))
 

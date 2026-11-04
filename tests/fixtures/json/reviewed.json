@@ -5,7 +5,8 @@
   "channel": "stable",
   "target": {
     "name": "v1.3.0",
-    "prerelease": false
+    "prerelease": false,
+    "path": "/fictional/v1.3.0"
   },
   "checks": {
     "bindings": {
@@ -58,14 +59,18 @@
       "reviewed": true
     },
     {
-      "id": "60d484f",
+      "id": "61e5cbb",
       "check": "bindings",
       "level": "note",
-      "title": "New default shortcuts: SUPER + N (\"Notifications\").",
+      "group": "New default shortcuts",
+      "title": "1 new default shortcut.",
       "evidence": [
         "default/hypr/bindings.lua"
       ],
       "detail": "",
+      "items": [
+        "SUPER + N: Notifications"
+      ],
       "fix": "",
       "partial": false,
       "reason": null,
@@ -118,15 +123,16 @@
       "reviewed": false
     },
     {
-      "id": "e2e0746",
+      "id": "16c9791",
       "check": "edits",
       "level": "note",
-      "title": "migrations/1700000003.sh, line 1, looks like it edits ~/.config/fictional-app/theme.conf, which Omarchy has no default for.",
+      "group": "Files a migration may edit",
+      "title": "migrations/1700000003.sh may edit ~/.config/fictional-app/theme.conf",
       "evidence": [
         "migrations/1700000003.sh:1",
         "~/.config/fictional-app/theme.conf"
       ],
-      "detail": "It is read, not run, so the result isn't known. omaforecast can show it by running the migration in a sandbox.",
+      "detail": "It looks like it edits the file on line 1. Omarchy has no default for it. It is read, not run, so the result isn't known. omaforecast can show it by running the migration in a sandbox.",
       "fix": "",
       "partial": false,
       "reason": null,
