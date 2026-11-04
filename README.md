@@ -58,36 +58,17 @@ omaupdateimpact is unofficial. It isn't affiliated with Omarchy or 37signals.
 
 ## Install
 
-Needs Python 3.11.4 or newer. `qmllint` is optional, and comes with `qt6-declarative`.
+Needs Python 3.11.4 or newer, which Omarchy already has. `qmllint` is optional, and
+comes with `qt6-declarative`.
 
-```
-git clone https://github.com/Frestina/omaupdateimpact.git
-cd omaupdateimpact
-./install.sh
-```
-
-That links the command into `~/.local/bin`, so keep the clone where it is. Running
-it twice is harmless, and it won't replace a file that isn't its own link.
-
-To also add an "Omarchy Impact" row to the Omarchy menu, under Update, run
-`./install.sh --menu` instead. The row opens the report in a terminal. It goes in
-`~/.config/omarchy/extensions/omarchy-menu.jsonc`, between two marked comment
-lines, and nothing else in that file changes. If that file is written on one line,
-the line is split after its `{`, and stays split after you remove the row.
-
-To update, run `git pull` in the clone. To remove it, run this there:
-
-```
-./install.sh --uninstall
-```
-
-That removes the link, and the menu row if you added it. It tells you where the
-cache and your reviewed findings are, and leaves them for you to delete.
+There are two ways to install it, and each works on its own. The plugin puts an
+icon in the bar and brings its own command. The terminal install puts the command
+on your `PATH`, with an optional row in the Omarchy menu. You need only one.
 
 ### In the bar
 
-The same repository is an Omarchy shell plugin. It puts an icon in the bar that
-shows the result, for when you'd rather not open a terminal:
+The repository is an Omarchy shell plugin. It puts an icon in the bar that shows
+the result, for when you'd rather not open a terminal:
 
 ```
 omarchy plugin add https://github.com/Frestina/omaupdateimpact.git --enable
@@ -111,11 +92,49 @@ omarchy plugin add https://github.com/Frestina/omaupdateimpact.git --enable
   It saves `checkEveryHours` on the widget's entry in `~/.config/omarchy/shell.json`,
   the only thing the panel changes. Another value set there by hand, up to 168, is
   kept.
-- To mark a finding reviewed, use `--ack` in a terminal.
 
-`omarchy plugin remove io.github.frestina.omaupdateimpact` deletes the plugin's
-folder. The cache in `~/.cache/omaupdateimpact` and your reviewed findings in
-`~/.config/omaupdateimpact/reviewed` stay, for you to delete.
+To mark a finding reviewed, use `--ack` in a terminal. The plugin's command is in
+its folder, so with the plugin alone you run it from there:
+
+```
+~/.config/omarchy/plugins/io.github.frestina.omaupdateimpact/bin/omaupdateimpact --ack 3344d3a
+```
+
+Or run `./install.sh` in that folder once, and `omaupdateimpact` is on your `PATH`.
+Run `./install.sh --uninstall` there before you remove the plugin.
+
+To update, run `omarchy plugin update io.github.frestina.omaupdateimpact`. To
+remove it, run `omarchy plugin remove io.github.frestina.omaupdateimpact`, which
+deletes the plugin's folder. The cache in `~/.cache/omaupdateimpact` and your
+reviewed findings in `~/.config/omaupdateimpact/reviewed` stay, for you to delete.
+
+### In the terminal
+
+```
+git clone --branch v0.2.0 https://github.com/Frestina/omaupdateimpact.git
+cd omaupdateimpact
+./install.sh
+```
+
+That gets the release, and links the command into `~/.local/bin`, so keep the clone
+where it is. `install.sh` makes that one link, and downloads nothing. Running it twice
+is harmless, and it won't replace a file that isn't its own link.
+
+To also add an "Omarchy Impact" row to the Omarchy menu, under Update, run
+`./install.sh --menu` instead. The row opens the report in a terminal. It goes in
+`~/.config/omarchy/extensions/omarchy-menu.jsonc`, between two marked comment
+lines, and nothing else in that file changes. If that file is written on one line,
+the line is split after its `{`, and stays split after you remove the row.
+
+To update, run `git fetch --tags` in the clone, then `git checkout` the newest tag
+in [CHANGELOG.md](CHANGELOG.md). To remove it, run this there:
+
+```
+./install.sh --uninstall
+```
+
+That removes the link, and the menu row if you added it. It tells you where the
+cache and your reviewed findings are, and leaves them for you to delete.
 
 ## Usage
 

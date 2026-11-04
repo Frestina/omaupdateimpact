@@ -627,8 +627,8 @@ only its own setting, when you choose one, and its command writes only these. Se
 It needs Python 3.11.4, because `tarfile`'s `filter=` does. An older Python gets one
 line on stderr and exit 2. That check comes before the other imports, and the file
 has to parse on an old Python for it to run, so it uses no syntax newer than 3.7.
-`--version` reads `__version__` in the command, and the AUR package repeats that
-number because a `PKGBUILD` must state it. A test holds the two together.
+`--version` reads `__version__` in the command, and `manifest.json` repeats it for
+the plugin. A test holds the two together. A release's tag is made from it.
 
 `install.sh` links the command into `~/.local/bin`, which Omarchy puts on `PATH`,
 and creates that folder if it's missing. It runs `--version` first, so a Python
@@ -679,8 +679,10 @@ move it. The format was checked against the menu code in v4.0.6 and v4.5.0-rc2.
 broken block is left alone with exit 1, and the link still goes. It says nothing
 about the menu when there is no block.
 
-The AUR package is in `packaging/aur`, and isn't published. It installs to `/usr/bin`
-and doesn't use `install.sh`.
+There are two ways to install, and each works on its own: the plugin, which brings
+its own command (see [Plugin](#plugin)), and the clone with `install.sh`, for the
+terminal and the menu row. There is no package. The AUR package was removed in 023,
+as publishing one needs an AUR account. It can come back from git history.
 
 ## Plugin
 
@@ -851,6 +853,12 @@ anything. Marking a finding reviewed stays in the terminal, with `--ack`, for no
   prints a golden document. Omarchy's own services are off in it but for the
   wallpaper, which shows the demo theme's own. It writes `preview.png`, or one image
   per theme with `--out`, and stops that shell, whatever happens.
+- The preview shows the icon in a bar at the top, just left of fleetlog's, as on the
+  owner's bar. Frestina's other plugins are public, so they may show. `demo/run`
+  copies them from the commits in the user's plugins folder, and they read the
+  fictional home, so they show no data. The demo bar sits under the user's, and its
+  panel places itself below one bar, so it covers the demo bar. The image is that
+  bar, taken before the panel opens, above the panel, cut at the panel's left edge.
 
 ## Docs
 

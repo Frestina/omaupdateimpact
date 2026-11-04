@@ -1,8 +1,17 @@
 # Changelog
 
-## Unreleased
+## 0.2.0 (2026-11-04)
 
-- `--json` prints one document for scripts and the coming bar plugin: what was
+- An Omarchy shell plugin, from this same repository. An icon in the bar shows the
+  result: faded when nothing needs attention, a count when something does, and a
+  `?` when it couldn't check. Click it for a panel with what needs attention and
+  each fix, what couldn't be checked, and the notes. It runs its own command with
+  `--json`, and holds no rules. Install it with `omarchy plugin add`.
+- When you are up to date and another channel has a newer release, the panel names
+  it, and "Check" shows that release's report in a terminal.
+- The plugin checks 2 minutes after login, then every 6 hours. "Check every" in the
+  panel changes that: only when asked, 1, 6, 12 or 24 hours.
+- `--json` prints one document for scripts and the bar plugin: what was
   checked, each check's state, and every finding with its evidence. Every exit code
   has one. See [docs/json.md](docs/json.md).
 - A new check reads the migrations you haven't run for files of yours they look like

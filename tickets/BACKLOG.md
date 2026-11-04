@@ -43,10 +43,9 @@ Paths already ruled out are not here; they are under
   Waits for someone to need it.
 - **Several machines.** Run the check on every machine you own. Waits for 0.1.0
   and `--json`.
-- **The AUR package.** `packaging/aur` builds, but publishing means an account and a
-  new package for every release, and the clone install already works. Waits for
-  someone to ask, or for 021 to need it. To publish: set the checksum from the tagged
-  tarball, generate `.SRCINFO`, and add it to the README's Install section.
+- **The AUR package.** Removed in 023: it was never published, and publishing needs
+  an AUR account. `packaging/aur` can come back from git history if someone gets
+  one. The rule that a command in `/usr/bin` leaves none of your files out stays.
 
 ## Limits to keep watching
 

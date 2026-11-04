@@ -8,9 +8,14 @@ Nothing of yours is touched or shown. A second shell starts with HOME set to a n
 folder in XDG_RUNTIME_DIR, so it reads none of your config, plugins or files. That
 home holds a copy of the plugin whose bin/omaupdateimpact only prints one of the
 golden documents in tests/fixtures/json, which are the command's own output on small
-fictional trees. Its bar sits at the bottom, and Omarchy's own services are off but
-for the wallpaper, which shows the demo theme's own over yours. So your bar,
-notifications and lock screen carry on.
+fictional trees. Its bar sits at the top, under yours. Its panels place themselves
+below one bar, so they cover it: the image is its bar, taken before the panel
+opens, above the panel, as one bar and its panel look. Left of the panel the demo bar
+shows through, so the image starts at the panel's left edge. The icon sits just left of fleetlog's, between Frestina's other plugins, as
+on a real bar. Those are copied from the commits in your plugins folder, and skipped
+when they aren't there. They read the fictional home, so they show no data of yours.
+Omarchy's own services are off but for the wallpaper, which shows the demo theme's
+own over yours. So your bar, notifications and lock screen carry on.
 
 It moves to an empty workspace while it captures, and goes back after. On any exit,
 the second shell is stopped, your workspace comes back, and the folder is deleted.
@@ -23,18 +28,26 @@ import json
 import os
 import shutil
 import signal
+import struct
 import subprocess
 import sys
 import tempfile
 import time
+import zlib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 GOLDEN = ROOT / "tests/fixtures/json"
 EXIT_CODES = {"clear": 0, "noUpdate": 0, "attention": 1, "failed": 2, "incomplete": 3}
 PREFIX = "omaupdateimpact-demo."
-# Logical pixels from the bottom right of the focused monitor: the bar and the panel.
-WIDTH, HEIGHT = 560, 760
+# Logical pixels from the top right of the demo bar: the bar and the panel.
+WIDTH, HEIGHT = 560, 800
+# The right of the bar, as on the owner's: Frestina's public plugins, then Omarchy's.
+NEIGHBOURS = ("io.github.frestina.cronward", "io.github.frestina.fleetlog", "io.github.frestina.fleetwatch")
+RIGHT = (
+    "io.github.frestina.cronward", "io.github.frestina.omaupdateimpact", "io.github.frestina.fleetlog",
+    "io.github.frestina.fleetwatch", "omarchy.network", "omarchy.audio", "omarchy.power",
+)
 
 
 def manifest():
@@ -80,17 +93,37 @@ def theme(home, omarchy, name):
     return current / "theme"
 
 
+def neighbours(plugins):
+    """Copies Frestina's other plugins from the commits in your plugins folder. Returns their ids."""
+    yours = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "omarchy/plugins"
+    found = []
+    for plugin_id in NEIGHBOURS:
+        source = (yours / plugin_id).resolve()
+        archive = subprocess.run(
+            ["git", "-C", str(source), "archive", "HEAD"], capture_output=True, check=False, timeout=30
+        )
+        if archive.returncode:
+            print(f"demo: {plugin_id} isn't a git checkout in {yours}, so it was left out", file=sys.stderr)
+            continue
+        (plugins / plugin_id).mkdir(parents=True)
+        subprocess.run(["tar", "-x", "-C", str(plugins / plugin_id)], input=archive.stdout, check=True, timeout=30)
+        found.append(plugin_id)
+    return found
+
+
 def fictional_home(home, omarchy, result):
     """The fictional home: a shell.json with the widget, and the plugin with a fixture command."""
     plugin_id = manifest()["id"]
     config = home / ".config/omarchy"
     config.mkdir(parents=True)
+    present = {plugin_id, *neighbours(config / "plugins")}
+    right = [{"id": entry} for entry in RIGHT if entry in present or entry.startswith("omarchy.")]
     shell = {
         "version": 1,
         "bar": {
-            "position": "bottom",
+            "position": "top",
             "transparent": False,
-            "layout": {"left": [], "center": [{"id": "omarchy.clock"}], "right": [{"id": plugin_id}]},
+            "layout": {"left": [], "center": [{"id": "omarchy.clock"}], "right": right},
         },
         "plugins": [],
         "disabledPlugins": first_party_services(omarchy),
@@ -107,6 +140,47 @@ def fictional_home(home, omarchy, result):
     fixture = plugin / "bin/omaupdateimpact"
     fixture.write_text(f'#!/bin/sh\n# A fixture: one golden document.\ncat "$(dirname "$0")/document.json"\nexit {code}\n')
     fixture.chmod(0o755)
+
+
+def demo_bar(pid, monitor, seconds=10):
+    """Where the demo bar sits on the monitor, below your own, and how high it is."""
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        for level in hypr("layers").get(monitor["name"], {}).get("levels", {}).values():
+            for layer in level:
+                if layer["pid"] == pid and layer["namespace"] == "omarchy-bar":
+                    return layer["y"] - monitor["y"], layer["h"]
+        time.sleep(0.25)
+    sys.exit(f"demo: the demo shell's bar didn't show within {seconds} seconds")
+
+
+def capture(x, y, w, h):
+    """The region's pixels from grim, as width, height and RGB rows."""
+    data = subprocess.run(
+        ["grim", "-t", "ppm", "-g", f"{x:.0f},{y:.0f} {w:.0f}x{h:.0f}", "-"], capture_output=True, check=True, timeout=30
+    ).stdout
+    magic, width, height, depth, pixels = data.split(maxsplit=4)
+    if magic != b"P6" or depth != b"255":
+        sys.exit("demo: grim's PPM wasn't 8-bit RGB")
+    width, height = int(width), int(height)
+    return width, [pixels[row * width * 3:(row + 1) * width * 3] for row in range(height)]
+
+
+def panel_left(strip, panel):
+    """The first pixel column where the panel covers the demo bar, which strip shows without it."""
+    for column in range(0, len(strip[0]), 3):
+        if any(s[column:column + 3] != p[column:column + 3] for s, p in zip(strip, panel)):
+            return column
+    sys.exit("demo: the panel didn't open")
+
+
+def write_png(path, width, rows):
+    def chunk(kind, body):
+        return struct.pack(">I", len(body)) + kind + body + struct.pack(">I", zlib.crc32(kind + body))
+
+    header = struct.pack(">IIBBBBB", width, len(rows), 8, 2, 0, 0, 0)
+    image = zlib.compress(b"".join(b"\0" + row for row in rows), 9)
+    path.write_bytes(b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", header) + chunk(b"IDAT", image) + chunk(b"IEND", b""))
 
 
 def go_to(workspace):
@@ -177,8 +251,9 @@ def main():
 
         monitor = next(m for m in hypr("monitors") if m["focused"])
         width, height = monitor["width"] / monitor["scale"], monitor["height"] / monitor["scale"]
-        w, h = min(WIDTH, width), min(HEIGHT, height)
-        region = f"{monitor['x'] + width - w:.0f},{monitor['y'] + height - h:.0f} {w:.0f}x{h:.0f}"
+        top, bar = demo_bar(shell.pid, monitor)
+        w, h = min(WIDTH, width), min(HEIGHT, height - bar)
+        x, y = monitor["x"] + width - w, monitor["y"]
 
         for index, name in enumerate(themes):
             current = theme(home, omarchy, name) if index else home / ".local/state/omarchy/current/theme"
@@ -186,11 +261,14 @@ def main():
             ipc(shell.pid, "call", "shell", "applyTheme", *payload)
             ipc(shell.pid, "call", plugin_id, "check")
             time.sleep(1.5)
+            pixels, strip = capture(x, y + top, w, bar)
             ipc(shell.pid, "call", "shell", "summon", plugin_id, "{}")
             time.sleep(1.5)
+            _, panel = capture(x, y + bar, w, h)
             target = args.out / f"{name}.png" if args.out else ROOT / "preview.png"
             target.parent.mkdir(parents=True, exist_ok=True)
-            run("grim", "-g", region, str(target))
+            left = panel_left(strip, panel)
+            write_png(target, pixels - left // 3, [row[left:] for row in strip + panel])
             ipc(shell.pid, "call", "shell", "hide", plugin_id)
             time.sleep(0.5)
             print(f"demo: wrote {target}")

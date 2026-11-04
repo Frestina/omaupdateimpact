@@ -72,4 +72,4 @@ when.
 | 022 | [Bar widget and panel](022-plugin-panel.md) | 021, 028 | done |
 | 027 | [Two runs share the cache](027-two-runs-share-the-cache.md) | 005 | done |
 | 029 | [Check a newer release, and choose how often, from the panel](029-panel-release-and-interval.md) | 022 | done |
-| 023 | [Marketplace listing](023-marketplace-listing.md) | 015, 022, 027, 029 | todo |
+| 023 | [Marketplace listing](023-marketplace-listing.md) | 015, 022, 027, 029 | in progress |

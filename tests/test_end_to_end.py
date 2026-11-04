@@ -761,9 +761,13 @@ class Version(RealCommand):
         self.assert_exit(result, 0)
         self.assertEqual(result.stdout, f"omaupdateimpact {impact.__version__}\n")
 
-    def test_the_aur_package_has_the_same_version(self):
-        package = (COMMAND.parent.parent / "packaging/aur/PKGBUILD").read_text()
-        self.assertIn(f"\npkgver={impact.__version__}\n", package)
+    def test_the_readme_clones_this_version(self):
+        readme = (COMMAND.parent.parent / "README.md").read_text()
+        self.assertIn(f"git clone --branch v{impact.__version__} https://", readme)
+
+    def test_the_changelog_names_this_version(self):
+        changelog = (COMMAND.parent.parent / "CHANGELOG.md").read_text()
+        self.assertIn(f"\n## {impact.__version__} (", changelog)
 
     def test_help_explains_the_options_for_other_trees(self):
         text = flat(self.command("--help").stdout)
