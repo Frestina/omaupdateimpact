@@ -811,13 +811,23 @@ anything out:
 
 With `noUpdate`, it says Omarchy is up to date and names any newer release on
 another channel, from `newer`, or `newerProblem`. Each newer release has a "Check"
-button that opens the report for that tag in the terminal, as "Open report" does. It
-says the release downloads first, about 200 MB, unless it is already in the cache.
-The command says which: each entry in `newer` has `cached`, as a run would find the
-release there. The plugin doesn't look in the cache itself, so the two can't
-disagree on where it is. The bar keeps showing the user's own channel: a release
-chosen by hand is only in that report, as an update wouldn't deliver it. With
-`failed`, it shows `reason`.
+button that runs the bundled command with `--json` and that tag, and shows its
+report in the panel, in the same sections as the user's own. It says the release
+downloads first, about 200 MB, unless it is already in the cache. The command says
+which: each entry in `newer` has `cached`, as a run would find the release there.
+The plugin doesn't look in the cache itself, so the two can't disagree on where it
+is. With `failed`, it shows `reason`.
+
+A release chosen by hand never changes the bar: the icon, the count and the tooltip
+follow the user's own channel only, as an update wouldn't deliver that release. The
+panel says at the top which release it shows, that it was chosen by hand, and that
+the bar follows the user's channel. "Back", or closing the panel, returns to the
+user's own result. The timer and "Check again" check the user's own release only,
+and the chosen report stays in memory until then, or until the shell restarts. On
+it, "Mark reviewed" runs `--ack` with its tag, so the review counts for that release
+only, and its document replaces the chosen report. "Ask agent" hands over the chosen
+report, and "Open report" opens that tag in the terminal. A chosen check that fails
+shows "couldn't check" for that release in the panel, and leaves the bar alone.
 
 A left click opens it. "Check again" checks now, as `r` does while it is open.
 "Open report" runs the same bundled command in
@@ -856,8 +866,8 @@ Nothing else in the panel changes anything.
 ### What it runs and touches
 
 - It runs only the bundled command with `--json`, with `--ack` when a finding is
-  marked reviewed, the terminal launcher for "Open report" and for checking a newer
-  release by its tag, and `omarchy-agent-prompt` for "Ask agent". It reads stdout as
+  marked reviewed, and with a tag for a newer release chosen in the panel, the
+  terminal launcher for "Open report", and `omarchy-agent-prompt` for "Ask agent". It reads stdout as
   the document. It looks for `omarchy-agent-prompt` with `command -v`, and runs
   nothing else.
 - The launcher joins its arguments and runs them in a second `bash -c`, so the
