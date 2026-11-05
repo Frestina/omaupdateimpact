@@ -43,6 +43,11 @@ Paths already ruled out are not here; they are under
   Waits for someone to need it.
 - **Several machines.** Run the check on every machine you own. Waits for 0.1.0
   and `--json`.
+- **Trimmed fixtures from a newer release.** The end-to-end tests, the golden files,
+  the demo and the README's report read v4.0.6 and v4.5.0-rc2. Moving them to v4.5.0
+  rewrites all of those, and rc2's files still test every format the parser reads.
+  The drift watch reads the newest release every day. Waits for a release whose
+  format rc2 can't show.
 - **The AUR package.** Removed in 023: it was never published, and publishing needs
   an AUR account. `packaging/aur` can come back from git history if someone gets
   one. The rule that a command in `/usr/bin` leaves none of your files out stays.

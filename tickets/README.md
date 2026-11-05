@@ -80,3 +80,4 @@ when.
 | 034 | [Undo a review, short notes, and ask what replaces it](034-undo-items-and-replacements.md) | 033 | done |
 | 035 | [Notes in groups, and arrows that show](035-panel-groups-and-arrows.md) | 034 | done |
 | 036 | [Check soon after loading, and wait for the network](036-first-check-sooner.md) | 035 | done |
+| 037 | [Lint and check against v4.5.0](037-lint-against-v4-5-0.md) | 011 | todo |
