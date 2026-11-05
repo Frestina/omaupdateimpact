@@ -15,6 +15,10 @@ later are in [BACKLOG.md](BACKLOG.md).
 - **Statuses:** `todo`, `in progress`, `done`, `blocked`.
 - New work found along the way goes to the backlog or a new ticket, never into
   the current one.
+- **Nothing is pushed while the listing is in review.** The marketplace issue for
+  023 describes v0.2.0 at `f58b589`, and `omarchy plugin add` takes `main`. Tickets
+  done since then wait on `main` here, and go out together, as the next version,
+  once the listing is decided.
 - **Fixtures are fictional.** No real paths, hostnames or personal config in the
   tests, the docs or the demo. The exception is unchanged Omarchy release files,
   kept with Omarchy's license and their source tag.

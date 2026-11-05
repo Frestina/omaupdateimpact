@@ -60,8 +60,9 @@ that check part of CI, and repeats it against rc2, which the spec names.
 
 ## Done when
 
-- [ ] CI lints the plugin against v4.0.6 and v4.5.0, and the run on the pushed commit
-      passes.
+- [ ] CI's lint step names v4.0.6 and v4.5.0, and `tests/lint-plugin` passes on both
+      trees locally. `main` isn't pushed while the listing is in review (see the
+      README), so CI's own run is checked when it is.
 - [ ] `tests/lint-plugin` names v4.5.0 in its example.
 - [ ] Each item under "Read v4.5.0's own files" was checked in v4.5.0's files, and
       the message to the reviewer says what was read.
