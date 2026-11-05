@@ -29,6 +29,10 @@ fleetlog and cronward-omarchy, which are already fixed the same way.
 - The slot widens with the mark's length, as fleetlog's does.
 - A vertical bar is unchanged: the glyph alone, and the mark as a badge under it.
 - The spec says where the mark goes, and why.
+- Review follow-ups: `tests/lint-plugin` against v4.0.6 warns
+  `Member "labelText" not found on type [missing-property]` on the guarded
+  assignment, and CI lints with `--max-warnings 0`. Turn that one warning off on that
+  line, with a comment that the `hasLabel` check guards it.
 
 ## Not in this ticket
 
@@ -44,3 +48,4 @@ fleetlog and cronward-omarchy, which are already fixed the same way.
       so CI's lint covers it when `main` is pushed.
 - [x] The spec's "What the bar shows" says where the mark goes.
 - [x] `tests/run` passes.
+- [x] `tests/lint-plugin` passes against v4.0.6 and v4.5.0 together, as CI runs it.

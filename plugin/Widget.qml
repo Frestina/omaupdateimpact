@@ -203,12 +203,13 @@ Panel {
     // would shrink the glyph with it. An older shell has no labelText and draws
     // text at its own size, so there the mark stays in text. Assigning
     // labelText where it does not exist would fail the whole icon, hence the
-    // check.
+    // check. The hasLabel check guards the assignment, so qmllint's warning on
+    // a shell without labelText is turned off for this line only.
     readonly property string sideMark: !root.vertical ? root.barView.mark : ""
     readonly property bool hasLabel: "labelText" in button
     text: sideMark !== "" && !hasLabel ? root.glyph + " " + sideMark : root.glyph
     Component.onCompleted: {
-      if (hasLabel) button.labelText = Qt.binding(function() { return button.sideMark })
+      if (hasLabel) button.labelText = Qt.binding(function() { return button.sideMark }) // qmllint disable missing-property
     }
     slotSize: root.barIconSlot * (sideMark !== "" ? 1.1 + 0.5 * sideMark.length : 1)
     foreground: root.iconColour(root.barView.colour)
