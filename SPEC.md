@@ -764,8 +764,8 @@ disagree. It was checked against the shell in v4.0.6 and v4.5.0.
   The panel belongs to the widget. It isn't a `panel` kind, as nothing else opens
   it.
 - Enabling the widget enables the service. The shell counts a plugin that isn't
-  Omarchy's as enabled when its id is anywhere in `shell.json`, and the bar entry
-  is one such place.
+  Omarchy's as enabled when its id is in the bar's layout or in `plugins`, and not
+  in `disabledPlugins`. The bar entry is one such place.
 - A replacement bar gives its widgets no service. The widget then shows that it
   couldn't check, and says why.
 - The service answers IPC on its id, with one method, `check`, which does what
