@@ -198,8 +198,19 @@ Panel {
     anchors.fill: parent
     bar: root.bar
     // Horizontal bars show the mark beside the icon; vertical ones under it, as a badge.
-    text: root.barView.mark !== "" && !root.vertical ? root.glyph + " " + root.barView.mark : root.glyph
-    slotSize: root.barIconSlot * (root.barView.mark.length > 0 && !root.vertical ? 1.3 + 0.3 * root.barView.mark.length : 1)
+    // From Omarchy 4.5.0 the mark goes in labelText, as the battery's percentage
+    // does: the shell fits all of text into one icon's box, so a mark there
+    // would shrink the glyph with it. An older shell has no labelText and draws
+    // text at its own size, so there the mark stays in text. Assigning
+    // labelText where it does not exist would fail the whole icon, hence the
+    // check.
+    readonly property string sideMark: !root.vertical ? root.barView.mark : ""
+    readonly property bool hasLabel: "labelText" in button
+    text: sideMark !== "" && !hasLabel ? root.glyph + " " + sideMark : root.glyph
+    Component.onCompleted: {
+      if (hasLabel) button.labelText = Qt.binding(function() { return button.sideMark })
+    }
+    slotSize: root.barIconSlot * (sideMark !== "" ? 1.1 + 0.5 * sideMark.length : 1)
     foreground: root.iconColour(root.barView.colour)
     useActiveColor: false
     tooltipText: root.opened ? "" : root.tooltipText

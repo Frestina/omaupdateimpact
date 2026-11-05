@@ -820,6 +820,11 @@ that is shown as "couldn't check", with the last line of stderr.
 
 - The icon is always there. A hidden icon would look the same as a widget that
   never ran.
+- On a horizontal bar the mark is the button's `labelText`, left of the glyph, as
+  the battery's percentage is. From Omarchy 4.5.0 the bar fits all of `text` into
+  one icon's box, so a mark there would shrink the glyph. A shell from before 4.5.0
+  has no `labelText`, and assigning it would fail the whole icon, so there the mark
+  stays in `text`. On a vertical bar the mark is a badge under the glyph.
 - The count is the attention findings that aren't reviewed, as `result` counts them.
 - `attention` with checks that didn't run in full shows as attention. The panel
   lists the limits.

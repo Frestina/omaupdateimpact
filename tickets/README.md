@@ -85,3 +85,4 @@ when.
 | 035 | [Notes in groups, and arrows that show](035-panel-groups-and-arrows.md) | 034 | done |
 | 036 | [Check soon after loading, and wait for the network](036-first-check-sooner.md) | 035 | done |
 | 037 | [Lint and check against v4.5.0](037-lint-against-v4-5-0.md) | 011 | done |
+| 038 | [The bar's mark is the icon's label](038-bar-mark-as-label.md) | 037 | done |

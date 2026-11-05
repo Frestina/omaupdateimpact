@@ -222,6 +222,17 @@ class States(unittest.TestCase):
         bar = {(f["state"], f["mark"], f["colour"], f["tooltip"], f["release"], f["channel"]) for f in found}
         self.assertEqual(bar, {("quiet", "", "muted", "Omarchy v1.3.0 is up to date", "v1.3.0", "stable")})
 
+    def test_the_mark_is_the_icons_label_so_the_glyph_keeps_its_size(self):
+        # Omarchy 4.5.0's bar fits all of a BarIconButton's text into one icon's box,
+        # so a mark in text shrinks the glyph. From 4.5.0 it goes in labelText, set
+        # only where the button has it: an older shell fails the whole icon on it.
+        widget = (PLUGIN / "Widget.qml").read_text()
+        button = widget.split("BarIconButton {", 1)[1].split("\n  }\n", 1)[0]
+        self.assertIn('readonly property bool hasLabel: "labelText" in button', button)
+        self.assertIn('text: sideMark !== "" && !hasLabel ? root.glyph + " " + sideMark : root.glyph', button)
+        self.assertIn("if (hasLabel) button.labelText = Qt.binding(", button)
+        self.assertNotRegex(button, r"(?m)^\s*labelText\s*:")
+
     def test_newer_releases_that_couldnt_be_fetched(self):
         doc = json.loads(golden("no-update")[0])
         doc["newer"], doc["newerProblem"] = None, "Couldn't check for newer releases on other channels."
