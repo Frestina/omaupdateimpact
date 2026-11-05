@@ -684,7 +684,7 @@ tools share it.
 Update, for people who don't open a terminal to update. It goes in
 `~/.config/omarchy/extensions/omarchy-menu.jsonc`, the file Omarchy's menu reads
 for user rows. Omarchy reads that path under `HOME`, so `XDG_CONFIG_HOME` doesn't
-move it. The format was checked against the menu code in v4.0.6 and v4.5.0-rc2.
+move it. The format was checked against the menu code in v4.0.6 and v4.5.0.
 
 - The row is `update.omaupdateimpact`, labelled "Omarchy Impact". Its action is
   `omarchy-launch-floating-terminal-with-presentation omaupdateimpact`, the launcher
@@ -725,7 +725,7 @@ as publishing one needs an AUR account. It can come back from git history.
 
 The plugin shows the result in the bar, for people who never open a terminal. It
 holds no rules. It runs the command and renders its `--json`, so the two can't
-disagree. It was checked against the shell in v4.0.6 and v4.5.0-rc2.
+disagree. It was checked against the shell in v4.0.6 and v4.5.0.
 
 - **One repository.** `manifest.json` sits at the root of this one, beside the
   command, as in Frestina's other plugins. `omarchy plugin add` clones the whole

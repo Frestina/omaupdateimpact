@@ -2,7 +2,7 @@
 # Lints plugin/*.qml with a Qt 6 qmllint against each Omarchy tree given, and fails on
 # any warning. The command leaves its own plugin out, so this is where its QML is linted.
 #
-#   tests/lint-plugin ~/.cache/omaupdateimpact/v4.0.6 ~/.cache/omaupdateimpact/v4.5.0-rc2
+#   tests/lint-plugin ~/.cache/omaupdateimpact/v4.0.6 ~/.cache/omaupdateimpact/v4.5.0
 #
 # The trees' shell/ folders give qs.Commons and qs.Ui. Quickshell's own modules come
 # from the quickshell package.

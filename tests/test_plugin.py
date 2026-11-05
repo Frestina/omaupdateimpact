@@ -382,7 +382,7 @@ class CheckEvery(unittest.TestCase):
 class Terminal(unittest.TestCase):
     """What "Open report" and "Check" hand to the bar's run(), through two shells."""
 
-    # The launcher in v4.0.6 and v4.5.0-rc2 joins its arguments with "$*" and runs
+    # The launcher in v4.0.6 and v4.5.0 joins its arguments with "$*" and runs
     # them in bash -c, between the logo and the done prompt. This one does only that.
     LAUNCHER = '#!/bin/bash\ncmd="$*"\nexec bash -c "$cmd"\n'
     REPORTER = "#!/usr/bin/env python3\nimport json, sys\nprint(json.dumps(sys.argv))\n"
@@ -797,7 +797,7 @@ class AskAgent(unittest.TestCase):
         agent = base / "agent/omarchy-agent"
         agent.parent.mkdir()
         agent.write_text('#!/bin/bash\n[[ $1 == --prompt ]] || exit 9\nprintf %s "$2" > "$PROMPT_OUT"\n')
-        # omarchy-agent-prompt in v4.0.6 and v4.5.0-rc3 ends in this line. The installed
+        # omarchy-agent-prompt in v4.0.6 and v4.5.0 ends in this line. The installed
         # one is copied to a folder of its own, so it can reach no agent but the one above.
         launchers = {"stub": '#!/bin/bash\nset -euo pipefail\nexec omarchy-agent --prompt "$*"\n'}
         installed = shutil.which("omarchy-agent-prompt")

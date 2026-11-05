@@ -56,15 +56,16 @@ jobs:
           /usr/lib/qt6/bin/qmllint --version
           node --version
       # The command leaves its own plugin out, so its QML is linted here, against the
-      # shell of both releases it was checked with. Any warning fails.
+      # shell of both releases it was checked with: v4.0.6, for anyone who hasn't
+      # updated, and v4.5.0, the current stable release. Any warning fails.
       - name: Lint the plugin's QML
         run: |
-          for tag in v4.0.6 v4.5.0-rc2; do
+          for tag in v4.0.6 v4.5.0; do
             mkdir -p "/tmp/omarchy/$tag"
             curl -fsSL "https://github.com/omacom/omarchy/archive/refs/tags/$tag.tar.gz" \
               | tar -xz --strip-components=1 -C "/tmp/omarchy/$tag"
           done
-          tests/lint-plugin /tmp/omarchy/v4.0.6 /tmp/omarchy/v4.5.0-rc2
+          tests/lint-plugin /tmp/omarchy/v4.0.6 /tmp/omarchy/v4.5.0
       # Root reads everything, so the tests of unreadable folders need a normal user.
       - name: Run the tests as a normal user
         run: |
