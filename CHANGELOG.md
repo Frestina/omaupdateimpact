@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.1 (2026-11-06)
+
+- Nothing changes for you. A test no longer needs `pacman`, so the tests pass on a
+  machine without it, such as CI's Ubuntu runners. 0.3.0's tests failed there.
+
 ## 0.3.0 (2026-11-06)
 
 - "Mark reviewed" in the panel, under each finding that needs attention. It runs

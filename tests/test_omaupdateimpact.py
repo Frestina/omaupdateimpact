@@ -2604,7 +2604,8 @@ class Json(ProgramCase):
 
     def test_the_target_has_the_path_of_the_release_it_read(self):
         # A relative --target is made absolute, so an agent can read it from anywhere.
-        with contextlib.chdir(self.base):
+        # Without its own packages, the run asks pacman, which a machine may not have.
+        with contextlib.chdir(self.base), mock.patch.object(impact, "installed_packages", return_value=frozenset()):
             code, out, _ = self.run_main("--json", "--target", "target")
         self.assertEqual((code, json.loads(out)["target"]["path"]), (0, str(self.base / "target")))
         cached = self.cache / "omaupdateimpact/v1.2.3"

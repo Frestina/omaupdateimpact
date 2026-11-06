@@ -49,6 +49,12 @@ and get the marketplace to verify it.
 - When the update request is in review, `tickets/README.md`'s hold note goes back
   on, naming the SHA in review. When it's verified, the note says pushes are open.
 
+- CI failed on `v0.3.0`'s push: a test from 034 ran the real `pacman -Qq`, and
+  Ubuntu's runners have none. The command and plugin were fine. A published tag
+  never moves, so the owner chose 0.3.1, with only that test fixed. Its tag, its
+  green CI and the SHA the marketplace verifies are one commit, and the README's
+  clone names `v0.3.1`. `v0.3.0` stays as published.
+
 ## Not in this ticket
 
 - Any change to the command or the plugin. Something found here goes to the
@@ -56,15 +62,17 @@ and get the marketplace to verify it.
 
 ## Done when
 
-- [ ] `--version` and `manifest.json` say 0.3.0, and the changelog dates it.
+- [ ] `--version` and `manifest.json` say 0.3.1, and the changelog dates 0.3.0 and
+      0.3.1.
 - [ ] `preview.png` shows the new panel buttons, its first finding open and the
       rest closed, and no real data.
 - [ ] The scan of the committed tree has no `FINDING` but
       `remote-git-execution-unpinned`.
-- [ ] The README's clone names `v0.3.0`.
-- [ ] `v0.3.0` and its GitHub release exist, on the commit pushed to `main`.
+- [ ] The README's clone names `v0.3.1`.
+- [ ] `v0.3.0` and `v0.3.1` and their GitHub releases exist, `v0.3.1` on the
+      commit pushed to `main`.
 - [ ] CI passed on that push.
 - [ ] The owner confirmed the update request, and the marketplace verified the new
       SHA.
-- [ ] `omarchy plugin add` on a clean machine installs 0.3.0.
+- [ ] `omarchy plugin add` on a clean machine installs 0.3.1.
 - [ ] `tests/run` passes.
