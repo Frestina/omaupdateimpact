@@ -1,0 +1,68 @@
+---
+id: "039"
+title: Release 0.3.0 and update the listing
+milestone: M4 Plugin
+depends_on: ["023", "038"]
+---
+
+# 039 Release 0.3.0 and update the listing
+
+## Goal
+
+Ship the work held on `main` since the listing went into review, as one version,
+and get the marketplace to verify it.
+
+## Spec
+
+- [Install](../SPEC.md#install)
+- [Plugin](../SPEC.md#plugin)
+
+## Scope
+
+- The marketplace listed `d092046`, which is `v0.2.0` plus spec and ticket edits.
+  `omarchy plugin add` clones `main` as it is, so whatever is pushed reaches users
+  at once. The listing shows it as unverified until a full-SHA update request is
+  approved. So the version, the tag and the push go out together, and the update
+  request follows straight after.
+- Prepare the version with the `omarchy-plugin-release` skill. It is 0.3.0, as the
+  changelog's Unreleased holds new features: "Mark reviewed", `--unack`, "Ask
+  agent", a newer release's report in the panel, and notes in groups. `__version__`
+  and `manifest.json` both say it. The changelog gives 0.3.0 its date.
+- A new `preview.png` from `demo/run`: the panel with "Mark reviewed" and "Ask
+  agent", and its findings closed, as 033 left it. The icon stays in the top bar,
+  left of the fleetlog icon, as in 023, and the data stays fictional. This is the
+  backlog's "A preview with the new buttons".
+- Scan the committed tree (`git archive`, or a fresh clone) with the release and
+  publish skills. It should find no more than 023's did: no `FINDING` but
+  `remote-git-execution-unpinned`. Answer anything new in the update request,
+  honestly, as 023 did.
+- The README's clone names `v0.3.0`.
+- Push `main` and tag `v0.3.0` together, with a GitHub release whose notes come
+  from the changelog. Watch CI on that push until every job ends. It is also the
+  first CI run for 030 to 038, and 037's lint against v4.5.0 runs there for the
+  first time.
+- Prepare the update request with the `omarchy-plugin-publish` skill, naming the
+  full SHA of the tagged commit. The owner confirms its text and attestations before
+  it is sent. Answer review comments until the new SHA is verified.
+- When the update request is in review, `tickets/README.md`'s hold note goes back
+  on, naming the SHA in review. When it's verified, the note says pushes are open.
+
+## Not in this ticket
+
+- Any change to the command or the plugin. Something found here goes to the
+  backlog or a new ticket, and waits for the version after.
+
+## Done when
+
+- [ ] `--version` and `manifest.json` say 0.3.0, and the changelog dates it.
+- [ ] `preview.png` shows the new panel buttons, its findings closed, and no real
+      data.
+- [ ] The scan of the committed tree has no `FINDING` but
+      `remote-git-execution-unpinned`.
+- [ ] The README's clone names `v0.3.0`.
+- [ ] `v0.3.0` and its GitHub release exist, on the commit pushed to `main`.
+- [ ] CI passed on that push.
+- [ ] The owner confirmed the update request, and the marketplace verified the new
+      SHA.
+- [ ] `omarchy plugin add` on a clean machine installs 0.3.0.
+- [ ] `tests/run` passes.

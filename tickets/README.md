@@ -15,10 +15,11 @@ later are in [BACKLOG.md](BACKLOG.md).
 - **Statuses:** `todo`, `in progress`, `done`, `blocked`.
 - New work found along the way goes to the backlog or a new ticket, never into
   the current one.
-- **Nothing is pushed while the listing is in review.** The marketplace issue for
-  023 describes v0.2.0 at `f58b589`, and `omarchy plugin add` takes `main`. Tickets
-  done since then wait on `main` here, and go out together, as the next version,
-  once the listing is decided.
+- **Nothing is pushed until 039.** The marketplace listed `d092046`, and
+  `omarchy plugin add` clones `main` as it is, so a push reaches users before the
+  marketplace verifies it. Tickets done since then wait on `main` here, and go out
+  together as 0.3.0 in 039. That includes 023's closing commit. While 039's update
+  request is in review, this note names the SHA in review.
 - **Fixtures are fictional.** No real paths, hostnames or personal config in the
   tests, the docs or the demo. The exception is unchanged Omarchy release files,
   kept with Omarchy's license and their source tag.
@@ -86,3 +87,4 @@ when.
 | 036 | [Check soon after loading, and wait for the network](036-first-check-sooner.md) | 035 | done |
 | 037 | [Lint and check against v4.5.0](037-lint-against-v4-5-0.md) | 011 | done |
 | 038 | [The bar's mark is the icon's label](038-bar-mark-as-label.md) | 037 | done |
+| 039 | [Release 0.3.0 and update the listing](039-release-0-3-0.md) | 023, 038 | todo |
