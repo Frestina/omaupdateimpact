@@ -63,20 +63,20 @@ List the plugin where Omarchy users look for tools.
 
 ## Done when
 
-- [ ] The owner has confirmed the attestations.
-- [ ] `--version` and `manifest.json` give the new version, and the tag matches.
-- [ ] The README tells a plugin-only user how to run `--ack`.
-- [ ] `packaging/aur` is gone, and nothing in the spec, README or tests names it.
-- [ ] The README's Install section puts the plugin first, and says the plugin and
+- [x] The owner has confirmed the attestations.
+- [x] `--version` and `manifest.json` give the new version, and the tag matches.
+- [x] The README tells a plugin-only user how to run `--ack`.
+- [x] `packaging/aur` is gone, and nothing in the spec, README or tests names it.
+- [x] The README's Install section puts the plugin first, and says the plugin and
       the terminal install each work on their own.
-- [ ] The README's clone names the release tag.
-- [ ] The scan of the committed tree has no `FINDING` but
+- [x] The README's clone names the release tag.
+- [x] The scan of the committed tree has no `FINDING` but
       `remote-git-execution-unpinned`, and the issue answers it and each capability.
-- [ ] `demo/run`'s docstring and the spec say it copies the neighbouring plugins
+- [x] `demo/run`'s docstring and the spec say it copies the neighbouring plugins
       from your plugins folder, as committed, and reads nothing else of yours.
-- [ ] Git tracks no `AGENTS.md`, `CLAUDE.md` or `.claude/`, they are still on disk,
+- [x] Git tracks no `AGENTS.md`, `CLAUDE.md` or `.claude/`, they are still on disk,
       and a test holds it.
-- [ ] `preview.png` shows the icon in the top bar, left of the fleetlog icon, and
+- [x] `preview.png` shows the icon in the top bar, left of the fleetlog icon, and
       no real data.
-- [ ] The plugin is listed, and installs with `omarchy plugin add` on a clean
+- [x] The plugin is listed, and installs with `omarchy plugin add` on a clean
       machine.
