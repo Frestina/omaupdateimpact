@@ -73,7 +73,7 @@ from collections import ChainMap, Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 REPO = "omacom/omarchy"
 INSTALLED = "/usr/share/omarchy"
 TREE_PARTS = ["bin", "default/hypr", "migrations", "shell"]

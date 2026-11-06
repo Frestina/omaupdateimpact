@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.0 (2026-11-06)
 
 - "Mark reviewed" in the panel, under each finding that needs attention. It runs
   `--ack` with that id at once, and the count in the bar drops. The finding moves to
@@ -44,6 +44,8 @@
   isn't up yet, as right after login, the bar says "Waiting for the network…" and
   tries again each minute, up to 5 times, before it says it couldn't check. "Check
   again" shows a failure at once.
+- On Omarchy 4.5.0 the bar icon is the same size as the others. Its count, `?` or
+  `…` shows to the left of the icon, at the bar's own size.
 - A failed `--json` document has `unreachable`: `true` when no answer came from
   GitHub at all, such as a name that didn't resolve or a timeout.
 

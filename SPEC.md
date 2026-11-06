@@ -998,7 +998,13 @@ Nothing else in the panel changes anything.
   any that isn't there. They read the fictional home, so they show no data. The
   demo bar sits under the user's, and its panel places itself below one bar, so it
   covers the demo bar. The image is that bar, taken before the panel opens, above
-  the panel, cut at the panel's left edge.
+  the panel, cut at the panel's left edge. The demo bar's height is what the monitor
+  reserves below its top edge, as from 4.5.0 the bar's layer reaches the bottom of
+  the screen.
+- The preview's panel opens with its first finding open, so its fix, "Mark
+  reviewed" and "Ask agent" show, and the rest closed. No click can be sent to the
+  demo shell, so `demo/run` edits its own copy of `Widget.qml` to open that finding
+  when the panel opens. The plugin is unchanged, and `demo/video` doesn't do it.
 - `demo/video` records the announcement video, a square MP4 of about 28 seconds,
   in `demo/run`'s second shell, with the same promise. A title card comes first.
   Then a terminal types the command and prints the report, as `tests.demo` runs it,

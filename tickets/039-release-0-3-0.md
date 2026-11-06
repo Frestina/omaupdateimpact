@@ -29,7 +29,9 @@ and get the marketplace to verify it.
   agent", a newer release's report in the panel, and notes in groups. `__version__`
   and `manifest.json` both say it. The changelog gives 0.3.0 its date.
 - A new `preview.png` from `demo/run`: the panel with "Mark reviewed" and "Ask
-  agent", and its findings closed, as 033 left it. The icon stays in the top bar,
+  agent", and its findings closed, as 033 left it. Since 033, "Mark reviewed" is
+  inside each finding, so the owner chose to open the first one, with the rest
+  closed. `demo/run` opens it in its own copy of the widget. The icon stays in the top bar,
   left of the fleetlog icon, as in 023, and the data stays fictional. This is the
   backlog's "A preview with the new buttons".
 - Scan the committed tree (`git archive`, or a fresh clone) with the release and
@@ -55,8 +57,8 @@ and get the marketplace to verify it.
 ## Done when
 
 - [ ] `--version` and `manifest.json` say 0.3.0, and the changelog dates it.
-- [ ] `preview.png` shows the new panel buttons, its findings closed, and no real
-      data.
+- [ ] `preview.png` shows the new panel buttons, its first finding open and the
+      rest closed, and no real data.
 - [ ] The scan of the committed tree has no `FINDING` but
       `remote-git-execution-unpinned`.
 - [ ] The README's clone names `v0.3.0`.

@@ -87,4 +87,4 @@ when.
 | 036 | [Check soon after loading, and wait for the network](036-first-check-sooner.md) | 035 | done |
 | 037 | [Lint and check against v4.5.0](037-lint-against-v4-5-0.md) | 011 | done |
 | 038 | [The bar's mark is the icon's label](038-bar-mark-as-label.md) | 037 | done |
-| 039 | [Release 0.3.0 and update the listing](039-release-0-3-0.md) | 023, 038 | todo |
+| 039 | [Release 0.3.0 and update the listing](039-release-0-3-0.md) | 023, 038 | in progress |

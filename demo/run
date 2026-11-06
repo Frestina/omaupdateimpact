@@ -11,7 +11,8 @@ of your config, other plugins or files. Those plugins are left out when they are
 there. They read the fictional home, so they show no data of yours. The home also
 holds a copy of this plugin whose bin/omaupdateimpact only prints one of the golden
 documents in tests/fixtures/json, which are the command's own output on small
-fictional trees.
+fictional trees. In that copy, the panel opens with its first finding open, as a
+click on its title would, so its fix, "Mark reviewed" and "Ask agent" show.
 
 Its bar sits at the top, under yours, with the icon just left of fleetlog's, between
 Frestina's other plugins, as on a real bar. Its panels place themselves below one
@@ -120,8 +121,22 @@ def neighbours(plugins):
     return found
 
 
-def fictional_home(home, omarchy, document):
-    """The fictional home: a shell.json with the widget, and the plugin with a fixture command."""
+# In the demo's copy of the widget only: the panel opens with its first finding open.
+OPENED = "  onOpenedChanged: if (!opened) {"
+OPEN_FIRST = (
+    "  onOpenedChanged: if (opened && root.view.attention.length > 0) {\n"
+    "    openFindings = State.toggled({}, root.view.attention[0])\n"
+    "  } else if (!opened) {"
+)
+
+
+def fictional_home(home, omarchy, document, open_first=False):
+    """The fictional home: a shell.json with the widget, and the plugin with a fixture command.
+
+    With open_first, the copy of the widget opens the first finding that needs attention
+    each time the panel opens, as a click on its title does, so its fix and buttons show.
+    The plugin itself is unchanged.
+    """
     plugin_id = manifest()["id"]
     config = home / ".config/omarchy"
     config.mkdir(parents=True)
@@ -143,6 +158,12 @@ def fictional_home(home, omarchy, document):
     (plugin / "bin").mkdir(parents=True)
     shutil.copy(ROOT / "manifest.json", plugin)
     shutil.copytree(ROOT / "plugin", plugin / "plugin")
+    if open_first:
+        widget = plugin / "plugin/Widget.qml"
+        source = widget.read_text()
+        if source.count(OPENED) != 1:
+            sys.exit("demo: Widget.qml no longer closes its findings as demo/run expects")
+        widget.write_text(source.replace(OPENED, OPEN_FIRST))
     (plugin / "bin/document.json").write_text(json.dumps(document, indent=2) + "\n")
     code = EXIT_CODES[document["result"]]
     # The mark is outside the plugin's folder, which the shell would reload on a change.
@@ -153,13 +174,21 @@ def fictional_home(home, omarchy, document):
 
 
 def demo_bar(pid, monitor, seconds=10):
-    """Where the demo bar sits on the monitor, below your own, and how high it is."""
+    """Where the demo bar sits on the monitor, below your own, and how high it is.
+
+    From 4.5.0 the bar's layer reaches to the bottom of the screen and reserves only
+    its thickness, so the height is what the monitor reserves at the top below the
+    layer's edge, not the layer's own height.
+    """
     deadline = time.monotonic() + seconds
     while time.monotonic() < deadline:
         for level in hypr("layers").get(monitor["name"], {}).get("levels", {}).values():
             for layer in level:
                 if layer["pid"] == pid and layer["namespace"] == "omarchy-bar":
-                    return layer["y"] - monitor["y"], layer["h"]
+                    top = layer["y"] - monitor["y"]
+                    reserved = next(m for m in hypr("monitors") if m["name"] == monitor["name"])["reserved"][1]
+                    if reserved > top:
+                        return top, min(layer["h"], reserved - top)
         time.sleep(0.25)
     sys.exit(f"demo: the demo shell's bar didn't show within {seconds} seconds")
 
@@ -241,7 +270,7 @@ def check(demo, seconds=30):
 
 
 @contextlib.contextmanager
-def session(document, theme_name):
+def session(document, theme_name, open_first=False):
     """A second shell on a fictional home whose plugin prints document, on an empty workspace.
 
     Whatever happens, the shell is stopped, your workspace comes back, and the folder is
@@ -258,7 +287,7 @@ def session(document, theme_name):
     shell = None
     workspace = hypr("activeworkspace")["id"]
     try:
-        fictional_home(home, omarchy, document)
+        fictional_home(home, omarchy, document, open_first)
         current = theme(home, omarchy, theme_name)
         used = {w["id"] for w in hypr("workspaces")}
         empty = next(n for n in range(9, 100) if n not in used)
@@ -323,7 +352,7 @@ def main():
         sys.exit(f"demo: no golden document {args.result}")
     document = json.loads((GOLDEN / f"{args.result}.json").read_text())
 
-    with session(document, themes[0]) as demo:
+    with session(document, themes[0], open_first=True) as demo:
         plugin_id = manifest()["id"]
         monitor = next(m for m in hypr("monitors") if m["focused"])
         width, height = monitor["width"] / monitor["scale"], monitor["height"] / monitor["scale"]
