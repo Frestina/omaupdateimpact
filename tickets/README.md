@@ -15,11 +15,12 @@ later are in [BACKLOG.md](BACKLOG.md).
 - **Statuses:** `todo`, `in progress`, `done`, `blocked`.
 - New work found along the way goes to the backlog or a new ticket, never into
   the current one.
-- **Nothing is pushed until 039.** The marketplace listed `d092046`, and
-  `omarchy plugin add` clones `main` as it is, so a push reaches users before the
-  marketplace verifies it. Tickets done since then wait on `main` here, and go out
-  together as 0.3.0 in 039. That includes 023's closing commit. While 039's update
-  request is in review, this note names the SHA in review.
+- **Nothing is pushed while an update is in review.** `omarchy plugin add` clones
+  `main` as it is, so a push reaches users before the marketplace verifies it, and
+  moves `main` off the SHA in review. 039's update request
+  ([issue 14152](https://github.com/omacom/omarchy-plugin-marketplace/issues/14152))
+  asks for `6fc32e73213559bf0d83503644137bfe14357188`, which is `v0.3.1`. Commits
+  wait on `main` here until it is verified.
 - **Fixtures are fictional.** No real paths, hostnames or personal config in the
   tests, the docs or the demo. The exception is unchanged Omarchy release files,
   kept with Omarchy's license and their source tag.
