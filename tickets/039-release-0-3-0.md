@@ -2,7 +2,7 @@
 id: "039"
 title: Release 0.3.0 and update the listing
 milestone: M4 Plugin
-depends_on: ["023", "038", "040", "041", "042"]
+depends_on: ["023", "038", "040", "041", "042", "043"]
 ---
 
 # 039 Release 0.3.0 and update the listing
