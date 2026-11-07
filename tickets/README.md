@@ -19,8 +19,8 @@ later are in [BACKLOG.md](BACKLOG.md).
   `main` as it is, so a push reaches users before the marketplace verifies it, and
   moves `main` off the SHA in review. 039's update request
   ([issue 14152](https://github.com/omacom/omarchy-plugin-marketplace/issues/14152))
-  asks for `6fc32e73213559bf0d83503644137bfe14357188`, which is `v0.3.1`. Commits
-  wait on `main` here until it is verified.
+  asks for the commit tagged `v0.3.2`, which the issue names in full. Commits wait
+  on `main` here until it is verified.
 - **Fixtures are fictional.** No real paths, hostnames or personal config in the
   tests, the docs or the demo. The exception is unchanged Omarchy release files,
   kept with Omarchy's license and their source tag.

@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.3.2 (2026-11-07)
+
+- Reading a release costs little more than its size, whatever its scripts hold. A
+  word of many `{a,b}` lists in a pending migration was spelled out in full before
+  the limit of 64 was checked, so 30 of them took 2^30 strings, and a crafted
+  release could exhaust the command and the plugin just by being read. The
+  marketplace's review found it. Such a word, a variable set to more than 64
+  values, or a value longer than any path, is now only known when it runs. A
+  release script over 256 KiB, or nested too deep to read, is reported as a limit.
+- `x=$(<file)` in a pending migration no longer stops the run. The run exited 2
+  and the bar said it couldn't check.
+
 ## 0.3.1 (2026-11-06)
 
 - Nothing changes for you. A test no longer needs `pacman`, so the tests pass on a
