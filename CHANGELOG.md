@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased
+
+- Every file read from a release now costs little more than its size, not only the
+  migrations. The bindings reader scanned to the end of a Lua file for each call
+  that never closed, so `hl.bind(` repeated in a crafted 64 KB file took over a
+  minute, and in 256 KiB about 18 minutes. The marketplace's review found it too.
+  Each Lua file is now read in one pass. A call that never closes is a computed
+  key, and so is one inside other calls past a budget for the file. A Lua file
+  over 256 KiB is reported as a limit.
+- A crafted release can no longer make the reasons, the shortcuts that move or a
+  migration's pattern cuts slow. Each finding looks its reason up instead of
+  checking every change in the notes. Notes over 256 KiB give no reasons. Finding
+  moves looks only at the chords that could match, and past a limit says it
+  couldn't tell. A cut such as `${x##*a*b}` counts each place it tries, and its
+  pattern, against the migration's budget.
+- The values a migration holds are bounded in total, not only one by one. 19,000
+  variables of long values fit in 256 KiB and took about 5 GB. Past 16 MiB the
+  migration is reported as a limit.
+
 ## 0.3.2 (2026-11-07)
 
 - Reading a release costs little more than its size, whatever its scripts hold. A

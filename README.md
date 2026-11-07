@@ -274,9 +274,11 @@ With `--json`, every exit code comes with a document. See [docs/json.md](docs/js
   files may change only some of them. Those are one note, and it can't tell which.
   `~/.cache` and `~/.local/state` aren't counted as your files.
 - Reading a release costs little more than its size. A release script over 256 KiB,
-  or nested too deep to read, is reported as a limit. A word that could be more
-  than 64 paths, a variable set to more than 64 values, or a value longer than any
-  path, is only known when it runs.
+  or nested too deep to read, is reported as a limit, and so is a Lua file of the
+  defaults over 256 KiB. A word that could be more than 64 paths, a variable set to
+  more than 64 values, or a value longer than any path, is only known when it runs.
+  A binding call that never closes is a computed key. Notes over 256 KiB give no
+  reasons.
 - Your files are read as text. A command called from a binary isn't seen. A file
   that can't be read, or a text file over 10 MiB, is reported as a limit. A broken
   link counts, so remove the ones you don't need.

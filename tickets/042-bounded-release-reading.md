@@ -18,6 +18,12 @@ would take about 18 minutes, in the command and in the plugin's scheduled check.
 This is the same kind of issue as 14152's finding, so it ships in the same release,
 and 14152 moves once.
 
+The maintainer found it too, on 0.3.2: their second comment on 14152 (2026-11-07,
+"rescans the entire remaining Lua text for every unterminated binding call") times
+50,000 open `hl.bind(` calls in 400 KB at about 10^10 steps. The same comment says
+the brace finding is fixed. The maintainer moves the request's target commit
+themselves: they moved it to 0.3.2's SHA three minutes after its tag.
+
 ## Spec
 
 - [Reading release formats](../SPEC.md#reading-release-formats)
@@ -50,9 +56,9 @@ and 14152 moves once.
 - Release 0.3.3, with 040's review follow-ups and this, using the
   `omarchy-plugin-release` skill: version, changelog, the README's clone, tag,
   GitHub release, push and CI, as in 039.
-- Edit 14152's target commit to 0.3.3's SHA, and answer the finding there. The
-  reply says what 0.3.2 and 0.3.3 each bounded, and claims no more than the timing
-  tests show. The owner confirms the edited request and the reply first.
+- Make sure 14152's target commit is 0.3.3's SHA (edit it if the maintainer
+  hasn't), and answer both findings there. The reply says what 0.3.2 and 0.3.3
+  each bounded, and claims no more than the timing tests show. The owner confirms the edited request and the reply first.
 
 ## Not in this ticket
 
@@ -61,13 +67,13 @@ and 14152 moves once.
 
 ## Done when
 
-- [ ] `hl.bind(` repeated with no `)`, at the size limit, reads in seconds.
-- [ ] Every crafted shape for every release reader, at the size limit, reads in
+- [x] `hl.bind(` repeated with no `)`, at the size limit, reads in seconds.
+- [x] Every crafted shape for every release reader, at the size limit, reads in
       seconds and with bounded memory, and a test measures both.
-- [ ] The old and new readers agree on every real Lua file and notes.
-- [ ] The spec says each new limit, and its line on what reading a release costs
+- [x] The old and new readers agree on every real Lua file and notes.
+- [x] The spec says each new limit, and its line on what reading a release costs
       is true.
 - [ ] `v0.3.3` and its GitHub release exist on the commit pushed to `main`, and CI
       passed on it.
 - [ ] 14152 names 0.3.3's SHA, and the finding is answered there.
-- [ ] `tests/run` passes.
+- [x] `tests/run` passes.

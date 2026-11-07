@@ -20,6 +20,7 @@ import tracemalloc
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 from email.message import Message
+from functools import partial
 from http.client import IncompleteRead
 from pathlib import Path
 from unittest import mock
@@ -1475,6 +1476,32 @@ def old_braces(word):
     return [word]
 
 
+def old_same_actions(one, other):
+    """same_actions() as it was before 042: every pair of binds looked at. The reference for what it says."""
+    def same(a, b):
+        return a.command == b.command or (bool(a.description) and a.description == b.description)
+    return all(any(same(a, b) for b in other) for a in one) and all(any(same(b, a) for a in one) for b in other)
+
+
+def old_moves(cur, tgt, changed, arrived):
+    """How compare_bindings found moves before 042: each changed chord against every arrived one."""
+    moved = {}
+    for chord in sorted(changed):
+        for other in sorted(arrived - {chord}):
+            if old_same_actions(cur[chord], tgt[other]):
+                moved[chord] = other
+                break
+    return moved
+
+
+def at_limit(shape):
+    """shape(n) for the largest n, by doubling, that is no longer than the size limit."""
+    n = 1
+    while len(shape(n * 2)) <= impact.LARGEST_SCRIPT:
+        n *= 2
+    return shape(n)
+
+
 UNREAD_MIGRATION = ["Couldn't read which files migrations/1.sh writes, so check it by hand."]
 
 
@@ -1483,7 +1510,7 @@ class Deadline(Exception):
 
 
 class BoundedReading(unittest.TestCase):
-    """What a release's scripts hold never makes reading them cost more than their size. See 040."""
+    """What a release's text holds never makes reading it cost much more than its size. See 040 and 042."""
 
     def setUp(self):
         directory = tempfile.TemporaryDirectory()
@@ -1511,6 +1538,187 @@ class BoundedReading(unittest.TestCase):
 
     def unknown(self, migration):
         return titles(self.findings(migration), "unknown")
+
+    def defaults(self, current, target):
+        """The bindings findings for these default files, with none of yours."""
+        for tree, text in (("current", current), ("target", target)):
+            folder = self.base / tree / "default/hypr"
+            folder.mkdir(parents=True, exist_ok=True)
+            (folder / "bindings.lua").write_text(text)
+        return impact.compare_bindings(
+            impact.parse_defaults(self.base / "current", "installed"),
+            impact.parse_defaults(self.base / "target", "release"),
+            impact.Parsed(),
+        )
+
+    def reasons(self, notes, findings, migration=None):
+        (self.base / "target" / impact.NOTES).write_text(notes)
+        if migration is not None:
+            (self.base / "target/migrations/1.sh").write_text(migration)
+        impact.give_reasons(findings, self.base / "target")
+        return [finding.reason and finding.reason.reference for finding in findings]
+
+    def test_unclosed_calls_read_at_once_as_one_computed_key(self):
+        # 042, and the maintainer's second finding on 14152: each call scanned to the end of the file.
+        self.within(10)
+        parsed = parse('hl.bind("SUPER + A", "x")\n' + "hl.bind(" * (impact.LARGEST_SCRIPT // 8 - 4))
+        self.assertEqual(list(parsed.binds), ["SUPER + A"])
+        self.assertEqual(len(parsed.unread), 1)
+        self.assertTrue(parsed.unread[0].expression.startswith("hl.bind(hl.bind("))
+
+    def test_a_call_that_never_closes_is_a_computed_key_not_a_bind(self):
+        # Before 042 it bound SUPER + A to an empty command.
+        parsed = parse('o.bind("SUPER + B", "x", "y")\nhl.bind("SUPER + A", "x"\no.bind("SUPER + C", "x", "y")')
+        self.assertEqual(list(parsed.binds), ["SUPER + B"])
+        self.assertEqual([c.expression for c in parsed.unread], ['hl.bind("SUPER + A","x"o.bind("SUPER + C","x","y")'])
+
+    def test_a_call_that_never_closes_is_a_note_when_both_versions_have_it_and_unknown_when_not(self):
+        same = 'hl.bind("SUPER + B", "x")\nhl.bind("SUPER + A", "x"\n'
+        self.assertEqual(titles(self.defaults(same, same), "note"), ["1 computed key not compared."])
+        # The rest of the file is in the expression, so a change after it is a difference.
+        found = titles(self.defaults(same, same + 'hl.bind("SUPER + C", "y")\n'), "unknown")
+        self.assertEqual(len(found), 2)
+        self.assertIn('hl.bind("SUPER + A","x"hl.bind("SUPER + C","y")', found[1])
+
+    def test_calls_inside_calls_past_the_budget_are_one_computed_key(self):
+        self.within(10)
+        depth = impact.LARGEST_SCRIPT // 9
+        parsed = parse('hl.bind("SUPER + A", "x")\n' + "hl.bind(" * depth + ")" * depth)
+        self.assertEqual(list(parsed.binds), ["SUPER + A"])
+        # The outer calls each spend most of the file, until one holds the rest.
+        self.assertLess(len(parsed.unread), 5)
+        self.assertEqual(len(parsed.unread[-1].expression), len(impact.tidy("hl.bind(" * (depth - len(parsed.unread) + 1))) + depth)
+        # Inside the budget each one is read, as before.
+        self.assertEqual(len(parse("hl.bind(" * 50 + ")" * 50).unread), 50)
+
+    def test_a_computed_key_too_long_to_show_is_cut_short_in_its_title(self):
+        found = self.defaults('hl.bind("SUPER + B", "x")\n', 'hl.bind("SUPER + B", "x")\nhl.bind(' + "k" * 500)
+        title = titles(found, "unknown")[0]
+        self.assertIn("hl.bind(" + "k" * (impact.LONGEST_SHOWN - 8) + "…", title)
+        self.assertLess(len(title), 200)
+
+    def test_a_call_named_in_a_string_is_not_a_call(self):
+        parsed = parse('o.bind("SUPER + A", "Run", "echo hl.bind(\\"SUPER + B\\", \\"x\\")")')
+        self.assertEqual(list(parsed.binds), ["SUPER + A"])
+        self.assertEqual(parsed.unread, [])
+
+    def test_a_lua_file_over_the_size_limit_is_unknown(self):
+        small = 'hl.bind("SUPER + A", "x")\n'
+        (self.base / "target/default/hypr").mkdir(parents=True)
+        (self.base / "target/default/hypr/big.lua").write_text("--" + "x" * impact.LARGEST_SCRIPT + "\n" + small)
+        found = self.defaults(small, small)
+        self.assertEqual(titles(found, "unknown"), [(
+            f"default/hypr/big.lua is over {impact.LARGEST_SCRIPT // 1024} KiB, so it wasn't read, "
+            "and keys bound in it weren't compared."
+        )])
+        self.assertTrue(found[-1].partial)
+
+    def test_defaults_only_in_files_over_the_size_limit_are_no_readable_bindings(self):
+        (self.base / "target/default/hypr").mkdir(parents=True)
+        (self.base / "target/default/hypr/bindings.lua").write_text('hl.bind("SUPER + A", "x")\n' + "-" * impact.LARGEST_SCRIPT)
+        with self.assertRaises(impact.UnusableTree):
+            impact.parse_defaults(self.base / "target", "release")
+
+    def test_an_unbind_costs_no_more_than_what_it_removes(self):
+        self.within(10)
+        n = 20000
+        parsed = parse('hl.bind("SHIFT + A", "x")\n' * n + 'hl.bind("A + SHIFT", "y")\nhl.unbind("A + SHIFT")\n' * n)
+        self.assertEqual([bind.command for bind in parsed.binds["SHIFT + A"]], ["x"] * n)
+
+    def test_binds_keep_their_order_through_unbinds(self):
+        parsed = parse(
+            'hl.bind("SHIFT + A", "a")\nhl.bind("A + SHIFT", "b")\nhl.bind("SHIFT + A", "c")\n'
+            'hl.unbind("A + SHIFT")\nhl.bind("A + SHIFT", "d")\nhl.bind("SUPER + B", "e")\nhl.unbind("all")\n'
+            'hl.bind("SUPER + C", "f")\nhl.bind("SUPER + B", "g")\n'
+        )
+        self.assertEqual({c: [b.command for b in bs] for c, bs in parsed.binds.items()}, {"SUPER + C": ["f"], "SUPER + B": ["g"]})
+        parsed = parse('hl.bind("SHIFT + A", "a")\nhl.bind("A + SHIFT", "b")\nhl.bind("SHIFT + A", "c")\nhl.unbind("A + SHIFT")\n')
+        self.assertEqual([b.command for b in parsed.binds["SHIFT + A"]], ["a", "c"])
+
+    def test_many_computed_keys_cost_no_more_than_their_number(self):
+        self.within(5)
+        n = 14000
+        target = 'hl.bind("SUPER + A", "x")\n' + "".join(f"hl.bind(k{i}, x)\n" for i in range(n))
+        self.assertEqual(len(titles(self.defaults('hl.bind("SUPER + A", "x")\n', target), "unknown")), n)
+
+    def test_same_actions_says_what_it_said_before(self):
+        rng = random.Random(42)
+
+        def binds():
+            return [impact.Bind(rng.choice(["", "a", "b"]), rng.choice(["x", "y", "z"])) for _ in range(rng.randint(0, 4))]
+
+        for _ in range(20000):
+            one, other = binds(), binds()
+            self.assertEqual(impact.same_actions(one, other), old_same_actions(one, other), (one, other))
+
+    def test_moves_are_found_as_before(self):
+        rng = random.Random(42)
+
+        def chords(prefix):
+            return {
+                f"{prefix}{n}": [impact.Bind(rng.choice(["", "a", "b", "c"]), rng.choice("wxyz")) for _ in range(rng.randint(1, 3))]
+                for n in range(rng.randint(0, 6))
+            }
+
+        for _ in range(3000):
+            cur, tgt = chords(rng.choice("AB")), chords(rng.choice("AB"))
+            changed = {c for c in cur if c not in tgt or not old_same_actions(cur[c], tgt[c])}
+            arrived = {c for c in tgt if c not in cur or not old_same_actions(cur[c], tgt[c])}
+            self.assertEqual(impact.moves(cur, tgt, changed, arrived), old_moves(cur, tgt, changed, arrived))
+
+    def test_moves_past_the_budget_are_unknown(self):
+        self.within(20)
+        n = 4000
+        current = "".join(f'hl.bind("SUPER + A{i}", "x")\nhl.bind("SUPER + A{i}", "y{i}")\n' for i in range(n))
+        target = "".join(f'hl.bind("SUPER + B{i}", "x")\n' for i in range(n))
+        self.assertIn(
+            "Too many default shortcuts changed to tell which of them move.", titles(self.defaults(current, target), "unknown")
+        )
+
+    def test_notes_over_the_size_limit_give_no_reason(self):
+        def finding():
+            return impact.Finding("packages", impact.ATTENTION, "", [], about=(("package", "fictional-editor"),))
+
+        notes = "- Remove fictional-editor by @someone in #1\n"
+        self.assertEqual(self.reasons(notes, [finding()]), ["#1"])
+        with contextlib.redirect_stderr(io.StringIO()) as err:
+            self.assertEqual(self.reasons(notes + "#" * impact.LARGEST_SCRIPT, [finding()]), [None])
+        self.assertIn("over 256 KiB", err.getvalue())
+
+    def test_a_migration_over_the_size_limit_says_nothing_it_does(self):
+        migration = self.base / "target/migrations/1.sh"
+        migration.write_text("echo 'Remove the editor'\n" + "#" * impact.LARGEST_SCRIPT)
+        self.assertIsNone(impact.description(migration))
+        migration.write_text("echo 'Remove the editor'\r" + "#" * 100)
+        self.assertEqual(impact.description(migration), "Remove the editor")
+
+    def test_changes_are_found_by_name_as_before(self):
+        # The index finds what change_names finds by looking at every change.
+        rng = random.Random(42)
+        words = ["Remove", "Replace", "Drop", "a", "b.c", "a.", "a-b", "@a", "a+", "A", "x,", "é", ".", "Super + A", "SHIFT+a", "go"]
+        names = ["a", "b", "b.c", "a-b", "@a", "a+", "é", "go", "x", "SUPER + A", "SHIFT + A", "Remove a", "a b", ""]
+        for _ in range(500):
+            entries = [(n, " ".join(rng.choice(words) for _ in range(rng.randint(0, 6))), f"#{n}") for n in range(rng.randint(0, 8))]
+            index = impact.note_index(entries)
+            for kind in ("package", "command", "migration", "keys"):
+                for name in names:
+                    expected = [at for at, (_, text, _) in enumerate(entries) if name and impact.change_names(text, kind, name)]
+                    self.assertEqual(impact.naming(entries, index, kind, name), expected, (kind, name, entries))
+
+    def test_a_cut_pays_for_each_place_it_tries(self):
+        # 042: 040's budget counted what a cut kept, not the fnmatch it ran for each place.
+        # 4,000 cuts of 64 values of 4,000 characters, in 56 KB, took about 20 s.
+        self.within(5)
+        script = "x=~/" + "c" * 3960 + "{a,b}" * 6 + "\n" + "y=${x##*a*b}\n" * 4000 + "rm $y\n"
+        self.assertEqual(self.unknown(script), UNREAD_MIGRATION)
+
+    def test_a_long_pattern_is_paid_for_before_it_is_made(self):
+        self.within(10)
+        self.assertEqual(self.unknown("x=~/a\n" + "".join(f"y=${{x##{'[a' * 2000}{i}}}\n" for i in range(30)) + "rm $y\n"), UNREAD_MIGRATION)
+
+    def test_cuts_still_read_as_before(self):
+        self.assertEqual(impact.expansions("${x##*/}", {"x": [("~/.config/app/app.conf", True)]}, self.home), [("app.conf", True)])
+        self.assertEqual(impact.expansions("${x%.*}", {"x": [("a.b.c", True)]}, self.home), [("a.b", True)])
 
     def test_thirty_lists_in_a_word_are_only_known_when_it_runs_at_once(self):
         # The marketplace's review of 0.3.1: 2^30 words were spelled out before the limit was checked.
@@ -1615,12 +1823,6 @@ class BoundedReading(unittest.TestCase):
         self.assertIsNone(impact.budget_left.get())
 
     def test_every_crafted_shape_at_the_size_limit_reads_in_seconds_and_bounded_memory(self):
-        def at_limit(shape):
-            n = 1
-            while len(shape(n * 2)) <= impact.LARGEST_SCRIPT:
-                n *= 2
-            return shape(n)
-
         shapes = {
             "lists": lambda n: "rm ~/.config/x" + "{a,b}" * n + "\n",
             "a variable set and used many times": lambda n: "".join(f"x=~/.config/a{i}\n" for i in range(n)) + "rm $x\n" * n,
@@ -1634,14 +1836,79 @@ class BoundedReading(unittest.TestCase):
             "many variables of long values": lambda n: (
                 "v0=~/" + "a" * 3800 + "{a,b}" * 6 + "\n" + "".join(f"v{i}=${{v0}}x\n" for i in range(1, n)) + "rm $v1\n"
             ),
+            # 042: a cut tries every place it could cut, and fnmatch makes a regex of each pattern.
+            "cuts of long values": lambda n: (
+                "".join(f"x=~/{'c' * 2000}{i}\n" for i in range(64)) + "y=${x##*a*b}\n" * n + "rm $y\n"
+            ),
+            "patterns of many brackets": lambda n: (
+                "x=~/a\n" + "".join(f"y=${{x##{'[a' * 1000}{i}}}\n" for i in range(n)) + "rm $y\n"
+            ),
+            "many short patterns": lambda n: "x=~/abc\n" + "".join(f"y=${{x##*{i}}}\n" for i in range(n)) + "rm $y\n",
         }
-        for name, shape in shapes.items():
+        lua = 'hl.bind("SUPER + Z", "z")\n'
+        defaults = {
+            "unclosed calls": lambda n: lua + "hl.bind(" * n,
+            "calls inside calls": lambda n: lua + "hl.bind(" * n + ")" * n,
+            "binds inside a command": lambda n: lua + 'hl.bind("SUPER + A", ' * n + ")" * n,
+            "unbinds of another spelling": lambda n: (
+                lua + 'hl.bind("SHIFT + A", "x")\n' * n + 'hl.bind("A + SHIFT", "y")\nhl.unbind("A + SHIFT")\n' * n
+            ),
+            "computed keys": lambda n: lua + "".join(f"hl.bind(k{i}, x)\n" for i in range(n)),
+            "a string that never closes": lambda n: lua + '"' + '\\"' * n,
+            "long brackets": lambda n: lua + "[" + "=" * n + "x" + "[" * n,
+            "a comment that never closes": lambda n: lua + "--[" + "=" * n,
+            "descriptions": lambda n: lua + 'hl.bind("SUPER + A", "x", {description="' + "description='" * n + "})",
+            "helpers": lambda n: lua + "function o.bind_thing() end\n" * n,
+            "shortcuts that never move": lambda n: lua + "".join(
+                f'hl.bind("SUPER + B{i}", "x")\nhl.bind("SUPER + B{i}", "y")\nhl.bind("SUPER + B{i}", "z{i}")\n'
+                for i in range(n)
+            ),
+            "shortcuts that could move": lambda n: lua + "".join(f'hl.bind("SUPER + B{i}", "x")\n' for i in range(n)),
+        }
+
+        # The installed defaults are crafted too, for the shapes that compare chords.
+        def current(n):
+            return lua + "".join(f'hl.bind("SUPER + A{i}", "x")\nhl.bind("SUPER + A{i}", "y{i}")\n' for i in range(n))
+
+        notes = {
+            "changes and packages": lambda n: "".join(f"- Remove p{i} by @a in #{i}\n" for i in range(n)),
+            "changes and keys": lambda n: "".join(f"- Move Super + {i} by @a in #{i}\n" for i in range(n)),
+            "changes and migrations": lambda n: "".join(f"- Do {i} by @a in #{i}\n" for i in range(n)),
+            "a change of many names": lambda n: "- Remove " + "a.b." * n + " by @a in #1\n",
+            "a change of many keys": lambda n: "- " + "SUPER + " * n + "A by @a in #1\n",
+            "many by": lambda n: "- x" + " by @a, @b in" * n + " q\n",
+        }
+
+        def finding(kind, name):
+            return impact.Finding("packages", impact.ATTENTION, "", [], about=((kind, name),))
+
+        def findings(n):
+            return [
+                *(finding("package", f"q{i}") for i in range(n)),
+                *(finding("keys", f"SUPER + {i}") for i in range(n)),
+                *(finding("command", f"c{i}") for i in range(n)),
+                *(finding("migration", "migrations/1.sh") for _ in range(n)),
+            ]
+
+        # Each text is made before the clock starts.
+        installed, first_line = at_limit(current), at_limit(lambda n: "echo " + "'Do 1'" * n + "\n")
+        texts = {kind: {name: at_limit(shape) for name, shape in group.items()} for kind, group in (
+            ("migrations", shapes), ("defaults", defaults), ("notes", notes)
+        )}
+        runs = {f"migrations: {name}": partial(self.findings, text) for name, text in texts["migrations"].items()}
+        for name, text in texts["defaults"].items():
+            runs[f"defaults: {name}"] = partial(self.defaults, installed, text)
+        for name, text in texts["notes"].items():
+            runs[f"notes: {name}"] = partial(self.reasons, text, findings(10000), "echo 'Do 1'\n")
+        runs["notes: a long first line"] = partial(
+            self.reasons, texts["notes"]["changes and migrations"], findings(10000), first_line
+        )
+        for name, run in runs.items():
             with self.subTest(name):
-                script = at_limit(shape)
                 self.within(60)
                 tracemalloc.start()
                 try:
-                    self.findings(script)
+                    run()
                     peak = tracemalloc.get_traced_memory()[1]
                 finally:
                     tracemalloc.stop()

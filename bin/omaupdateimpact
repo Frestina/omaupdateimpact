@@ -86,15 +86,28 @@ BIND_CALLS = ["o.bind_toggle", "o.bind_hold", "o.rebind", "o.bind", "hl.bind", "
 HELPERS_READ = {"o.bind_toggle", "o.bind_hold", "o.rebind", "o.bind", "o.preinstalled_bindings_enabled"}
 HELPER = re.compile(r"(?<![\w.])(?:function\s+(o[.:][\w.:]*[Bb]ind\w*)|(o\.[\w.]*[Bb]ind\w*)\s*=\s*[A-Za-z_])")
 LONG_STRING = re.compile(r"\[(=*)\[")
+BIND_CALL = re.compile(rf"(?<![\w.])({'|'.join(re.escape(name) for name in BIND_CALLS)})\s*\(")
+# What lua_brackets stops at: a string's start, a bracket or a comma.
+LUA_TOKEN = re.compile(r"[\"'\[\](){},]")
 TEXT_SUFFIXES = {"", ".lua", ".sh", ".hook", ".conf", ".toml", ".json", ".jsonc", ".qml", ".js", ".py"}
 STARTUP_FILES = [
     ".bashrc", ".bashrc.local", ".bash_profile", ".bash_login", ".bash_aliases", ".bash_logout",
     ".profile", ".zshrc", ".zshenv", ".zprofile", ".zlogin", ".zlogout", ".config/fish/config.fish",
 ]
 LARGEST_SCANNED = 10 * 1024 * 1024
-# A release script larger than this isn't read: what it does is unknown. Omarchy's
-# largest migration, in v4.5.0, is 13 KiB.
+# A release file larger than this isn't read: a script, a Lua file of the defaults or
+# the notes. What it does is unknown. Omarchy's largest migration, in v4.5.0, is 13 KiB,
+# its largest Lua file 22 KiB and its longest notes, v4.5.0-rc3's, 32 KiB.
 LARGEST_SCRIPT = 256 * 1024
+# Reading one Lua file's calls may spend this much more than the file's length.
+# Each call costs its length, so a call inside another is paid for twice. Omarchy's
+# calls never are, so they spend less than the file.
+LUA_BUDGET = LARGEST_SCRIPT
+# Finding which shortcuts move compares at most this many binds, in all. Omarchy's
+# releases compare at most 16, from v4.0.6 to v4.5.0.
+MOVE_BUDGET = 1_000_000
+# A computed key's title shows this much of its expression.
+LONGEST_SHOWN = 80
 QMLLINT = "/usr/lib/qt6/bin/qmllint"
 # Qt 5 prints "qmllint 1.0", and Qt 6 its own version, such as "qmllint 6.4.2".
 QMLLINT_VERSION = re.compile(r"qmllint (\d{1,3})\.[\d.]+", re.ASCII)
@@ -153,9 +166,14 @@ MOST_EXPANSIONS = 64
 LONGEST_PATH = 4096
 # What reading one script may spend on the values its words stand for, in total:
 # each value's characters and VALUE_COST more. Past it the script is unread. Omarchy's
-# costliest migration, in v4.5.0, spends 0.2 MiB, and its costliest command 1.2 MiB.
+# costliest migration, in v4.5.0, spends 0.4 MiB, and its costliest command 5 MiB.
 VALUE_BUDGET = 16 * 1024 * 1024
 VALUE_COST = 100
+# What a pattern a value is cut with costs, as fnmatch spends it on making a regex:
+# this much, this much more for each character, and the square of its length, as a
+# pattern of many [ costs. One unit is about what a value's character costs.
+PATTERN_COST = 2048
+PATTERN_CHARACTER_COST = 256
 # What is left of VALUE_BUDGET for the script being read, or None outside script_writes.
 budget_left = contextvars.ContextVar("budget_left", default=None)
 MOST_PASSES = 16
@@ -186,6 +204,12 @@ NOTES = ".omaupdateimpact-notes.md"
 NOTE_ENTRY = re.compile(r"\s*[-*] (.+?) by @[\w-]+(?:, @[\w-]+)* in (\S+)\s*")
 # A change that names a package is why it goes only when it starts this way. Others fix or add it.
 REMOVING = re.compile(r"(?:Remove|Replace|Drop|Switch|Retire)\b")
+# What a package or command name in the notes is made of. change_names reads a name
+# only where none of these comes before it.
+NAME_RUN = re.compile(r"[\w@.+-]+")
+WORD_CHARACTER = re.compile(r"\w")
+# Where a line ends, as Python reads a text file.
+LINE_BREAK = re.compile(r"\r\n?|\n")
 NOTE_KEYS = re.compile(
     r"(?<![\w+])(?:(?:" + "|".join([*MODIFIERS, *MODIFIER_SPELLINGS]) + r")\s*\+\s*)+\w+", re.IGNORECASE
 )
@@ -205,10 +229,12 @@ class Bind:
     source: str = ""
     keys: str = ""
 
+    def actions(self):
+        """What this bind does: its command, and its description if it has one. Two binds share one when they do the same."""
+        return {("command", self.command), *([("description", self.description)] if self.description else [])}
+
     def same_action(self, other):
-        if self.command == other.command:
-            return True
-        return bool(self.description) and self.description == other.description
+        return not self.actions().isdisjoint(other.actions())
 
 
 @dataclass
@@ -219,10 +245,43 @@ class Computed:
 
 @dataclass
 class Parsed:
-    binds: dict = field(default_factory=dict)
     unbinds: dict = field(default_factory=dict)
     unread: list = field(default_factory=list)
     helpers: dict = field(default_factory=dict)
+    # Files over LARGEST_SCRIPT, which weren't read.
+    too_large: list = field(default_factory=list)
+    # Each chord's binds in the order they were made, and the binds made with each
+    # spelling of its keys, so an unbind costs no more than the binds it removes.
+    chords: dict = field(default_factory=dict, repr=False)
+    spelled: dict = field(default_factory=dict, repr=False)
+    made: int = field(default=0, repr=False)
+    _binds: dict | None = field(default=None, repr=False, compare=False)
+
+    @property
+    def binds(self):
+        """Each chord's binds, in the order they were made."""
+        if self._binds is None:
+            self._binds = {chord: list(made.values()) for chord, made in self.chords.items()}
+        return self._binds
+
+    def add(self, chord, bind):
+        self.made += 1
+        self.chords.setdefault(chord, {})[self.made] = bind
+        self.spelled.setdefault((chord, spelling(bind.keys)), []).append(self.made)
+        self._binds = None
+
+    def remove(self, chord, spelled):
+        """Takes away the binds on chord whose keys are written this way, as hl.unbind does."""
+        for made in self.spelled.pop((chord, spelled), []):
+            del self.chords[chord][made]
+        if not self.chords.get(chord, True):
+            del self.chords[chord]
+        self._binds = None
+
+    def clear(self):
+        self.chords.clear()
+        self.spelled.clear()
+        self._binds = None
 
 
 @dataclass
@@ -305,13 +364,19 @@ class ShellUnread(Exception):
     """A script this reader lost its place in, or won't read."""
 
 
-def script_text(path):
-    """A release script's text. One over LARGEST_SCRIPT isn't read, so it costs nothing."""
+def release_text(path):
+    """A release file's text, or None over LARGEST_SCRIPT. One that big isn't read, so it costs nothing."""
     with path.open("rb") as file:
         data = file.read(LARGEST_SCRIPT + 1)
-    if len(data) > LARGEST_SCRIPT:
+    return None if len(data) > LARGEST_SCRIPT else data.decode(errors="replace")
+
+
+def script_text(path):
+    """A release script's text. One over LARGEST_SCRIPT is unread."""
+    text = release_text(path)
+    if text is None:
         raise ShellUnread
-    return data.decode(errors="replace")
+    return text
 
 
 class NoReview(Exception):
@@ -380,33 +445,42 @@ def quoted_end(text, start):
     return string_end(text, start) if text[start] in "\"'" else long_string_end(text, start)
 
 
-def call_arguments(text, start):
-    """Split the arguments of the call whose opening bracket is at start."""
-    args, depth, current, i = [], 0, [], start
-    while i < len(text):
-        char = text[i]
-        end = quoted_end(text, i)
+def lua_brackets(text):
+    """Pairs every bracket with its closer, and lists the commas directly inside it.
+
+    One pass does it, so a file of many calls costs no more than its length.
+    Strings are skipped, and their spans come back in order. Any closer closes
+    the innermost bracket, whatever its kind, and one that never closes has none.
+    """
+    closers, commas, strings, opens = {}, {}, [], []
+    found = LUA_TOKEN.search(text)
+    while found:
+        index = found.start()
+        char = text[index]
+        end = quoted_end(text, index) if char in "\"'[" else None
         if end is not None:
-            current.append(text[i:end])
-            i = end
+            strings.append((index, end))
+            found = LUA_TOKEN.search(text, end)
             continue
         if char in "([{":
-            depth += 1
-            if depth > 1:
-                current.append(char)
+            opens.append(index)
+            commas[index] = []
         elif char in ")]}":
-            depth -= 1
-            if depth == 0:
-                args.append("".join(current).strip())
-                return args
-            current.append(char)
-        elif char == "," and depth == 1:
-            args.append("".join(current).strip())
-            current = []
-        else:
-            current.append(char)
-        i += 1
-    return args
+            if opens:
+                closers[opens.pop()] = index
+        elif opens:
+            commas[opens[-1]].append(index)
+        found = LUA_TOKEN.search(text, index + 1)
+    return closers, commas, strings
+
+
+def call_arguments(text, start, brackets=None):
+    """The arguments of the call whose opening bracket is at start, or None if it never closes."""
+    closers, commas, _ = brackets or lua_brackets(text)
+    if start not in closers:
+        return None
+    cuts = [start, *commas[start], closers[start]]
+    return [text[after + 1 : before].strip() for after, before in itertools.pairwise(cuts)]
 
 
 def literal(arg):
@@ -462,24 +536,36 @@ def command_text(arg):
 
 def unbind(parsed, keys, source):
     if keys == "all":
-        parsed.binds.clear()
+        parsed.clear()
         return
     chord = normalize_keys(keys)
     parsed.unbinds.setdefault(chord, {})[spelling(keys)] = source
-    left = [bind for bind in parsed.binds.get(chord, []) if spelling(bind.keys) != spelling(keys)]
-    if left:
-        parsed.binds[chord] = left
-    else:
-        parsed.binds.pop(chord, None)
+    parsed.remove(chord, spelling(keys))
 
 
 def parse_lua(text, parsed, source=""):
-    """Collect the bind and unbind calls in one Lua file."""
+    """Collect the bind and unbind calls in one Lua file.
+
+    A call the reader can't read in full holds the rest of the file, and is one
+    computed key: one that never closes, or one past what the file may spend. The
+    file spends each call's length, so a call inside a call is paid for again.
+    """
     text = blank_comments(text)
-    names = "|".join(re.escape(name) for name in BIND_CALLS)
-    for match in re.finditer(rf"(?<![\w.])({names})\s*\(", text):
-        name = match.group(1)
-        args = call_arguments(text, match.end() - 1)
+    brackets = lua_brackets(text)
+    strings = brackets[2]
+    starts = [start for start, _ in strings]
+    left = len(text) + LUA_BUDGET
+    for match in BIND_CALL.finditer(text):
+        at = bisect.bisect_right(starts, match.start()) - 1
+        if at >= 0 and strings[at][1] > match.start():
+            # A call's name in a string isn't a call.
+            continue
+        name, start = match.group(1), match.end() - 1
+        args = call_arguments(text, start, brackets)
+        left -= len(text) - start if args is None else brackets[0][start] - start
+        if args is None or left < 0:
+            parsed.unread.append(Computed(tidy(text[match.start() :]), source))
+            return
         keys = literal(args[0]) if args else None
         if keys is None:
             expression = tidy(args[0]) if args else ""
@@ -502,7 +588,7 @@ def parse_lua(text, parsed, source=""):
             command = command_text(command)
             if name == "o.bind_toggle":
                 command = "omarchy-toggle-" + command
-            parsed.binds.setdefault(normalize_keys(keys), []).append(Bind(description, command, source, keys))
+            parsed.add(normalize_keys(keys), Bind(description, command, source, keys))
 
 
 def parse_helpers(text, parsed, source):
@@ -522,7 +608,10 @@ def check_tree(root, name):
 def parse_defaults(root, name):
     parsed = Parsed()
     for path in sorted((root / "default/hypr").rglob("*.lua")):
-        text, source = path.read_text(errors="replace"), str(path.relative_to(root))
+        text, source = release_text(path), str(path.relative_to(root))
+        if text is None:
+            parsed.too_large.append(source)
+            continue
         parse_helpers(text, parsed, source)
         if path.name != "helpers.lua":
             parse_lua(text, parsed, source)
@@ -592,40 +681,95 @@ def keys(*chords):
     return tuple(("keys", chord) for chord in chords)
 
 
+def actions(binds):
+    return {action for bind in binds for action in bind.actions()}
+
+
 def same_actions(one, other):
-    """Whether two chords do the same. A press alone isn't the same as a press and release pair."""
-    return all(any(a.same_action(b) for b in other) for a in one) and all(
-        any(b.same_action(a) for a in one) for b in other
+    """Whether two chords do the same. A press alone isn't the same as a press and release pair.
+
+    Each bind on one does what a bind on the other does: it shares an action with
+    one of them. Looking that up in the other's actions costs no more than the binds.
+    """
+    mine, theirs = actions(one), actions(other)
+    return all(not bind.actions().isdisjoint(theirs) for bind in one) and all(
+        not bind.actions().isdisjoint(mine) for bind in other
     )
+
+
+def moves(cur, tgt, changed, arrived):
+    """Where each changed chord went: the first arrived chord, in order, that does the same, or None.
+
+    Only a changed chord that does what each of an arrived chord's binds does can
+    match it, so each arrived chord looks only at those, not at every changed chord.
+    A chord that moved is matched no more. Past MOVE_BUDGET binds compared, it can't
+    tell which chords move, and that is None.
+    """
+    doing = {}
+    for chord in changed:
+        for action in actions(cur[chord]):
+            doing.setdefault(action, set()).add(chord)
+    moved, left = {}, MOVE_BUDGET
+    for other in sorted(arrived):
+        candidates = None
+        # The bind fewest chords do goes first, as it leaves the fewest to look at.
+        for bind in sorted(tgt[other], key=lambda bind: sum(len(doing.get(action, ())) for action in bind.actions())):
+            reached = set().union(*(doing.get(action, ()) for action in bind.actions()))
+            candidates = reached if candidates is None else candidates & reached
+            if not candidates:
+                break
+        for chord in sorted(candidates or ()):
+            left -= len(cur[chord]) + len(tgt[other])
+            if left < 0:
+                return None
+            if chord != other and same_actions(cur[chord], tgt[other]):
+                moved[chord] = other
+                for action in actions(cur[chord]):
+                    doing[action].discard(chord)
+    return moved
+
+
+def shortened(expression):
+    """An expression as a title shows it. A call the reader couldn't read in full can hold a whole file."""
+    return expression if len(expression) <= LONGEST_SHOWN else expression[:LONGEST_SHOWN] + "…"
+
+
+def where(*groups):
+    """The files each expression is in."""
+    found = {}
+    for unread in groups:
+        for computed in unread:
+            found.setdefault(computed.expression, set()).add(computed.source)
+    return found
 
 
 def compare_computed(current, target, user):
     before = Counter(computed.expression for computed in current.unread)
     after = Counter(computed.expression for computed in target.unread)
+    defaults, yours = where(current.unread, target.unread), where(user.unread)
     findings = []
     for expression in sorted(set(before) | set(after)):
         if before[expression] != after[expression]:
-            evidence = {c.source for c in current.unread + target.unread if c.expression == expression}
             findings.append(Finding(
                 "bindings",
                 UNKNOWN,
-                f"The computed key {expression} isn't the same in both versions, so it wasn't compared.",
-                sorted(evidence),
+                f"The computed key {shortened(expression)} isn't the same in both versions, so it wasn't compared.",
+                sorted(defaults[expression]),
                 detail="It could land on one of your keys.",
                 partial=True,
             ))
-    for expression in sorted({computed.expression for computed in user.unread}):
+    for expression in sorted(yours):
         findings.append(Finding(
             "bindings",
             UNKNOWN,
-            f"Your computed key {expression} wasn't compared.",
-            sorted({c.source for c in user.unread if c.expression == expression}),
+            f"Your computed key {shortened(expression)} wasn't compared.",
+            sorted(yours[expression]),
             detail="It could clash with a default.",
             partial=True,
         ))
     same = before & after
     if same:
-        evidence = {c.source for c in current.unread + target.unread if c.expression in same}
+        evidence = set().union(*(defaults[expression] for expression in same))
         findings.append(Finding(
             "bindings",
             NOTE,
@@ -648,12 +792,17 @@ def compare_bindings(current, target, user):
         return all(spelling(bind.keys) in user.unbinds.get(chord, {}) for bind in binds)
 
     taken_over = {c for c in arrived if c in cur and c not in user.binds}
-    moved = {}
-    for chord in sorted(changed):
-        for other in sorted(arrived - {chord}):
-            if same_actions(cur[chord], tgt[other]):
-                moved[chord] = other
-                break
+    moved = moves(cur, tgt, changed, arrived)
+    if moved is None:
+        findings.append(Finding(
+            "bindings",
+            UNKNOWN,
+            "Too many default shortcuts changed to tell which of them move.",
+            sources(*(cur[c] for c in changed), *(tgt[c] for c in arrived)),
+            detail="One you turned off could come back on another key.",
+            partial=True,
+        ))
+        moved = {}
 
     for chord in sorted(user.binds):
         mine = user.binds[chord]
@@ -760,6 +909,15 @@ def compare_bindings(current, target, user):
             sources(*(cur[c] for c in gone)),
             items=[f"{c}: {label(cur[c])}" for c in gone],
             group="Default shortcuts removed",
+        ))
+
+    for source in sorted({*current.too_large, *target.too_large}):
+        findings.append(Finding(
+            "bindings",
+            UNKNOWN,
+            f"{source} is over {LARGEST_SCRIPT // 1024} KiB, so it wasn't read, and keys bound in it weren't compared.",
+            [source],
+            partial=True,
         ))
 
     for name, source in sorted({**current.helpers, **target.helpers}.items()):
@@ -1246,12 +1404,23 @@ def braces(word):
 
 
 def cut(text, operator, pattern):
-    """text without the shortest start (#), longest start (##), shortest end (%) or longest end (%%) that pattern matches."""
+    """text without the shortest start (#), longest start (##), shortest end (%) or longest end (%%) that pattern matches.
+
+    It tries each place it could cut, and each try is paid for as a value is, so
+    a long value cut many times costs the script what it costs to read. So is the
+    pattern, before fnmatch makes a regex of it.
+    """
+    pay(PATTERN_COST + PATTERN_CHARACTER_COST * len(pattern) + len(pattern) ** 2)
+
+    def matches(part):
+        pay(len(part) + VALUE_COST)
+        return fnmatch.fnmatchcase(part, pattern)
+
     if operator[0] == "#":
         ends = range(len(text) + 1) if operator == "#" else range(len(text), -1, -1)
-        return next((text[end:] for end in ends if fnmatch.fnmatchcase(text[:end], pattern)), text)
+        return next((text[end:] for end in ends if matches(text[:end])), text)
     starts = range(len(text), -1, -1) if operator == "%" else range(len(text) + 1)
-    return next((text[:start] for start in starts if fnmatch.fnmatchcase(text[start:], pattern)), text)
+    return next((text[:start] for start in starts if matches(text[start:])), text)
 
 
 def stripped(values, operator, pattern, variables, home):
@@ -1329,9 +1498,14 @@ def expanded(word, variables, home):
 
 def spend(values):
     """Takes values from what the script being read may spend, and stops reading it past that."""
+    pay(sum(len(text) + VALUE_COST for text, _ in values))
+
+
+def pay(cost):
+    """Takes cost from what the script being read may spend, and stops reading it past that."""
     left = budget_left.get()
     if left is not None:
-        left[0] -= sum(len(text) + VALUE_COST for text, _ in values)
+        left[0] -= cost
         if left[0] < 0:
             raise ShellUnread
 
@@ -2264,20 +2438,30 @@ def compare_plugins(current, target, home, checked):
 
 
 def read_notes(tree):
-    """The changes listed in a release's notes: each line number, what changed, and where. Empty without notes."""
+    """The changes listed in a release's notes: each line number, what changed, and where.
+
+    Empty without notes, and for notes over LARGEST_SCRIPT, which aren't read.
+    """
     path = tree / NOTES
     try:
-        text = path.read_text(errors="replace") if path.is_file() else ""
+        text = release_text(path) if path.is_file() else ""
     except OSError:
         return []
-    found = ((number, NOTE_ENTRY.fullmatch(line)) for number, line in enumerate(text.split("\n"), 1))
+    if text is None:
+        print(f"The release notes are over {LARGEST_SCRIPT // 1024} KiB, so no finding says why.", file=sys.stderr)
+        return []
+    found = ((number, NOTE_ENTRY.fullmatch(line)) for number, line in enumerate(LINE_BREAK.split(text), 1))
     return [(number, *entry.groups()) for number, entry in found if entry]
 
 
 def description(path):
-    """What a migration says it does: the line it echoes first, as Omarchy's migrations do. None if it doesn't."""
+    """What a migration says it does: the line it echoes first, as Omarchy's migrations do. None if it doesn't.
+
+    A migration over LARGEST_SCRIPT isn't read, and says nothing.
+    """
     try:
-        words = shell_tokens(path.read_text(errors="replace").split("\n", 1)[0])[0]
+        text = release_text(path)
+        words = shell_tokens(LINE_BREAK.split(text, maxsplit=1)[0])[0] if text is not None else []
     except (OSError, ShellUnread):
         return None
     if [type(word) for word in words] == [Word, Word] and words[0] == "echo" and "$" not in words[1]:
@@ -2287,6 +2471,54 @@ def description(path):
 
 def plain_words(text):
     return " ".join(text.casefold().split()).rstrip(".")
+
+
+def named_words(text):
+    """Each name that change_names would find in text, for a name NAME_RUN matches whole.
+
+    A name starts a run of them, and ends with it or at a full stop that no word
+    character follows, as change_names reads it.
+    """
+    for run in NAME_RUN.finditer(text):
+        run = run.group()
+        yield run
+        for end, character in enumerate(run):
+            if character == "." and not WORD_CHARACTER.match(run, end + 1):
+                yield run[:end]
+
+
+def note_index(entries):
+    """For each kind of name, where in entries each name is, so a finding looks up its changes, not every one."""
+    index = {"keys": {}, "migration": {}, "package": {}, "command": {}}
+
+    def add(kind, names, at):
+        for name in names:
+            places = index[kind].setdefault(name, [])
+            if not places or places[-1] != at:
+                places.append(at)
+
+    for at, (_, text, _) in enumerate(entries):
+        add("keys", (normalize_keys(found) for found in NOTE_KEYS.findall(text)), at)
+        add("migration", [plain_words(text)], at)
+        add("command", named_words(text), at)
+        if REMOVING.match(text):
+            add("package", named_words(text.partition(",")[0]), at)
+    return index
+
+
+def naming(entries, index, kind, name):
+    """Where in entries the changes that name this are, in order."""
+    if not name:
+        return []
+    if kind == "migration":
+        return index[kind].get(plain_words(name), [])
+    if kind == "keys":
+        return index[kind].get(name, [])
+    if kind in ("package", "command") and NAME_RUN.fullmatch(name):
+        spellings = {name, name[:1].upper() + name[1:]} if kind == "package" else {name}
+        return sorted({at for spelled in spellings for at in index[kind].get(spelled, [])})
+    # Any other name looks at every change. Past its first character it is in each one that names it.
+    return [at for at, (_, text, _) in enumerate(entries) if name[1:] in text and change_names(text, kind, name)]
 
 
 def change_names(text, kind, name):
@@ -2316,13 +2548,20 @@ def give_reasons(findings, tree):
     Two that name it are unsure, and a wrong reason is worse than none.
     """
     entries = read_notes(tree)
+    # Each migration's first line is read once, and each name looked up once, however many findings share it.
+    index, descriptions, named = note_index(entries), {}, {}
     for finding in findings:
         changes = {}
         for kind, name in finding.about:
-            name = description(tree / name) if kind == "migration" else name
-            for number, text, reference in entries:
-                if name and change_names(text, kind, name):
-                    changes.setdefault((text, reference), number)
+            if kind == "migration":
+                if name not in descriptions:
+                    descriptions[name] = description(tree / name)
+                name = descriptions[name]
+            if (kind, name) not in named:
+                named[kind, name] = naming(entries, index, kind, name)
+            for at in named[kind, name]:
+                number, text, reference = entries[at]
+                changes.setdefault((text, reference), number)
         if len(changes) == 1:
             ((text, reference), number), = changes.items()
             finding.reason = Reason(text, reference, f"{NOTES}:{number}")

@@ -239,6 +239,24 @@ notice for failed scheduled runs. CI and the watch are in `.github/workflows`, a
 
 A chord holds every bind made on it, so a press and release pair is one action.
 Two chords do the same thing when each bind on one has a match on the other.
+Finding the chords that move compares at most 1,000,000 binds in all: each pair of
+chords it compares counts the binds on both. It compares only chords that could
+match. Past that, which shortcuts move is `unknown`. Omarchy's releases compare at
+most 16, from v4.0.6 to v4.5.0.
+
+Reading the defaults costs no more than their size, as a release can be crafted:
+
+- A Lua file over 256 KiB isn't read, and the keys bound in it are `unknown`.
+  Omarchy's largest, in v4.5.0, is 22 KiB. With no other file, there are no
+  readable default bindings.
+- A call the reader can't read in full is a computed key that holds the rest of
+  the file, by the rules in [Reasons](#reasons): one that never closes, which Lua
+  wouldn't load, or one past what the file may spend. Each call spends its length,
+  so a call inside a call is paid for again. A file may spend its own length and
+  256 KiB more. Omarchy's calls are never inside each other, so they spend less
+  than the file. A computed key's title shows the first 80 characters of its
+  expression.
+- A call's name inside a string isn't a call.
 
 Modifiers follow Hyprland's Lua parser (`LuaBindingsToplevel.cpp`, checked at
 v0.56.2): `CTRL` and `CONTROL`, `ALT` and `MOD1`, `SUPER`, `WIN`, `LOGO`, `MOD4` and
@@ -294,10 +312,13 @@ loses its place, as with a quote that never closes. The same goes for a file it
 reaches, and the finding names that file too. What it can read from the same
 removal is still reported.
 
-Reading a release never costs much more than its size, whatever its scripts hold,
-as a release can be crafted and the plugin reads it on its own. A script over
-256 KiB isn't read, and is `unknown`. Omarchy's largest migration, in v4.5.0, is
-13 KiB, and its largest command 97 KiB. A script nested too deep to read, such as
+Reading a release never costs much more than its size, whatever its files hold,
+as a release can be crafted and the plugin reads it on its own. Each file the tool
+reads from a release, a script, a Lua file of the defaults or the notes, is read
+only up to 256 KiB. A script over that isn't read, and is `unknown`. Omarchy's
+largest migration, in v4.5.0, is 13 KiB, and its largest command 97 KiB. The
+defaults and the notes say what their limit does in
+[Reading release formats](#reading-release-formats) and [Reasons](#reasons). A script nested too deep to read, such as
 `$(` or `${x:-` hundreds of times inside each other, is `unknown` too.
 
 ### Reading what migrations write
@@ -360,8 +381,10 @@ A path is read as bash would expand it, without running anything:
   when the migration runs. A word of many lists stops as soon as it passes 64,
   before it spells them out: 30 lists of two would be 2^30 paths. All the values
   one migration's words stand for, counted as their characters and 100 more each,
-  come to at most 16 MiB. Past that the migration is `unknown`. Omarchy's costliest
-  migration, in v4.5.0, comes to 0.2 MiB.
+  come to at most 16 MiB. A cut such as `${name##pattern}` counts too: each place it
+  tries, as a value, and its pattern, as making a regex of it costs: 2,048, 256 more
+  for each character, and the square of its length. Past 16 MiB the migration is
+  `unknown`. Omarchy's costliest migration, in v4.5.0, comes to 0.4 MiB.
 - A value longer than 4096 characters, the longest path Linux takes, is only known
   when the migration runs.
 - Functions defined more than 16 deep inside each other make the migration
@@ -523,6 +546,11 @@ What a change can name:
 - **Keys:** a chord in the change, such as `Super + Shift + Q`, read as the
   bindings check reads keys. A move is about both its keys. A list of new or removed
   shortcuts isn't about any one key, so it takes no reason.
+
+Notes over 256 KiB aren't read, so no finding has a reason, as without notes, and
+the run says so. Omarchy's longest, v4.5.0-rc3's, are 32 KiB. A migration over
+256 KiB has no first line to go by. A reason never decides a verdict, so this limit
+leaves nothing `unknown`.
 
 An `unknown` takes no reason: a limit of this tool isn't in the notes. A migration's
 first line isn't a reason by itself, only a way to find its change, so without notes

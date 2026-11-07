@@ -91,4 +91,4 @@ when.
 | 039 | [Release 0.3.0 and update the listing](039-release-0-3-0.md) | 023, 038, 040, 041, 042 | in progress |
 | 040 | [The migration reader's work is bounded](040-bounded-migration-reader.md) | 038 | done |
 | 041 | [A $(...) with no command doesn't stop the run](041-empty-command-substitution.md) | 040 | done |
-| 042 | [Every reader of release text is bounded](042-bounded-release-reading.md) | 040 | todo |
+| 042 | [Every reader of release text is bounded](042-bounded-release-reading.md) | 040 | in progress |
