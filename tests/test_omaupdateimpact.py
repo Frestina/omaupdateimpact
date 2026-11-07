@@ -7,8 +7,10 @@ import importlib.util
 import io
 import json
 import os
+import random
 import re
 import shutil
+import signal
 import socket
 import stat
 import tarfile
@@ -1458,6 +1460,158 @@ class Edits(unittest.TestCase):
 
     def test_a_redirect_is_not_a_package(self):
         self.assertEqual(impact.package_commands("omarchy-pkg-drop a >~/log 2>&1\n"), [("drop", ["a"], False)])
+
+
+def old_braces(word):
+    """braces() as it was before 040: every list spelled out, with no limit. The reference for what it spells."""
+    index = word.find("{")
+    while index >= 0:
+        end = impact.brace_end(word, index + 1)
+        inner = word[index + 1 : end - 1]
+        if word[index - 1 : index] != "$" and word[end - 1] == "}" and "," in inner and "{" not in inner:
+            return [out for part in inner.split(",") for out in old_braces(word[:index] + part + word[end:])]
+        index = word.find("{", end if word[index - 1 : index] == "$" else index + 1)
+    return [word]
+
+
+UNREAD_MIGRATION = ["Couldn't read which files migrations/1.sh writes, so check it by hand."]
+
+
+class Deadline(Exception):
+    pass
+
+
+class BoundedReading(unittest.TestCase):
+    """What a release's scripts hold never makes reading them cost more than their size. See 040."""
+
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.base = Path(directory.name)
+        self.home = self.base / "home"
+        (self.home / ".config/app").mkdir(parents=True)
+        (self.home / ".config/app/app.conf").write_text("colour = red\n")
+        (self.base / "current").mkdir()
+        (self.base / "target/migrations").mkdir(parents=True)
+        (self.base / "target/bin").mkdir()
+
+    def within(self, seconds):
+        """Fails the test, instead of hanging it, when what follows takes longer than seconds."""
+        def stop(*_):
+            raise Deadline(f"took more than {seconds} seconds")
+        previous = signal.signal(signal.SIGALRM, stop)
+        signal.alarm(seconds)
+        self.addCleanup(signal.signal, signal.SIGALRM, previous)
+        self.addCleanup(signal.alarm, 0)
+
+    def findings(self, migration):
+        (self.base / "target/migrations/1.sh").write_text(migration)
+        return impact.compare_edits(self.base / "current", self.base / "target", self.home, {})
+
+    def unknown(self, migration):
+        return titles(self.findings(migration), "unknown")
+
+    def test_thirty_lists_in_a_word_are_only_known_when_it_runs_at_once(self):
+        # The marketplace's review of 0.3.1: 2^30 words were spelled out before the limit was checked.
+        self.within(5)
+        self.assertIsNone(impact.braces("~/.config/x" + "{a,b}" * 30))
+        self.assertEqual(impact.expansions("~/.config/x" + "{a,b}" * 30, {}, self.home), [("", False)])
+        self.assertEqual(self.unknown("rm ~/.config/x" + "{a,b}" * 30 + "\n"), [
+            "Couldn't tell which files migrations/1.sh writes on line 1, so check it by hand."
+        ])
+
+    def test_a_list_of_too_many_is_not_built(self):
+        self.within(5)
+        self.assertIsNone(impact.braces("{" + ",".join(map(str, range(10**6))) + "}"))
+
+    def test_lists_are_spelled_as_before_up_to_the_limit(self):
+        rng = random.Random(40)
+        for _ in range(20000):
+            word = "".join(rng.choice("{},$ab") for _ in range(rng.randint(0, 12)))
+            before = old_braces(word)
+            self.assertEqual(impact.braces(word), before if len(before) <= impact.MOST_EXPANSIONS else None, word)
+
+    def test_sixty_four_lists_are_still_spelled_out(self):
+        self.assertEqual(len(impact.braces("{a,b}" * 6)), 64)
+        self.assertIsNone(impact.braces("{a,b}" * 6 + "{c,d}"))
+
+    def test_a_variable_holds_at_most_sixty_four_values_and_then_one_only_known_when_it_runs(self):
+        held = []
+        impact.held_too(held, [(str(n), True) for n in range(100)])
+        self.assertEqual(held, [(str(n), True) for n in range(64)] + [("", False)])
+        impact.held_too(held, [("more", True)])
+        self.assertEqual(len(held), 65)
+
+    def test_a_variable_set_too_many_times_is_only_known_when_it_runs(self):
+        # Never clear: the file past the 64th value could be one of yours.
+        script = "".join(f"x=~/.config/other{n}\n" for n in range(100)) + "x=~/.config/app/app.conf\nrm $x\n"
+        findings = self.findings(script)
+        self.assertEqual(titles(findings, "unknown"), [
+            "Couldn't tell which files migrations/1.sh writes on line 102, so check it by hand."
+        ])
+
+    def test_a_value_longer_than_any_path_is_only_known_when_it_runs(self):
+        variables = {"x": [("a" * impact.LONGEST_PATH, True)]}
+        self.assertEqual(impact.expansions("$x", variables, self.home), [("a" * impact.LONGEST_PATH, True)])
+        self.assertEqual(impact.expansions("$x/b", variables, self.home), [("", False)])
+
+    def test_a_migration_over_the_size_limit_is_unknown(self):
+        script = "sed -i s/a/b/ ~/.config/app/app.conf\n" + "#" * impact.LARGEST_SCRIPT
+        self.assertEqual(self.unknown(script), UNREAD_MIGRATION)
+        self.assertEqual(self.unknown(script[: impact.LARGEST_SCRIPT]), [])
+
+    def test_a_migration_over_the_size_limit_is_unread_for_packages(self):
+        (self.base / "target/migrations/1.sh").write_text("omarchy-pkg-drop a\n" + "#" * impact.LARGEST_SCRIPT)
+        self.assertEqual(impact.package_changes(self.base / "target/migrations", set()), ({}, {("1.sh",)}))
+
+    def test_a_command_it_reaches_over_the_size_limit_is_unread(self):
+        (self.base / "target/bin/omarchy-tool").write_text("#!/bin/bash\nomarchy-pkg-drop a\n" + "#" * impact.LARGEST_SCRIPT)
+        (self.base / "target/migrations/1.sh").write_text("omarchy-tool\n")
+        self.assertEqual(
+            impact.package_changes(self.base / "target/migrations", set()), ({}, {("1.sh", "bin/omarchy-tool")})
+        )
+
+    def test_a_script_nested_too_deep_to_read_is_unknown(self):
+        self.assertEqual(self.unknown("rm " + "${x:-" * 2000 + "y" + "}" * 2000 + "\n"), UNREAD_MIGRATION)
+        (self.base / "target/migrations/1.sh").write_text("echo " + "$(" * 2000 + ")" * 2000 + "\nomarchy-pkg-drop a\n")
+        self.assertEqual(impact.package_changes(self.base / "target/migrations", set()), ({}, {("1.sh",)}))
+
+    def test_functions_defined_too_deep_inside_each_other_are_unknown(self):
+        deepest = impact.MOST_NESTED_FUNCTIONS
+        nested = "".join(f"f{n}() {{\n" for n in range(deepest)) + "rm ~/.config/app/app.conf\n" + "}\n" * deepest
+        self.assertEqual(self.unknown(nested), [])
+        deeper = "".join(f"f{n}() {{\n" for n in range(deepest + 1)) + "rm ~/.config/app/app.conf\n" + "}\n" * (deepest + 1)
+        self.assertEqual(self.unknown(deeper), UNREAD_MIGRATION)
+
+    def test_an_argument_past_nine_that_the_function_names_is_still_read(self):
+        script = 'f() { rm "${10}"; }\nf 1 2 3 4 5 6 7 8 9 ~/.config/app/app.conf\n'
+        self.assertEqual([finding.title for finding in self.findings(script)], [
+            "migrations/1.sh may remove ~/.config/app/app.conf"
+        ])
+
+    def test_every_crafted_shape_at_the_size_limit_reads_in_seconds(self):
+        def at_limit(shape):
+            n = 1
+            while len(shape(n * 2)) <= impact.LARGEST_SCRIPT:
+                n *= 2
+            return shape(n)
+
+        shapes = {
+            "lists": lambda n: "rm ~/.config/x" + "{a,b}" * n + "\n",
+            "a variable set and used many times": lambda n: "".join(f"x=~/.config/a{i}\n" for i in range(n)) + "rm $x\n" * n,
+            "nested braces": lambda n: "rm " + "{" * n + "}" * n + "\n",
+            "values that grow": lambda n: "v0=~/.config\n" + "".join(f"v{i}=$v{i - 1}/a{i}\n" for i in range(1, n)) + f"rm $v{n - 1}\n",
+            "many calls": lambda n: 'f() { rm "$1"; }\n' + "".join(f"f ~/.config/a{i}\n" for i in range(n)),
+            "a call of many arguments": lambda n: 'f() { rm "$1"; }\nf ' + " ".join(f"a{i}" for i in range(n)) + "\n" + "f x\n" * n,
+            "a spread": lambda n: 'g() { rm "$1"; }\nf() { g "$@" ' + " ".join(f"a{i}" for i in range(n)) + "; }\nf ~/.config/x\n",
+            "a chain of functions": lambda n: "".join(f'f{i}() {{ f{i + 1} "$1" "$1"; }}\n' for i in range(n)) + f'f{n}() {{ rm "$1"; }}\nf0 ~/.config/a\n',
+            "a long loop": lambda n: "for x in " + " ".join(f"~/.config/a{i}" for i in range(n)) + "; do rm $x; done\n",
+        }
+        for name, shape in shapes.items():
+            with self.subTest(name):
+                self.within(60)
+                self.findings(at_limit(shape))
+                signal.alarm(0)
 
 
 class Commands(unittest.TestCase):

@@ -2,7 +2,7 @@
 id: "039"
 title: Release 0.3.0 and update the listing
 milestone: M4 Plugin
-depends_on: ["023", "038"]
+depends_on: ["023", "038", "040"]
 ---
 
 # 039 Release 0.3.0 and update the listing
@@ -54,6 +54,10 @@ and get the marketplace to verify it.
   never moves, so the owner chose 0.3.1, with only that test fixed. Its tag, its
   green CI and the SHA the marketplace verifies are one commit, and the README's
   clone names `v0.3.1`. `v0.3.0` stays as published.
+
+- The marketplace's review of 0.3.1 on 14152 found the migration reader's brace
+  expansion unbounded. The owner chose to fix it in 040 and release 0.3.2, and 14152
+  then names 0.3.2's SHA.
 
 ## Not in this ticket
 

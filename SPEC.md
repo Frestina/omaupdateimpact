@@ -294,6 +294,12 @@ loses its place, as with a quote that never closes. The same goes for a file it
 reaches, and the finding names that file too. What it can read from the same
 removal is still reported.
 
+Reading a release never costs much more than its size, whatever its scripts hold,
+as a release can be crafted and the plugin reads it on its own. A script over
+256 KiB isn't read, and is `unknown`. Omarchy's largest migration, in v4.5.0, is
+13 KiB, and its largest command 97 KiB. A script nested too deep to read, such as
+`$(` or `${x:-` hundreds of times inside each other, is `unknown` too.
+
 ### Reading what migrations write
 
 This finds likely edits by reading. omaforecast finds them by running migrations,
@@ -349,6 +355,15 @@ A path is read as bash would expand it, without running anything:
   1786719479 links to `skills/${name##*/}`. A pattern with both quotes and a `*`, `?`
   or `[` is only known when it runs, as a quoted `*` matches only itself.
 - `{a,b}` lists are spelled out, and wildcards are matched in your home.
+- A word stands for at most 64 paths, and a variable or a function's argument holds
+  at most 64 values. Past that, the word or the rest of the values are only known
+  when the migration runs. A word of many lists stops as soon as it passes 64,
+  before it spells them out: 30 lists of two would be 2^30 paths. The marketplace's
+  review of 0.3.1 found that it spelled them all out first.
+- A value longer than 4096 characters, the longest path Linux takes, is only known
+  when the migration runs.
+- Functions defined more than 16 deep inside each other make the migration
+  `unknown`. Each body is read again for each function around it.
 - `mktemp` makes a file by its template, or one that isn't yours when it has none.
   `realpath` and `readlink -f` name the file they're given.
 
