@@ -250,12 +250,12 @@ Reading the defaults costs no more than their size, as a release can be crafted:
   Omarchy's largest, in v4.5.0, is 22 KiB. With no other file, there are no
   readable default bindings.
 - A call the reader can't read in full is a computed key that holds the rest of
-  the file, by the rules in [Findings and exit codes](#findings-and-exit-codes):
-  one that never closes, which Lua wouldn't load, or one past what the file may
-  spend. Each call spends its length, so a call inside a call is paid for again. A
-  file may spend its own length and 256 KiB more. Omarchy's calls are never inside each other, so they spend less
-  than the file. A computed key's title shows the first 80 characters of its
-  expression.
+  the file, by the rules in [Exit codes](#exit-codes): one that never closes,
+  which Lua wouldn't load, or one past what the file may spend. Each call spends
+  its length, so a call inside a call is paid for again. A file may spend its own
+  length and 256 KiB more. Omarchy's calls are never inside each other, so they
+  spend less than the file. A computed key's title shows the first 80 characters
+  of its expression.
 - A call's name inside a string isn't a call.
 
 Modifiers follow Hyprland's Lua parser (`LuaBindingsToplevel.cpp`, checked at
@@ -318,8 +318,9 @@ reads from a release, a script, a Lua file of the defaults or the notes, is read
 only up to 256 KiB. A script over that isn't read, and is `unknown`. Omarchy's
 largest migration, in v4.5.0, is 13 KiB, and its largest command 97 KiB. The
 defaults and the notes say what their limit does in
-[Reading release formats](#reading-release-formats) and [Reasons](#reasons). A script nested too deep to read, such as
-`$(` or `${x:-` hundreds of times inside each other, is `unknown` too.
+[Reading release formats](#reading-release-formats) and [Reasons](#reasons). A
+script nested too deep to read, such as `$(` or `${x:-` hundreds of times inside
+each other, is `unknown` too.
 
 ### Reading what migrations write
 
@@ -559,6 +560,8 @@ no finding has a reason.
 The report prints the reason on a `Why:` line, after the finding and before its fix,
 with its reference, such as `Why: Replace the Disk Usage TUI with Disktree (#14426).`
 Its evidence is the line in the notes.
+
+### Exit codes
 
 | Exit | Meaning |
 | --- | --- |
