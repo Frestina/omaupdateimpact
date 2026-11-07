@@ -48,6 +48,12 @@ been there since 017.
   README's clone, tag, GitHub release, push and CI, as in 039.
 - Edit 14152's target commit to 0.3.2's SHA, which runs the checks again, and
   answer the finding there. The owner confirms the edited request first.
+  The owner moved this to 042, which releases 0.3.3 with the follow-ups below.
+- Review follow-ups: the values a script holds are bounded one by one, but not in
+  total. 19,000 variables, each 64 values just under 4096 characters, fit in
+  256 KiB and take about 5 GB. Past a budget for the whole script, it is
+  `unknown`. The timing test also measures memory. The spec drops the line on
+  what the review found, as the spec holds no history.
 
 ## Not in this ticket
 
@@ -62,5 +68,8 @@ been there since 017.
 - [x] The spec says each limit.
 - [x] `v0.3.2` and its GitHub release exist on the commit pushed to `main`, and CI
       passed on it.
-- [ ] 14152 names 0.3.2's SHA, and the finding is answered there.
+- [x] A script whose values would hold more than the budget in total is `unknown`,
+      and the 19,000-variable shape reads in seconds and well under 100 MB.
+- [x] The timing test measures peak memory for every shape too.
+- [x] The spec's 64-values bullet says the limit, not what the review found.
 - [x] `tests/run` passes.

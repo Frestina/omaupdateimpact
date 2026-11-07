@@ -1,0 +1,68 @@
+---
+id: "042"
+title: Every reader of release text is bounded
+milestone: M4 Plugin
+depends_on: ["040"]
+---
+
+# 042 Every reader of release text is bounded
+
+## Goal
+
+040 bounded the migration reader, but the spec and the README now say that
+reading a release costs little more than its size. That isn't true yet. The
+bindings reader is slower than quadratic: `hl.bind(` repeated with no `)`, in a
+Lua file under `default/hypr`, takes 4.5 s at 16 KB, 17 s at 32 KB and 67 s at
+64 KB. Each call's `call_arguments()` scans to the end of the file. A 256 KiB file
+would take about 18 minutes, in the command and in the plugin's scheduled check.
+This is the same kind of issue as 14152's finding, so it ships in the same release,
+and 14152 moves once.
+
+## Spec
+
+- [Reading release formats](../SPEC.md#reading-release-formats)
+- [Reading migrations](../SPEC.md#reading-migrations)
+- [Reasons](../SPEC.md#reasons)
+- [What must never happen](../SPEC.md#what-must-never-happen)
+
+## Scope
+
+- Time every reader of a release's text on crafted input of growing size, as 040
+  did: the Lua defaults (`parse_lua`, `call_arguments`, `blank_comments`,
+  `parse_helpers`), a migration's first line (`description`), and the notes
+  (`read_notes`, `give_reasons`). Bound each one that grows faster than its input
+  or reads without limit.
+- `hl.bind(` with no `)` costs no more than its length. A call the reader can't
+  read in full counts as a computed key, never as no binding, so it stays a note
+  or `unknown` by the existing rules.
+- A limit that makes a reader stop is `unknown`, or exit 2 where the rules already
+  say so, such as no readable default bindings. It is never clear. The spec says
+  each limit.
+- A test for each, and one that times every crafted shape, and measures its peak
+  memory, at the size limit.
+- On every real Lua file and notes in v4.5.0, v4.5.0-rc3 and the installed tree,
+  the old and new readers give the same answer.
+- Release 0.3.3, with 040's review follow-ups and this, using the
+  `omarchy-plugin-release` skill: version, changelog, the README's clone, tag,
+  GitHub release, push and CI, as in 039.
+- Edit 14152's target commit to 0.3.3's SHA, and answer the finding there. The
+  reply says what 0.3.2 and 0.3.3 each bounded, and claims no more than the timing
+  tests show. The owner confirms the edited request and the reply first.
+
+## Not in this ticket
+
+- `qmllint` on the release's shell. It already stops after 60 seconds per plugin.
+- Anything else the review of 14152 raises. It goes to a new ticket.
+
+## Done when
+
+- [ ] `hl.bind(` repeated with no `)`, at the size limit, reads in seconds.
+- [ ] Every crafted shape for every release reader, at the size limit, reads in
+      seconds and with bounded memory, and a test measures both.
+- [ ] The old and new readers agree on every real Lua file and notes.
+- [ ] The spec says each new limit, and its line on what reading a release costs
+      is true.
+- [ ] `v0.3.3` and its GitHub release exist on the commit pushed to `main`, and CI
+      passed on it.
+- [ ] 14152 names 0.3.3's SHA, and the finding is answered there.
+- [ ] `tests/run` passes.

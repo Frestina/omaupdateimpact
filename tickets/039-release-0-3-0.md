@@ -2,7 +2,7 @@
 id: "039"
 title: Release 0.3.0 and update the listing
 milestone: M4 Plugin
-depends_on: ["023", "038", "040", "041"]
+depends_on: ["023", "038", "040", "041", "042"]
 ---
 
 # 039 Release 0.3.0 and update the listing
@@ -60,6 +60,10 @@ and get the marketplace to verify it.
   then names 0.3.2's SHA. 040 found 041, an older crash on `$(<file)`, and the
   owner put it in 0.3.2 too.
 
+- The review of 040 found its memory unbounded in total, and the bindings reader
+  unbounded, as the migration reader was in 14152. The owner chose to bound both and release
+  0.3.3, in 040's follow-ups and 042, and 14152 then names 0.3.3's SHA.
+
 ## Not in this ticket
 
 - Any change to the command or the plugin. Something found here goes to the
@@ -67,17 +71,17 @@ and get the marketplace to verify it.
 
 ## Done when
 
-- [ ] `--version` and `manifest.json` say 0.3.2, and the changelog dates 0.3.0,
-      0.3.1 and 0.3.2.
+- [ ] `--version` and `manifest.json` say 0.3.3, and the changelog dates 0.3.0,
+      0.3.1, 0.3.2 and 0.3.3.
 - [ ] `preview.png` shows the new panel buttons, its first finding open and the
       rest closed, and no real data.
 - [ ] The scan of the committed tree has no `FINDING` but
       `remote-git-execution-unpinned`.
-- [ ] The README's clone names `v0.3.2`.
-- [ ] `v0.3.0`, `v0.3.1` and `v0.3.2` and their GitHub releases exist, `v0.3.2` on
-      the commit pushed to `main`.
+- [ ] The README's clone names `v0.3.3`.
+- [ ] `v0.3.0` to `v0.3.3` and their GitHub releases exist, `v0.3.3` on the commit
+      pushed to `main`.
 - [ ] CI passed on that push.
 - [ ] The owner confirmed the update request, and the marketplace verified the new
       SHA.
-- [ ] `omarchy plugin add` on a clean machine installs 0.3.2.
+- [ ] `omarchy plugin add` on a clean machine installs 0.3.3.
 - [ ] `tests/run` passes.

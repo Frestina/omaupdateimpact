@@ -16,6 +16,7 @@ import stat
 import tarfile
 import tempfile
 import threading
+import tracemalloc
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 from email.message import Message
@@ -1597,7 +1598,23 @@ class BoundedReading(unittest.TestCase):
                     "migrations/1.sh may remove ~/.config/app/app.conf"
                 ])
 
-    def test_every_crafted_shape_at_the_size_limit_reads_in_seconds(self):
+    def test_values_over_the_budget_for_the_whole_script_are_unknown(self):
+        # 040's review: 64 values of almost 4096 characters in each of 19,000 variables
+        # fit in 256 KiB and took about 5 GB.
+        self.within(30)
+        script = "v0=~/" + "a" * 3800 + "{a,b}" * 6 + "\n" + "".join(f"v{i}=${{v0}}x\n" for i in range(1, 19000)) + "rm $v1\n"
+        self.assertLessEqual(len(script), impact.LARGEST_SCRIPT)
+        tracemalloc.start()
+        self.addCleanup(tracemalloc.stop)
+        self.assertEqual(self.unknown(script), UNREAD_MIGRATION)
+        self.assertLess(tracemalloc.get_traced_memory()[1], 100 * 1024 * 1024)
+
+    def test_the_budget_holds_for_one_script_at_a_time(self):
+        self.assertIsNone(impact.budget_left.get())
+        self.findings("rm ~/.config/app/app.conf\n")
+        self.assertIsNone(impact.budget_left.get())
+
+    def test_every_crafted_shape_at_the_size_limit_reads_in_seconds_and_bounded_memory(self):
         def at_limit(shape):
             n = 1
             while len(shape(n * 2)) <= impact.LARGEST_SCRIPT:
@@ -1614,12 +1631,22 @@ class BoundedReading(unittest.TestCase):
             "a spread": lambda n: 'g() { rm "$1"; }\nf() { g "$@" ' + " ".join(f"a{i}" for i in range(n)) + "; }\nf ~/.config/x\n",
             "a chain of functions": lambda n: "".join(f'f{i}() {{ f{i + 1} "$1" "$1"; }}\n' for i in range(n)) + f'f{n}() {{ rm "$1"; }}\nf0 ~/.config/a\n',
             "a long loop": lambda n: "for x in " + " ".join(f"~/.config/a{i}" for i in range(n)) + "; do rm $x; done\n",
+            "many variables of long values": lambda n: (
+                "v0=~/" + "a" * 3800 + "{a,b}" * 6 + "\n" + "".join(f"v{i}=${{v0}}x\n" for i in range(1, n)) + "rm $v1\n"
+            ),
         }
         for name, shape in shapes.items():
             with self.subTest(name):
+                script = at_limit(shape)
                 self.within(60)
-                self.findings(at_limit(shape))
-                signal.alarm(0)
+                tracemalloc.start()
+                try:
+                    self.findings(script)
+                    peak = tracemalloc.get_traced_memory()[1]
+                finally:
+                    tracemalloc.stop()
+                    signal.alarm(0)
+                self.assertLess(peak, 200 * 1024 * 1024)
 
 
 class Commands(unittest.TestCase):

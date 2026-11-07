@@ -358,8 +358,10 @@ A path is read as bash would expand it, without running anything:
 - A word stands for at most 64 paths, and a variable or a function's argument holds
   at most 64 values. Past that, the word or the rest of the values are only known
   when the migration runs. A word of many lists stops as soon as it passes 64,
-  before it spells them out: 30 lists of two would be 2^30 paths. The marketplace's
-  review of 0.3.1 found that it spelled them all out first.
+  before it spells them out: 30 lists of two would be 2^30 paths. All the values
+  one migration's words stand for, counted as their characters and 100 more each,
+  come to at most 16 MiB. Past that the migration is `unknown`. Omarchy's costliest
+  migration, in v4.5.0, comes to 0.2 MiB.
 - A value longer than 4096 characters, the longest path Linux takes, is only known
   when the migration runs.
 - Functions defined more than 16 deep inside each other make the migration

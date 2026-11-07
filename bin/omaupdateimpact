@@ -47,6 +47,7 @@ if sys.version_info < (3, 11, 4):
 import argparse
 import bisect
 import contextlib
+import contextvars
 import dataclasses
 import errno
 import fcntl
@@ -150,6 +151,13 @@ UNBRACED = re.compile(r"[A-Za-z_]\w*|[\d@]")
 MOST_EXPANSIONS = 64
 # The longest path Linux takes, PATH_MAX. A longer value is only known when it runs.
 LONGEST_PATH = 4096
+# What reading one script may spend on the values its words stand for, in total:
+# each value's characters and VALUE_COST more. Past it the script is unread. Omarchy's
+# costliest migration, in v4.5.0, spends 0.2 MiB, and its costliest command 1.2 MiB.
+VALUE_BUDGET = 16 * 1024 * 1024
+VALUE_COST = 100
+# What is left of VALUE_BUDGET for the script being read, or None outside script_writes.
+budget_left = contextvars.ContextVar("budget_left", default=None)
 MOST_PASSES = 16
 # Functions defined deeper than this inside each other make a script unread.
 MOST_NESTED_FUNCTIONS = 16
@@ -1315,7 +1323,17 @@ def expanded(word, variables, home):
         values = [("", False) if len(text) > LONGEST_PATH else (text, known) for text, known in values]
         if len(values) > MOST_EXPANSIONS:
             return [("", False)]
+    spend(values)
     return values
+
+
+def spend(values):
+    """Takes values from what the script being read may spend, and stops reading it past that."""
+    left = budget_left.get()
+    if left is not None:
+        left[0] -= sum(len(text) + VALUE_COST for text, _ in values)
+        if left[0] < 0:
+            raise ShellUnread
 
 
 def expansions(word, variables, home):
@@ -1766,7 +1784,17 @@ def script_writes(text, home):
     give it several, and a path can hold wildcards. It maps to the lines that write
     it, and whether those only remove it. A path only known when it runs is a line
     it can't tell about, unless sudo runs the command: that is for system files.
+    A script whose values would cost more than VALUE_BUDGET in all is unread.
     """
+    reset = budget_left.set([VALUE_BUDGET])
+    try:
+        return writes_in(text, home)
+    finally:
+        budget_left.reset(reset)
+
+
+def writes_in(text, home):
+    """script_writes, within the budget it sets."""
     tokens = shell_tokens(text)[0]
     commands = list(simple_commands(tokens))
     (variables, arguments), wrappers = script_values(tokens, commands, home), wrapper_functions(tokens)
