@@ -686,6 +686,25 @@ class Packages(unittest.TestCase):
             words = [rng.choice(singles) for _ in range(rng.randint(0, 20))]
             self.assertEqual(once(impact.package_action(words)), once(old_package_action(words)), words)
 
+    def test_names_removal_says_what_one_search_said(self):
+        # 044: names_removal() reads a pacman name with the removal flag that
+        # follows it in the same line, where the old regex's greedy rest retried
+        # the suffix behind every name. It says what one search over the whole
+        # text said, for every word and every file's.
+        parts = [
+            "pacman", "yay", "paru", "xpacman", "pacmany", "xparu", "pacman-key",
+            "omarchy-pkg-drop", "omarchy-pkg-remove", "omarchy pkg drop", "omarchy pkg remove",
+            "-R", "-Rns", "--remove", "--print", "-a", "aRb", "-", "x",
+            "\n", "\t", " ", "\"", "'", " R ", "--",
+        ]
+        rng = random.Random(44)
+        for _ in range(50000):
+            text = "".join(rng.choice(parts) for _ in range(rng.randint(0, 12)))
+            self.assertEqual(impact.names_removal(text), bool(OLD_NAMES_REMOVAL.search(text)), text)
+        for _ in range(5000):
+            text = "".join(rng.choice(parts) for _ in range(rng.randint(0, 60)))
+            self.assertEqual(impact.names_removal(text), bool(OLD_NAMES_REMOVAL.search(text)), text)
+
     def test_every_redirect_is_dropped(self):
         for redirect in (">/dev/null", "> /dev/null", ">>log", "2>&1", "&>/dev/null", "&>>log", "</dev/null", '<<<"$x"', "2> err"):
             self.assertEqual(self.read({"1.sh": f"omarchy-pkg-drop a {redirect}\n"}), ({"a": (False, "1.sh")}, set()), redirect)
@@ -1513,6 +1532,15 @@ def old_moves(cur, tgt, changed, arrived):
     return moved
 
 
+# What names a package removal, as the command read it before 044: one search whose
+# pacman branch retried the greedy rest behind every name. The reference for what
+# names_removal() says.
+OLD_NAMES_REMOVAL = re.compile(
+    r"\bomarchy-pkg-(?:drop|remove)\b|\bomarchy pkg (?:drop|remove)\b"
+    r"|\b(?:pacman|yay|paru)\b.*[\s\"'](?:-[a-zA-Z]*R|--remove)"
+)
+
+
 def old_package_action(words):
     """package_action() as it was before 043: the rest of the command copied for every
     word, and the shell-string, pacman and reached-file scans run again for each. The
@@ -1528,7 +1556,7 @@ def old_package_action(words):
         if name in impact.PACKAGE_ADDS:
             return "add", rest
         shell_string = name == "eval" or (name in ("bash", "sh") and any(impact.SHELL_STRING_FLAG.fullmatch(part) for part in rest))
-        if shell_string and any(impact.NAMES_REMOVAL.search(part) for part in rest):
+        if shell_string and any(OLD_NAMES_REMOVAL.search(part) for part in rest):
             return "unread", []
         if name in impact.SHELLS:
             reached += [part for part in rest if impact.RELEASE_FILE.fullmatch(part)]
@@ -1621,6 +1649,11 @@ class BoundedReading(unittest.TestCase):
         """What the packages check makes of a migration's one line."""
         (self.base / "target/migrations/1.sh").write_text(migration)
         return impact.package_changes(self.base / "target/migrations", set())
+
+    def reaches(self, text):
+        """What the packages check makes of a migration reaching a non-shell-script file."""
+        (self.base / "target/bin/omarchy-thing").write_text(text)
+        return self.removes("omarchy-thing\n")
 
     def test_unclosed_calls_read_at_once_as_one_computed_key(self):
         # 042, and the maintainer's second finding on 14152: each call scanned to the end of the file.
@@ -1915,6 +1948,10 @@ class BoundedReading(unittest.TestCase):
         # one pass, and so does a guard before the command's head, whose words the
         # reader used to drop one copy at a time.
         # The shape of one bash word is at least 50,000 of them at the size limit.
+        # 044: the removal-naming scan retried the rest behind every pacman name, so
+        # one word of N names cost N² as well, its 35,000 names about 2 minutes. The
+        # word here is one bash -c argument of names, and the reached file one that
+        # isn't a shell script, each at the size limit.
         commands = {
             "a long command of bash": lambda n: "bash " * n,
             "a long command of sh": lambda n: "sh -c x " * n,
@@ -1922,6 +1959,10 @@ class BoundedReading(unittest.TestCase):
             "a long command of omarchy pkg": lambda n: "omarchy pkg list " * n,
             "a long command of pacman": lambda n: "pacman -Q " * n,
             "a guard before a drop": lambda n: "! " * n + "omarchy-pkg-drop a\n",
+            "a long word of pacman names": lambda n: "bash -c '" + "pacman " * n + "'\n",
+        }
+        reached = {
+            "a file of pacman names": lambda n: "#!/usr/bin/python3\n" + "pacman " * n,
         }
         lua = 'hl.bind("SUPER + Z", "z")\n'
         defaults = {
@@ -1971,11 +2012,13 @@ class BoundedReading(unittest.TestCase):
         # Each text is made before the clock starts.
         installed, first_line = at_limit(current), at_limit(lambda n: "echo " + "'Do 1'" * n + "\n")
         texts = {kind: {name: at_limit(shape) for name, shape in group.items()} for kind, group in (
-            ("migrations", shapes), ("defaults", defaults), ("notes", notes), ("commands", commands)
+            ("migrations", shapes), ("defaults", defaults), ("notes", notes), ("commands", commands), ("reached", reached)
         )}
         runs = {f"migrations: {name}": partial(self.findings, text) for name, text in texts["migrations"].items()}
         for name, text in texts["commands"].items():
             runs[f"package commands: {name}"] = partial(self.removes, text)
+        for name, text in texts["reached"].items():
+            runs[f"reached files: {name}"] = partial(self.reaches, text)
         for name, text in texts["defaults"].items():
             runs[f"defaults: {name}"] = partial(self.defaults, installed, text)
         for name, text in texts["notes"].items():

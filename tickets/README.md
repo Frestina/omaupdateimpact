@@ -94,4 +94,4 @@ when.
 | 041 | [A $(...) with no command doesn't stop the run](041-empty-command-substitution.md) | 040 | done |
 | 042 | [Every reader of release text is bounded](042-bounded-release-reading.md) | 040 | done |
 | 043 | [A long command costs no more than its length](043-long-commands.md) | 042 | done |
-| 044 | [NAMES_REMOVAL costs no more than the words it reads](044-named-removal-bounded.md) | 042, 043 | todo |
+| 044 | [NAMES_REMOVAL costs no more than the words it reads](044-named-removal-bounded.md) | 042, 043 | in progress |

@@ -318,7 +318,10 @@ reads from a release, a script, a Lua file of the defaults or the notes, is read
 only up to 256 KiB. A script over that isn't read, and is `unknown`. A command
 in it is read in one pass: what lies after each word is found one walk
 backwards, and the files a command reaches are found once, after its first
-shell. Omarchy's
+shell. A word or a file says it names a removal in one pass over its text: a
+`pacman`, `yay` or `paru` name only removes with a `-R`-shaped flag that follows
+it in the same line, so the text between them is never scanned again behind a
+name. Omarchy's
 largest migration, in v4.5.0, is 13 KiB, and its largest command 97 KiB. The
 defaults and the notes say what their limit does in
 [Reading release formats](#reading-release-formats) and [Reasons](#reasons). A

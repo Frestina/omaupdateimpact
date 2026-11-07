@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- Saying a word or a file names a package removal now costs no more than the text
+  it reads, not the square of it. The check read its one regex with a pacman name
+  followed by any text and a removal flag, and retried that text behind every
+  name, so one word of 35,000 `pacman` names took about 2 minutes to read. The
+  name and the flag it removes with are now read in one pass, and the whole read
+  takes about a hundredth of a second.
+
 ## 0.3.4 (2026-11-07)
 
 - A long package command now costs no more than its length, not the square of it.
