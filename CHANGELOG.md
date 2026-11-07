@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.4 (2026-11-07)
 
 - A long package command now costs no more than its length, not the square of it.
   The rest of a command was copied and scanned again for every word, so 50,000
