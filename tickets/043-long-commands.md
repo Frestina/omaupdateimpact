@@ -39,10 +39,10 @@ wrong for this reader.
 
 ## Done when
 
-- [ ] One command of 50,000 `bash` words, at the size limit, reads in seconds.
-- [ ] The timing test covers a long command of each word above.
-- [ ] The old and new readers agree on every real script.
-- [ ] `v0.3.4` and its GitHub release exist on the commit pushed to `main`, and CI
+- [x] One command of 50,000 `bash` words, at the size limit, reads in seconds.
+- [x] The timing test covers a long command of each word above.
+- [x] The old and new readers agree on every real script.
+- [x] `v0.3.4` and its GitHub release exist on the commit pushed to `main`, and CI
       passed on it.
-- [ ] 14152 names 0.3.4's SHA, and the finding is answered there.
-- [ ] `tests/run` passes.
+- [x] 14152 names 0.3.4's SHA, and the finding is answered there.
+- [x] `tests/run` passes.
