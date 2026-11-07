@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- A long package command now costs no more than its length, not the square of it.
+  The rest of a command was copied and scanned again for every word, so 50,000
+  `bash` words took minutes to read, and the marketplace's 250 KB of them, about
+  5. Each command is now read in one pass, and a command behind many guards, such
+  as `!`, paid a copy per word before. A file a command reaches was also named
+  once per shell that reached it; now once.
+
 ## 0.3.3 (2026-11-07)
 
 - Every file read from a release now costs little more than its size, not only the

@@ -667,6 +667,25 @@ class Packages(unittest.TestCase):
     def test_a_redirect_is_not_a_package(self):
         self.assertEqual(self.script("omarchy-pkg-drop a 2>/dev/null\n"), {"a": (False, "1.sh")})
 
+    def test_a_long_command_says_what_it_said_before(self):
+        # 043: the words after each word are found one walk backwards, so a command
+        # says what it said when the rest was copied and scanned for every word.
+        # Before, a word after every shell was named once per shell; a reached file
+        # counts once, so one of each is the same answer.
+        def once(action):
+            return (action[0], same_reach(action[1])) if action and action[0] == "reach" else action
+
+        rng = random.Random(43)
+        singles = [
+            "bash", "sh", "eval", "pacman", "yay", "paru", "command", "source", ".", "sudo",
+            "-c", "-Q", "-R", "-Rp", "-pR", "--remove", "--remove-something", "--print", "--", "-", "x",
+            "omarchy", "pkg", "list", "drop", "omarchy-pkg-drop", "omarchy-pkg-add", "omarchy-thing",
+            "$OMARCHY_PATH/bin/omarchy-tool", "$OMARCHY_PATH/{a,b}/a.sh", "sudo/omarchy-pkg-drop", "bash/bash",
+        ]
+        for _ in range(30000):
+            words = [rng.choice(singles) for _ in range(rng.randint(0, 20))]
+            self.assertEqual(once(impact.package_action(words)), once(old_package_action(words)), words)
+
     def test_every_redirect_is_dropped(self):
         for redirect in (">/dev/null", "> /dev/null", ">>log", "2>&1", "&>/dev/null", "&>>log", "</dev/null", '<<<"$x"', "2> err"):
             self.assertEqual(self.read({"1.sh": f"omarchy-pkg-drop a {redirect}\n"}), ({"a": (False, "1.sh")}, set()), redirect)
@@ -1494,6 +1513,46 @@ def old_moves(cur, tgt, changed, arrived):
     return moved
 
 
+def old_package_action(words):
+    """package_action() as it was before 043: the rest of the command copied for every
+    word, and the shell-string, pacman and reached-file scans run again for each. The
+    reference for what a command says.
+    """
+    reached = []
+    for index, word in enumerate(words):
+        name, rest = word.rsplit("/", 1)[-1], words[index + 1 :]
+        if name == "omarchy" and rest[:1] == ["pkg"]:
+            name, rest = "-".join([name, *rest[:2]]), rest[2:]
+        if name in impact.PACKAGE_DROPS or (name in impact.PACMANS and impact.pacman_removes(rest)):
+            return "drop", rest
+        if name in impact.PACKAGE_ADDS:
+            return "add", rest
+        shell_string = name == "eval" or (name in ("bash", "sh") and any(impact.SHELL_STRING_FLAG.fullmatch(part) for part in rest))
+        if shell_string and any(impact.NAMES_REMOVAL.search(part) for part in rest):
+            return "unread", []
+        if name in impact.SHELLS:
+            reached += [part for part in rest if impact.RELEASE_FILE.fullmatch(part)]
+        if impact.RELEASE_FILE.fullmatch(word) and words[:index] in ([], ["sudo"]):
+            reached.append(word)
+        if name.startswith("omarchy-"):
+            reached.append(name)
+    return ("reach", reached) if reached else None
+
+
+def same_reach(one):
+    """A reach answer with one of each file name, keeping the first of each.
+
+    Before 043 a word after two shells was named once per shell. What a reader
+    says for files is deduped by name on the way out, so one of each counts.
+    """
+    spelled, first = [], set()
+    for value in one:
+        if value not in first:
+            first.add(value)
+            spelled.append(value)
+    return spelled
+
+
 def at_limit(shape):
     """shape(n) for the largest n, by doubling, that is no longer than the size limit."""
     n = 1
@@ -1557,6 +1616,11 @@ class BoundedReading(unittest.TestCase):
             (self.base / "target/migrations/1.sh").write_text(migration)
         impact.give_reasons(findings, self.base / "target")
         return [finding.reason and finding.reason.reference for finding in findings]
+
+    def removes(self, migration):
+        """What the packages check makes of a migration's one line."""
+        (self.base / "target/migrations/1.sh").write_text(migration)
+        return impact.package_changes(self.base / "target/migrations", set())
 
     def test_unclosed_calls_read_at_once_as_one_computed_key(self):
         # 042, and the maintainer's second finding on 14152: each call scanned to the end of the file.
@@ -1845,6 +1909,20 @@ class BoundedReading(unittest.TestCase):
             ),
             "many short patterns": lambda n: "x=~/abc\n" + "".join(f"y=${{x##*{i}}}\n" for i in range(n)) + "rm $y\n",
         }
+        # 043: the rest of a command was copied for every word, and for each bash, sh,
+        # eval or pacman word that rest was scanned again, so one command of N such
+        # words cost N². 50,000 bash words took minutes to read. Each now reads in
+        # one pass, and so does a guard before the command's head, whose words the
+        # reader used to drop one copy at a time.
+        # The shape of one bash word is at least 50,000 of them at the size limit.
+        commands = {
+            "a long command of bash": lambda n: "bash " * n,
+            "a long command of sh": lambda n: "sh -c x " * n,
+            "a long command of eval": lambda n: "eval x " * n,
+            "a long command of omarchy pkg": lambda n: "omarchy pkg list " * n,
+            "a long command of pacman": lambda n: "pacman -Q " * n,
+            "a guard before a drop": lambda n: "! " * n + "omarchy-pkg-drop a\n",
+        }
         lua = 'hl.bind("SUPER + Z", "z")\n'
         defaults = {
             "unclosed calls": lambda n: lua + "hl.bind(" * n,
@@ -1893,9 +1971,11 @@ class BoundedReading(unittest.TestCase):
         # Each text is made before the clock starts.
         installed, first_line = at_limit(current), at_limit(lambda n: "echo " + "'Do 1'" * n + "\n")
         texts = {kind: {name: at_limit(shape) for name, shape in group.items()} for kind, group in (
-            ("migrations", shapes), ("defaults", defaults), ("notes", notes)
+            ("migrations", shapes), ("defaults", defaults), ("notes", notes), ("commands", commands)
         )}
         runs = {f"migrations: {name}": partial(self.findings, text) for name, text in texts["migrations"].items()}
+        for name, text in texts["commands"].items():
+            runs[f"package commands: {name}"] = partial(self.removes, text)
         for name, text in texts["defaults"].items():
             runs[f"defaults: {name}"] = partial(self.defaults, installed, text)
         for name, text in texts["notes"].items():

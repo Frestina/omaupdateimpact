@@ -1109,23 +1109,53 @@ def package_action(words):
     """What a command does to packages, as an action and its arguments, or None.
 
     The action is drop, add, unread for a removal in a string, or reach for the
-    words that may name other release files.
+    words that may name other release files. One pass reads the command: a walk
+    backwards finds what lies after each word, and the release files a command
+    reaches are those after its first shell, so a long command costs no more than
+    its length. See 043.
     """
-    reached = []
-    for index, word in enumerate(words):
-        name, rest = word.rsplit("/", 1)[-1], words[index + 1 :]
-        if name == "omarchy" and rest[:1] == ["pkg"]:
-            name, rest = "-".join([name, *rest[:2]]), rest[2:]
-        if name in PACKAGE_DROPS or (name in PACMANS and pacman_removes(rest)):
-            return "drop", rest
+    count = len(words)
+    names = [word.rsplit("/", 1)[-1] for word in words]
+    # What lies after each word, found in one walk backwards, with one search per
+    # word: whether its options together remove something, a flag for a command in
+    # a string is there, a word names a removal, and the word names a release file.
+    removes, flags, named, files = [False] * count, [False] * count, [False] * count, [False] * count
+    short_R = short_P = remove_long = print_long = False
+    a_flag, a_name = False, False
+    for index in range(count - 1, -1, -1):
+        removes[index] = (short_R or remove_long) and not (short_P or print_long)
+        flags[index], named[index], files[index] = a_flag, a_name, RELEASE_FILE.fullmatch(words[index]) is not None
+        word = words[index]
+        if word.startswith("-"):
+            if word.startswith("--"):
+                remove_long = remove_long or word == "--remove"
+                print_long = print_long or word.startswith("--print")
+            else:
+                short_R = short_R or "R" in word[1:]
+                short_P = short_P or "p" in word[1:]
+        a_flag = a_flag or bool(SHELL_STRING_FLAG.fullmatch(word))
+        a_name = a_name or bool(NAMES_REMOVAL.search(word))
+
+    reached, first_shell = [], None
+    for index in range(count):
+        word = words[index]
+        name = names[index]
+        stop = index + 1
+        if name == "omarchy" and words[index + 1 : index + 2] == ["pkg"]:
+            name = "-".join(["omarchy", *words[index + 1 : index + 3]])
+            stop = index + 3
+        if name in PACKAGE_DROPS or (name in PACMANS and removes[index]):
+            return "drop", words[stop:]
         if name in PACKAGE_ADDS:
-            return "add", rest
-        shell_string = name == "eval" or (name in ("bash", "sh") and any(SHELL_STRING_FLAG.fullmatch(part) for part in rest))
-        if shell_string and any(NAMES_REMOVAL.search(part) for part in rest):
+            return "add", words[stop:]
+        if (name == "eval" or (name in ("bash", "sh") and flags[index])) and named[index]:
             return "unread", []
-        if name in SHELLS:
-            reached += [part for part in rest if RELEASE_FILE.fullmatch(part)]
-        if RELEASE_FILE.fullmatch(word) and words[:index] in ([], ["sudo"]):
+        if name in SHELLS and first_shell is None:
+            # The files any shell word reaches are those after the first of them:
+            # a later shell's rest is only a part of the first one's.
+            first_shell = index
+            reached += [words[index + at] for at in range(1, count - index) if files[index + at]]
+        if files[index] and (index == 0 or (index == 1 and words[0] == "sudo")):
             reached.append(word)
         if name.startswith("omarchy-"):
             reached.append(name)
@@ -1163,8 +1193,9 @@ def package_commands(text):
             function = True
             words = []
             continue
-        while words:
-            head = words[0]
+        at = 0
+        while at < len(words):
+            head = words[at]
             if head in ("if", "while", "until"):
                 enter(True)
             elif head in ("for", "select", "case"):
@@ -1178,10 +1209,12 @@ def package_commands(text):
                 leave()
             elif head == "function":
                 function = True
-                words = words[1:]
+                at += 1
             elif head not in ("then", "do", "else", "elif", "!", "time"):
                 break
-            words = words[1:]
+            at += 1
+        if at:
+            words = words[at:]
         if patterns:
             patterns = token != ")"
             continue
