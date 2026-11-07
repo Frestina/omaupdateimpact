@@ -85,5 +85,5 @@ themselves: they moved it to 0.3.2's SHA three minutes after its tag.
 - [x] The spec's link for a call that can't be read goes to the computed-key rules.
 - [x] `v0.3.3` and its GitHub release exist on the commit pushed to `main`, and CI
       passed on it.
-- [ ] 14152 names 0.3.3's SHA, and the finding is answered there.
+- [x] 14152 names 0.3.3's SHA, and the finding is answered there.
 - [x] `tests/run` passes.
