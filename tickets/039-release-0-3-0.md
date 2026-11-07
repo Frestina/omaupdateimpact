@@ -64,6 +64,19 @@ and get the marketplace to verify it.
   unbounded, as the migration reader was in 14152. The owner chose to bound both and release
   0.3.3, in 040's follow-ups and 042, and 14152 then names 0.3.3's SHA.
 
+- The review of 042 also found the command reader unbounded, one command of N such
+  words costing N². The owner chose 043, and 0.3.4 is the release and the SHA in
+  review; 14152 answers the finding there.
+
+- Review follow-ups, from the 2026-11-07 handoff: the Done-when boxes that name
+  0.3.3 say the shipped state instead (0.3.4; the changelog dates 0.3.0 through
+  0.3.4; the README's clone names `v0.3.4`; `v0.3.4` is the release on the commit
+  pushed to `main`), and the scan box spells what the scan found — no
+  `FINDING`-level result, and no `remote-git-execution-unpinned` on this tree, which
+  0.2.0's did. The verification and install boxes wait on the marketplace, and now
+  behind 044: the maintainer's fourth finding came on 0.3.4 itself, so the request
+  can't be verified until 044's release answers it.
+
 ## Not in this ticket
 
 - Any change to the command or the plugin. Something found here goes to the
@@ -71,17 +84,17 @@ and get the marketplace to verify it.
 
 ## Done when
 
-- [x] `--version` and `manifest.json` say 0.3.3, and the changelog dates 0.3.0,
-      0.3.1, 0.3.2 and 0.3.3.
+- [x] `--version` and `manifest.json` say 0.3.4, and the changelog dates 0.3.0
+      through 0.3.4.
 - [x] `preview.png` shows the new panel buttons, its first finding open and the
       rest closed, and no real data.
-- [x] The scan of the committed tree has no `FINDING` but
-      `remote-git-execution-unpinned`.
-- [x] The README's clone names `v0.3.3`.
-- [x] `v0.3.0` to `v0.3.3` and their GitHub releases exist, `v0.3.3` on the commit
+- [x] The scan of the committed tree has no `FINDING`-level result, and no
+      `remote-git-execution-unpinned`, which 0.2.0's tree did produce.
+- [x] The README's clone names `v0.3.4`.
+- [x] `v0.3.0` to `v0.3.4` and their GitHub releases exist, `v0.3.4` on the commit
       pushed to `main`.
 - [x] CI passed on that push.
 - [ ] The owner confirmed the update request, and the marketplace verified the new
       SHA.
-- [ ] `omarchy plugin add` on a clean machine installs 0.3.3.
+- [ ] `omarchy plugin add` on a clean machine installs `v0.3.4`'s `main`.
 - [x] `tests/run` passes.
