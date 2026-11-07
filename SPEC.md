@@ -250,10 +250,10 @@ Reading the defaults costs no more than their size, as a release can be crafted:
   Omarchy's largest, in v4.5.0, is 22 KiB. With no other file, there are no
   readable default bindings.
 - A call the reader can't read in full is a computed key that holds the rest of
-  the file, by the rules in [Reasons](#reasons): one that never closes, which Lua
-  wouldn't load, or one past what the file may spend. Each call spends its length,
-  so a call inside a call is paid for again. A file may spend its own length and
-  256 KiB more. Omarchy's calls are never inside each other, so they spend less
+  the file, by the rules in [Findings and exit codes](#findings-and-exit-codes):
+  one that never closes, which Lua wouldn't load, or one past what the file may
+  spend. Each call spends its length, so a call inside a call is paid for again. A
+  file may spend its own length and 256 KiB more. Omarchy's calls are never inside each other, so they spend less
   than the file. A computed key's title shows the first 80 characters of its
   expression.
 - A call's name inside a string isn't a call.

@@ -58,7 +58,14 @@ themselves: they moved it to 0.3.2's SHA three minutes after its tag.
   GitHub release, push and CI, as in 039.
 - Make sure 14152's target commit is 0.3.3's SHA (edit it if the maintainer
   hasn't), and answer both findings there. The reply says what 0.3.2 and 0.3.3
-  each bounded, and claims no more than the timing tests show. The owner confirms the edited request and the reply first.
+  each bounded, and claims no more than the timing tests show. The owner confirms
+  the edited request and the reply first.
+- Review follow-ups: the timing test fails on a slower machine. On a 2-core
+  laptop, "a chain of functions" passes its 60 s limit under `tracemalloc`, so CI
+  could fail on 0.3.3's tag, as it did on 0.3.0's. Time each shape without
+  `tracemalloc`, and measure its memory in a pass of its own. The spec's link for
+  a call that can't be read goes to the computed-key rules, not to Reasons.
+  Release only after this is ready.
 
 ## Not in this ticket
 
@@ -73,6 +80,9 @@ themselves: they moved it to 0.3.2's SHA three minutes after its tag.
 - [x] The old and new readers agree on every real Lua file and notes.
 - [x] The spec says each new limit, and its line on what reading a release costs
       is true.
+- [x] The timing test measures time without `tracemalloc`, and passes on the
+      2-core laptop as well as here.
+- [x] The spec's link for a call that can't be read goes to the computed-key rules.
 - [ ] `v0.3.3` and its GitHub release exist on the commit pushed to `main`, and CI
       passed on it.
 - [ ] 14152 names 0.3.3's SHA, and the finding is answered there.

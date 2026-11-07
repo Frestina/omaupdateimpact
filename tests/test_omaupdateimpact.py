@@ -1903,9 +1903,17 @@ class BoundedReading(unittest.TestCase):
         runs["notes: a long first line"] = partial(
             self.reasons, texts["notes"]["changes and migrations"], findings(10000), first_line
         )
+        # Each shape is timed on its own, as tracemalloc makes it several times slower,
+        # and then its memory is measured in a pass of its own, which the timed pass has
+        # shown ends.
         for name, run in runs.items():
             with self.subTest(name):
                 self.within(60)
+                try:
+                    run()
+                finally:
+                    signal.alarm(0)
+                self.within(600)
                 tracemalloc.start()
                 try:
                     run()
