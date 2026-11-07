@@ -71,16 +71,16 @@ and get the marketplace to verify it.
 
 ## Done when
 
-- [ ] `--version` and `manifest.json` say 0.3.3, and the changelog dates 0.3.0,
+- [x] `--version` and `manifest.json` say 0.3.3, and the changelog dates 0.3.0,
       0.3.1, 0.3.2 and 0.3.3.
 - [ ] `preview.png` shows the new panel buttons, its first finding open and the
       rest closed, and no real data.
 - [ ] The scan of the committed tree has no `FINDING` but
       `remote-git-execution-unpinned`.
-- [ ] The README's clone names `v0.3.3`.
-- [ ] `v0.3.0` to `v0.3.3` and their GitHub releases exist, `v0.3.3` on the commit
+- [x] The README's clone names `v0.3.3`.
+- [x] `v0.3.0` to `v0.3.3` and their GitHub releases exist, `v0.3.3` on the commit
       pushed to `main`.
-- [ ] CI passed on that push.
+- [x] CI passed on that push.
 - [ ] The owner confirmed the update request, and the marketplace verified the new
       SHA.
 - [ ] `omarchy plugin add` on a clean machine installs 0.3.3.
