@@ -32,6 +32,11 @@ and 14152 moves once.
   `parse_helpers`), a migration's first line (`description`), and the notes
   (`read_notes`, `give_reasons`). Bound each one that grows faster than its input
   or reads without limit.
+- The migration reader's `${x#pattern}` and its like: 040's budget counts the
+  values a cut keeps, not the `fnmatch` it runs for every place it could cut. So
+  4,000 lines of `y=${x##*a*b}`, where `x` holds 64 values of 4,000 characters,
+  take about 20 s (56 KB) before the budget makes the migration `unknown`. That
+  work counts too, so the shape reads in seconds.
 - `hl.bind(` with no `)` costs no more than its length. A call the reader can't
   read in full counts as a computed key, never as no binding, so it stays a note
   or `unknown` by the existing rules.
