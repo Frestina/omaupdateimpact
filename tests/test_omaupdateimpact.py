@@ -1589,6 +1589,14 @@ class BoundedReading(unittest.TestCase):
             "migrations/1.sh may remove ~/.config/app/app.conf"
         ])
 
+    def test_a_substitution_with_no_command_names_no_path_and_the_run_goes_on(self):
+        # 041: $(<file) has no command, and stopped the whole run with IndexError.
+        for script in ("x=$(<~/.config/app/app.conf)\nrm ~/.config/app/app.conf\n", "x=$( )\nrm ~/.config/app/app.conf\n"):
+            with self.subTest(script):
+                self.assertEqual([finding.title for finding in self.findings(script)], [
+                    "migrations/1.sh may remove ~/.config/app/app.conf"
+                ])
+
     def test_every_crafted_shape_at_the_size_limit_reads_in_seconds(self):
         def at_limit(shape):
             n = 1

@@ -1337,8 +1337,10 @@ def substituted(words, variables, home):
 
     mktemp makes its file by its template, or in the folder for temporary files,
     which isn't yours, when it has none. realpath and readlink -f name the file
-    they're given.
+    they're given. One with no command, such as $(<file), names none.
     """
+    if not words:
+        return None
     name, arguments = words[0], operands(words[1:], "pt")
     if name == "mktemp":
         if any(word.startswith(("-p", "-t", "--tmpdir")) for word in words[1:]):

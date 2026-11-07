@@ -2,7 +2,7 @@
 id: "039"
 title: Release 0.3.0 and update the listing
 milestone: M4 Plugin
-depends_on: ["023", "038", "040"]
+depends_on: ["023", "038", "040", "041"]
 ---
 
 # 039 Release 0.3.0 and update the listing
@@ -57,7 +57,8 @@ and get the marketplace to verify it.
 
 - The marketplace's review of 0.3.1 on 14152 found the migration reader's brace
   expansion unbounded. The owner chose to fix it in 040 and release 0.3.2, and 14152
-  then names 0.3.2's SHA.
+  then names 0.3.2's SHA. 040 found 041, an older crash on `$(<file)`, and the
+  owner put it in 0.3.2 too.
 
 ## Not in this ticket
 
