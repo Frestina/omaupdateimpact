@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.3 (2026-11-07)
 
 - Every file read from a release now costs little more than its size, not only the
   migrations. The bindings reader scanned to the end of a Lua file for each call
