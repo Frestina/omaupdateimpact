@@ -55,12 +55,12 @@ been there since 017.
 
 ## Done when
 
-- [ ] A word of 30 `{a,b}` lists reads at once, as only known when it runs.
-- [ ] Every crafted shape, at the size limit, reads in seconds, and a test times
+- [x] A word of 30 `{a,b}` lists reads at once, as only known when it runs.
+- [x] Every crafted shape, at the size limit, reads in seconds, and a test times
       them.
-- [ ] A script over the size limit, or nested too deep, is `unknown`.
-- [ ] The spec says each limit.
-- [ ] `v0.3.2` and its GitHub release exist on the commit pushed to `main`, and CI
+- [x] A script over the size limit, or nested too deep, is `unknown`.
+- [x] The spec says each limit.
+- [x] `v0.3.2` and its GitHub release exist on the commit pushed to `main`, and CI
       passed on it.
 - [ ] 14152 names 0.3.2's SHA, and the finding is answered there.
-- [ ] `tests/run` passes.
+- [x] `tests/run` passes.
