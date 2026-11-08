@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.5 (2026-11-08)
 
 - Saying a word or a file names a package removal now costs no more than the text
   it reads, not the square of it. The check read its one regex with a pacman name

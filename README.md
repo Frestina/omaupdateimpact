@@ -141,7 +141,7 @@ reviewed findings in `~/.config/omaupdateimpact/reviewed` stay, for you to delet
 ### In the terminal
 
 ```
-git clone --branch v0.3.4 https://github.com/Frestina/omaupdateimpact.git
+git clone --branch v0.3.5 https://github.com/Frestina/omaupdateimpact.git
 cd omaupdateimpact
 ./install.sh
 ```
