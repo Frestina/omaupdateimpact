@@ -59,11 +59,11 @@ call sites need the bound.
 
 ## Done when
 
-- [ ] One command whose one `bash -c` word holds 35,000 `pacman` names, within
+- [x] One command whose one `bash -c` word holds 35,000 `pacman` names, within
       the size limit, reads in seconds.
-- [ ] The timing test covers the long word and the non-shell-script file of names.
-- [ ] The old and new readers agree on every real script.
-- [ ] `v0.3.5` and its GitHub release exist on the commit pushed to `main`, and
+- [x] The timing test covers the long word and the non-shell-script file of names.
+- [x] The old and new readers agree on every real script.
+- [x] `v0.3.5` and its GitHub release exist on the commit pushed to `main`, and
       CI passed on it.
-- [ ] 14152 names 0.3.5's SHA, and the finding is answered there.
-- [ ] `tests/run` passes.
+- [x] 14152 names 0.3.5's SHA, and the finding is answered there.
+- [x] `tests/run` passes.
