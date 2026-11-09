@@ -172,6 +172,15 @@ a run ends, however it ends. With `--target`, nothing is locked.
 
 Each check returns findings and says whether it could run.
 
+The checks share one budget: 2 minutes of the command's own CPU time, counted from
+when both trees are ready. Each reader of release text is bounded, but a crafted
+release could still find a slow path, so this caps what any release costs to read,
+whatever its files hold. Waiting doesn't count: the download, the cache lock, and
+`qmllint`, which runs as its own process with its own limit. A real run on v4.5.0
+takes about 3 seconds. Past the budget, the run stops with exit 2 and says reading
+the release took too long, so nothing was compared. `--ack` and `--unack` run the
+same comparison, so they stop the same way and write nothing.
+
 - **Bindings:** your bindings against both versions of the defaults. Flags clashes
   and shortcuts you turned off that come back, and lists the rest as notes.
 - **Packages:** installed packages removed by migrations you haven't run yet. A
@@ -573,7 +582,7 @@ Its evidence is the line in the notes.
 | --- | --- |
 | 0 | Every check ran and nothing needs attention, or there is no update |
 | 1 | Something needs attention, that you haven't reviewed |
-| 2 | No verdict: bad usage, a failed download, an unusable tree or a crash |
+| 2 | No verdict: bad usage, a failed download, an unusable tree, a release too slow to read, or a crash |
 | 3 | Nothing needs attention, but at least one check couldn't run in full |
 
 An unexpected exception is exit 2 with one line of explanation. It never falls

@@ -21,7 +21,12 @@ later are in [BACKLOG.md](BACKLOG.md).
   ([issue 14152](https://github.com/omacom/omarchy-plugin-marketplace/issues/14152))
   asks for the commit tagged `v0.3.5`, `d3d10c02e1712ad98006f56092637700e79ff1aa`,
   which the issue names in full. Commits wait
-  on `main` here until it is verified.
+  on `main` here until it is verified. A release's tag is the top of `main` on
+  GitHub, and the request's "Target commit" names it: the form asks for the
+  current HEAD, and the catalog shows "Update unverified" once HEAD moves past the
+  verified commit. Ticking a ticket after its tag is committed here, not pushed.
+  Changing the target means editing that field, which reruns the checks; a comment
+  naming a new SHA doesn't.
 - **Fixtures are fictional.** No real paths, hostnames or personal config in the
   tests, the docs or the demo. The exception is unchanged Omarchy release files,
   kept with Omarchy's license and their source tag.
@@ -89,9 +94,10 @@ when.
 | 036 | [Check soon after loading, and wait for the network](036-first-check-sooner.md) | 035 | done |
 | 037 | [Lint and check against v4.5.0](037-lint-against-v4-5-0.md) | 011 | done |
 | 038 | [The bar's mark is the icon's label](038-bar-mark-as-label.md) | 037 | done |
-| 039 | [Release 0.3.0 and update the listing](039-release-0-3-0.md) | 023, 038, 040, 041, 042, 043 | in progress |
+| 039 | [Release 0.3.0 and update the listing](039-release-0-3-0.md) | 023, 038, 040, 041, 042, 043, 044, 045 | in progress |
 | 040 | [The migration reader's work is bounded](040-bounded-migration-reader.md) | 038 | done |
 | 041 | [A $(...) with no command doesn't stop the run](041-empty-command-substitution.md) | 040 | done |
 | 042 | [Every reader of release text is bounded](042-bounded-release-reading.md) | 040 | done |
 | 043 | [A long command costs no more than its length](043-long-commands.md) | 042 | done |
 | 044 | [NAMES_REMOVAL costs no more than the words it reads](044-named-removal-bounded.md) | 042, 043 | done |
+| 045 | [Reading a release has one budget](045-reading-budget.md) | 044 | todo |

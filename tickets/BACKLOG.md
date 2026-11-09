@@ -211,12 +211,10 @@ Paths already ruled out are not here; they are under
 - **A check that never ends.** The service starts no new check while one runs, and
   sets no deadline on it. The command has timeouts on its requests, so a hang is
   unlikely, but one would leave the bar on its last state until the shell restarts.
-  Stopping it mid-download leaves scratch in the cache (see above). 040 and 042
-  bound each file read from a release, not the release as a whole. The slowest
-  crafted file takes 17.6 s on a 2-core laptop, so a release of many such files
-  would take that many times as long. The marketplace's review of 14152 named the
-  service waiting on such a check. A deadline would cap it, as would a budget for
-  the whole release. Waits for a real report, or the marketplace asking.
+  Stopping it mid-download leaves scratch in the cache (see above). 045 caps
+  reading a release at 2 minutes of CPU, so what is left is waiting: a download
+  that keeps trickling, or the lock's 15 minutes. A deadline in the service on the
+  whole run would cap those. Waits for a real report.
 - **The plugin's timer doesn't count sleep.** Qt's timers run on a clock that stops
   while the machine sleeps, so a laptop that sleeps most of the day checks less often
   than every 6 hours. A login or an update restarts the shell, which checks again.

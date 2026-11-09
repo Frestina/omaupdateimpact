@@ -2,7 +2,7 @@
 id: "039"
 title: Release 0.3.0 and update the listing
 milestone: M4 Plugin
-depends_on: ["023", "038", "040", "041", "042", "043"]
+depends_on: ["023", "038", "040", "041", "042", "043", "044", "045"]
 ---
 
 # 039 Release 0.3.0 and update the listing
@@ -79,6 +79,12 @@ and get the marketplace to verify it.
 
 - 044 bounded `NAMES_REMOVAL`, and 0.3.5 is the release and the SHA in review;
   14152 answers the finding there. The boxes below name 0.3.5.
+
+- 0.3.5 was never checked by the marketplace: 14152's "Target commit" still named
+  0.3.4, and only editing it reruns the checks. `main` had also moved past the tag.
+  Each finding was one more slow reader, so the owner chose to cap them all: 045
+  gives reading one budget, and 0.3.6 is the release 14152 targets. The boxes
+  below then name 0.3.6.
 
 ## Not in this ticket
 
