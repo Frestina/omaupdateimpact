@@ -79,8 +79,8 @@ reader, including ones nobody has traced yet, and a run past it is never clear.
       its own. The rest, whose old reader was within a few times the new one's
       time, stay as guards on the new reader.
 - [x] Real runs on v4.5.0 and v4.5.0-rc3 give the same results as before.
-- [ ] `v0.3.6` and its GitHub release exist on the commit at the top of `main` on
+- [x] `v0.3.6` and its GitHub release exist on the commit at the top of `main` on
       GitHub, and CI passed on it.
-- [ ] The owner confirmed the edit and the reply, 14152 targets 0.3.6's SHA, and
+- [x] The owner confirmed the edit and the reply, 14152 targets 0.3.6's SHA, and
       the marketplace's checks ran on it.
 - [x] `tests/run` passes.

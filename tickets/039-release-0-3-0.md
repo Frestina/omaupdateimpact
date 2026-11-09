@@ -100,9 +100,9 @@ and get the marketplace to verify it.
 - [x] The scan of the committed tree has no `FINDING`-level result, and no
       `remote-git-execution-unpinned`, which 0.2.0's tree did produce.
 - [x] The README's clone names `v0.3.6`.
-- [ ] `v0.3.0` to `v0.3.6` and their GitHub releases exist, `v0.3.6` on the commit
+- [x] `v0.3.0` to `v0.3.6` and their GitHub releases exist, `v0.3.6` on the commit
       pushed to `main`.
-- [ ] CI passed on that push.
+- [x] CI passed on that push.
 - [ ] The owner confirmed the update request, and the marketplace verified the new
       SHA.
 - [ ] `omarchy plugin add` on a clean machine installs `v0.3.6`'s `main`.

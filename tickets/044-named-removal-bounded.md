@@ -65,5 +65,6 @@ call sites need the bound.
 - [x] The old and new readers agree on every real script.
 - [x] `v0.3.5` and its GitHub release exist on the commit pushed to `main`, and
       CI passed on it.
-- [x] 14152 names 0.3.5's SHA, and the finding is answered there.
+- [x] The reply on 14152 names 0.3.5's SHA and answers the finding. The
+      request's Target commit stayed at 0.3.4 until 045 moved it.
 - [x] `tests/run` passes.

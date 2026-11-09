@@ -19,7 +19,7 @@ later are in [BACKLOG.md](BACKLOG.md).
   `main` as it is, so a push reaches users before the marketplace verifies it, and
   moves `main` off the SHA in review. 039's update request
   ([issue 14152](https://github.com/omacom/omarchy-plugin-marketplace/issues/14152))
-  asks for the commit tagged `v0.3.5`, `d3d10c02e1712ad98006f56092637700e79ff1aa`,
+  asks for the commit tagged `v0.3.6`, `9993b0a19036cb3502489a56766402524f70af4e`,
   which the issue names in full. Commits wait
   on `main` here until it is verified. A release's tag is the top of `main` on
   GitHub, and the request's "Target commit" names it: the form asks for the
@@ -100,4 +100,4 @@ when.
 | 042 | [Every reader of release text is bounded](042-bounded-release-reading.md) | 040 | done |
 | 043 | [A long command costs no more than its length](043-long-commands.md) | 042 | done |
 | 044 | [NAMES_REMOVAL costs no more than the words it reads](044-named-removal-bounded.md) | 042, 043 | done |
-| 045 | [Reading a release has one budget](045-reading-budget.md) | 044 | in progress |
+| 045 | [Reading a release has one budget](045-reading-budget.md) | 044 | done |
