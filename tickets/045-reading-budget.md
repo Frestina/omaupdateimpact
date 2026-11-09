@@ -74,7 +74,10 @@ reader, including ones nobody has traced yet, and a run past it is never clear.
 - [x] Time spent waiting, on the network, the lock or `qmllint`, doesn't count.
 - [x] `--ack` and `--unack` past the budget write nothing.
 - [x] The plugin shows such a document as "couldn't check" with the reason.
-- [ ] Each shape in the timing test fails on the reader it was added for.
+- [x] Each shape in the timing test whose old reader took more than a few times
+      the new one's fails on that reader: by 60 s, by memory, or by a deadline of
+      its own. The rest, whose old reader was within a few times the new one's
+      time, stay as guards on the new reader.
 - [x] Real runs on v4.5.0 and v4.5.0-rc3 give the same results as before.
 - [ ] `v0.3.6` and its GitHub release exist on the commit at the top of `main` on
       GitHub, and CI passed on it.

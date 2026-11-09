@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.3.6 (2026-11-09)
+
+- Reading a release now has one budget: 2 minutes of the command's own CPU time,
+  counted from when both trees are ready. Each reader of release text was already
+  bounded, but a crafted release could still find a slow path nobody had traced.
+  Past the budget, the run stops with exit 2 and says reading the release took too
+  long, so nothing was compared. `--json` gives a `failed` document with that
+  reason, and the plugin shows it as "Couldn't check". `--ack` and `--unack` stop
+  the same way and write nothing. Waiting doesn't count: the download, the cache
+  lock, and `qmllint`, which keeps its own 60-second limit. A real run on v4.5.0
+  takes about 3 seconds.
+
 ## 0.3.5 (2026-11-08)
 
 - Saying a word or a file names a package removal now costs no more than the text
