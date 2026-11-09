@@ -16,7 +16,7 @@ import unittest
 from pathlib import Path
 
 from tests.golden import GOLDEN
-from tests.test_omaupdateimpact import impact
+from tests.test_omaupdateimpact import impact, too_slow_run
 
 ROOT = Path(__file__).parent.parent
 PLUGIN = ROOT / "plugin"
@@ -187,6 +187,17 @@ class States(unittest.TestCase):
     def test_failed_shows_the_reason(self):
         text, code = golden("failed")
         self.assertEqual(view(text, code)["problem"], json.loads(text)["reason"])
+
+    def test_a_run_past_the_reading_budget_couldnt_check_and_says_why(self):
+        # 045: the plugin needs no change for it.
+        text, code = too_slow_run()
+        self.assertEqual(code, 2)
+        found = view(text, code)
+        self.assertEqual((found["state"], found["mark"]), ("unknown", "?"))
+        reason = json.loads(text)["reason"]
+        self.assertTrue(reason.startswith("Reading the release took too long"), reason)
+        self.assertEqual(found["tooltip"], f"Couldn't check\n{reason}")
+        self.assertEqual(found["problem"], reason)
 
     def test_no_update_names_newer_releases(self):
         found = view(*golden("no-update"))

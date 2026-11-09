@@ -69,15 +69,15 @@ reader, including ones nobody has traced yet, and a run past it is never clear.
 
 ## Done when
 
-- [ ] A run whose reading passes the budget stops with exit 2, a `failed`
+- [x] A run whose reading passes the budget stops with exit 2, a `failed`
       document and its reason, and never a clear result.
-- [ ] Time spent waiting, on the network, the lock or `qmllint`, doesn't count.
-- [ ] `--ack` and `--unack` past the budget write nothing.
-- [ ] The plugin shows such a document as "couldn't check" with the reason.
+- [x] Time spent waiting, on the network, the lock or `qmllint`, doesn't count.
+- [x] `--ack` and `--unack` past the budget write nothing.
+- [x] The plugin shows such a document as "couldn't check" with the reason.
 - [ ] Each shape in the timing test fails on the reader it was added for.
-- [ ] Real runs on v4.5.0 and v4.5.0-rc3 give the same results as before.
+- [x] Real runs on v4.5.0 and v4.5.0-rc3 give the same results as before.
 - [ ] `v0.3.6` and its GitHub release exist on the commit at the top of `main` on
       GitHub, and CI passed on it.
 - [ ] The owner confirmed the edit and the reply, 14152 targets 0.3.6's SHA, and
       the marketplace's checks ran on it.
-- [ ] `tests/run` passes.
+- [x] `tests/run` passes.

@@ -16,6 +16,7 @@ import stat
 import tarfile
 import tempfile
 import threading
+import time
 import tracemalloc
 import unittest
 from concurrent.futures import ThreadPoolExecutor
@@ -1596,6 +1597,21 @@ class Deadline(Exception):
     pass
 
 
+# 045: a shape whose old reader read it in under 60 seconds on a fast machine has a
+# deadline of its own, under the old reader's time and well over the new one's, so
+# the test fails without the fix. Seconds of CPU at the size limit, old -> new:
+SHAPE_DEADLINES = {
+    "package commands: a long word of pacman names": 5,  # 044: 42 -> 0.01
+    "reached files: a file of pacman names": 5,  # 044: 45 -> 0.01
+    "package commands: a long command of pacman": 5,  # 043: 34 -> 0.2
+    "package commands: a guard before a drop": 5,  # 043: 19.5 -> 0.2
+    "package commands: a long command of omarchy pkg": 1.5,  # 043: 3.4 -> 0.2
+    "defaults: shortcuts that could move": 10,  # 042: 47 -> 1.5
+    "defaults: shortcuts that never move": 5,  # 042: 12.4 -> 0.5
+    "migrations: patterns of many brackets": 2,  # 042: 6.1 -> 0.2
+}
+
+
 class BoundedReading(unittest.TestCase):
     """What a release's text holds never makes reading it cost much more than its size. See 040 and 042."""
 
@@ -1615,9 +1631,9 @@ class BoundedReading(unittest.TestCase):
         def stop(*_):
             raise Deadline(f"took more than {seconds} seconds")
         previous = signal.signal(signal.SIGALRM, stop)
-        signal.alarm(seconds)
+        signal.setitimer(signal.ITIMER_REAL, seconds)
         self.addCleanup(signal.signal, signal.SIGALRM, previous)
-        self.addCleanup(signal.alarm, 0)
+        self.addCleanup(signal.setitimer, signal.ITIMER_REAL, 0)
 
     def findings(self, migration):
         (self.base / "target/migrations/1.sh").write_text(migration)
@@ -1919,7 +1935,8 @@ class BoundedReading(unittest.TestCase):
         self.findings("rm ~/.config/app/app.conf\n")
         self.assertIsNone(impact.budget_left.get())
 
-    def test_every_crafted_shape_at_the_size_limit_reads_in_seconds_and_bounded_memory(self):
+    def crafted_runs(self):
+        """Each crafted shape at the size limit, by name, ready to read."""
         shapes = {
             "lists": lambda n: "rm ~/.config/x" + "{a,b}" * n + "\n",
             "a variable set and used many times": lambda n: "".join(f"x=~/.config/a{i}\n" for i in range(n)) + "rm $x\n" * n,
@@ -2026,16 +2043,21 @@ class BoundedReading(unittest.TestCase):
         runs["notes: a long first line"] = partial(
             self.reasons, texts["notes"]["changes and migrations"], findings(10000), first_line
         )
+        return runs
+
+    def test_every_crafted_shape_at_the_size_limit_reads_in_seconds_and_bounded_memory(self):
+        runs = self.crafted_runs()
+        self.assertLessEqual(set(SHAPE_DEADLINES), set(runs))
         # Each shape is timed on its own, as tracemalloc makes it several times slower,
         # and then its memory is measured in a pass of its own, which the timed pass has
         # shown ends.
         for name, run in runs.items():
             with self.subTest(name):
-                self.within(60)
+                self.within(SHAPE_DEADLINES.get(name, 60))
                 try:
                     run()
                 finally:
-                    signal.alarm(0)
+                    signal.setitimer(signal.ITIMER_REAL, 0)
                 self.within(600)
                 tracemalloc.start()
                 try:
@@ -2043,7 +2065,7 @@ class BoundedReading(unittest.TestCase):
                     peak = tracemalloc.get_traced_memory()[1]
                 finally:
                     tracemalloc.stop()
-                    signal.alarm(0)
+                    signal.setitimer(signal.ITIMER_REAL, 0)
                 self.assertLess(peak, 200 * 1024 * 1024)
 
 
@@ -4307,6 +4329,8 @@ class SharedCache(ProgramCase):
         self.stderr = Noticed(self.second)
         self.enterContext(mock.patch.object(impact.urllib.request, "urlopen", self.answer))
         self.enterContext(mock.patch.object(impact, "installed_packages", self.packages))
+        # A signal handler can only be set from the main thread, so these runs have no reading budget.
+        self.enterContext(mock.patch.object(impact, "reading_budget", lambda seconds: contextlib.nullcontext()))
         self.enterContext(contextlib.redirect_stderr(self.stderr))
         self.pool = self.enterContext(ThreadPoolExecutor(2))
         # Before the pool shuts down, so a failed test doesn't leave a run waiting.
@@ -4380,6 +4404,142 @@ class SharedCache(ProgramCase):
         self.assertEqual(document["result"], "failed")
         self.assertIn("another omaupdateimpact run held the cache", document["reason"])
         self.assertEqual(self.archives, [])
+
+def spin(seconds):
+    """Use this much of the process's CPU time."""
+    start = time.process_time()
+    while time.process_time() - start < seconds:
+        sum(range(1000))
+
+
+def burn(*_):
+    """Use CPU time until the reading budget stops it."""
+    while True:
+        sum(range(1000))
+
+
+TOO_SLOW = "Reading the release took too long: it passed 0.3 seconds of CPU time, so nothing was compared."
+
+
+class ReadingBudget(ProgramCase):
+    """Reading a release has one budget of CPU time, and a run past it is never clear. See 045."""
+
+    def setUp(self):
+        super().setUp()
+        self.budget = impact.READ_BUDGET
+        self.enterContext(mock.patch.object(impact, "READ_BUDGET", 0.3))
+
+        # Fails the test, instead of hanging it, if the budget never stops the run.
+        def stop(*_):
+            raise Deadline("the reading budget didn't stop the run")
+        previous = signal.signal(signal.SIGALRM, stop)
+        self.addCleanup(signal.signal, signal.SIGALRM, previous)
+        signal.alarm(60)
+        self.addCleanup(signal.alarm, 0)
+        (self.base / "target/migrations/1.sh").write_text("omarchy-pkg-drop a\n")
+
+    def slow(self, *args, reader="compare_edits"):
+        with mock.patch.object(impact, reader, burn):
+            return self.check(*args, packages={"a"})
+
+    def reviews(self):
+        path = self.home / ".config/omaupdateimpact/reviewed"
+        return path.read_bytes() if path.exists() else None
+
+    def plugin(self, script):
+        """A plugin to lint, and a qmllint that runs script."""
+        plugin = self.home / ".config/omarchy/plugins/demo"
+        plugin.mkdir(parents=True)
+        (plugin / "Demo.qml").write_text("import QtQuick\nItem {}\n")
+        qmllint = self.base / "qmllint"
+        qmllint.write_text(f"#!/bin/sh\n{QT6_VERSION}\n{script}\n")
+        qmllint.chmod(0o755)
+        return mock.patch.object(impact.shutil, "which", return_value=str(qmllint))
+
+    def test_a_run_past_the_budget_exits_2_and_says_why_on_one_line(self):
+        self.assertEqual(self.slow(), (2, "", TOO_SLOW + "\n"))
+
+    def test_its_document_is_failed_with_the_reason_and_not_unreachable(self):
+        code, out, _ = self.slow("--json")
+        self.assertEqual(code, 2)
+        self.assertEqual(json.loads(out), impact.failure(TOO_SLOW))
+        self.assertFalse(json.loads(out)["unreachable"])
+
+    def test_it_stops_in_any_reader_of_the_release(self):
+        readers = ["parse_lua", "package_changes", "compare_bindings", "compare_commands", "compare_plugins", "give_reasons"]
+        for reader in readers:
+            with self.subTest(reader):
+                self.assertEqual(self.slow("--json", reader=reader)[0], 2)
+
+    def test_the_budget_is_two_minutes(self):
+        self.assertEqual(self.budget, 120)
+        self.assertEqual(impact.amount(self.budget), "2 minutes")
+        self.assertEqual(impact.amount(1), "1 second")
+
+    def test_a_run_inside_the_budget_is_as_before_and_leaves_no_timer(self):
+        code, out, _ = self.check(packages={"a"})
+        self.assertEqual(code, 1)
+        self.assertIn("Needs attention", out)
+        self.assertEqual(signal.getitimer(signal.ITIMER_PROF), (0.0, 0.0))
+        self.assertEqual(signal.getsignal(signal.SIGPROF), signal.SIG_DFL)
+
+    def test_time_before_both_trees_are_ready_doesnt_count(self):
+        # The download and the wait for the cache lock come before.
+        fetch = impact.fetch_release
+
+        def slow_fetch(*args):
+            spin(1)
+            return fetch(*args)
+
+        with mock.patch.object(impact, "fetch_release", slow_fetch):
+            code, _, err = self.download(io.BytesIO(self.archive()), packages={"a"})
+        self.assertEqual(code, 1, err)
+
+    def test_waiting_for_qmllint_doesnt_count(self):
+        # Two lints of a second each, past a budget of 0.3 seconds.
+        with self.plugin("sleep 1"):
+            code, out, _ = self.check("--all", packages={"a"})
+        self.assertEqual(code, 1)
+        self.assertIn("1 plugin linted", " ".join(out.split()))
+
+    def test_a_qmllint_still_running_is_stopped_with_it(self):
+        # Waiting costs nothing, but reading what qmllint prints does, so the budget can
+        # run out while it runs. It is killed, and nothing is left behind.
+        pids = self.base / "pids"
+        with self.plugin(f"echo $$ >> '{pids}'\nwhile :; do echo {'x' * 200}; done"):
+            started = time.monotonic()
+            code, _, err = self.check(packages={"a"})
+        self.assertEqual((code, err), (2, TOO_SLOW + "\n"))
+        self.assertLess(time.monotonic() - started, impact.LINT_TIMEOUT / 2)
+        for pid in map(int, pids.read_text().split()):
+            with self.assertRaises(ProcessLookupError):
+                os.kill(pid, 0)
+
+    def test_ack_past_the_budget_writes_nothing(self):
+        found = json.loads(self.check("--json", packages={"a"})[1])["findings"]
+        self.assertEqual(self.slow("--ack", found[0]["id"])[0], 2)
+        self.assertIsNone(self.reviews())
+        self.assertFalse((self.home / ".config/omaupdateimpact").exists())
+
+    def test_unack_past_the_budget_writes_nothing(self):
+        found = json.loads(self.check("--json", packages={"a"})[1])["findings"]
+        self.assertEqual(self.check("--ack", found[0]["id"], packages={"a"})[0], 0)
+        before = self.reviews()
+        self.assertIn(found[0]["id"].encode(), before)
+        self.assertEqual(self.slow("--unack", found[0]["id"])[0], 2)
+        self.assertEqual(self.reviews(), before)
+
+
+def too_slow_run():
+    """The --json document and exit code of a run past the reading budget, for the plugin's tests."""
+    case = ReadingBudget()
+    case.setUp()
+    try:
+        code, out, _ = case.slow("--json")
+        return out, code
+    finally:
+        case.doCleanups()
+
 
 class RateLimits(ProgramCase):
     def api_failure(self, error):

@@ -23,7 +23,7 @@ change, so ignore keys you don't know.
 | `clear` | 0 | Every check ran and nothing needs attention. |
 | `noUpdate` | 0 | The release is already installed. Nothing was compared. |
 | `attention` | 1 | Something needs attention, that you haven't reviewed. |
-| `failed` | 2 | No verdict: bad usage, a failed download, an unusable tree or a crash. |
+| `failed` | 2 | No verdict: bad usage, a failed download, an unusable tree, a release too slow to read, or a crash. |
 | `incomplete` | 3 | Nothing needs attention, but at least one check couldn't run in full. |
 
 `attention` can come with checks that didn't run in full. Their states say so.

@@ -236,7 +236,7 @@ none.
 | --- | --- |
 | 0 | Every check ran and nothing needs attention, or there is no update |
 | 1 | Something needs attention, that you haven't reviewed |
-| 2 | No verdict: bad usage, a failed download, an unusable tree or a crash |
+| 2 | No verdict: bad usage, a failed download, an unusable tree, a release too slow to read, or a crash |
 | 3 | Nothing needs attention, but at least one check couldn't run |
 
 Exit 3 names the checks that didn't run, and those that ran in part. A failure
@@ -278,7 +278,9 @@ With `--json`, every exit code comes with a document. See [docs/json.md](docs/js
   defaults over 256 KiB. A word that could be more than 64 paths, a variable set to
   more than 64 values, or a value longer than any path, is only known when it runs.
   A binding call that never closes is a computed key. Notes over 256 KiB give no
-  reasons.
+  reasons. If reading a release still takes more than 2 minutes of CPU time, the
+  run stops with exit 2 and says so, and nothing is compared. A real release takes
+  about 3 seconds.
 - Your files are read as text. A command called from a binary isn't seen. A file
   that can't be read, or a text file over 10 MiB, is reported as a limit. A broken
   link counts, so remove the ones you don't need.
