@@ -19,7 +19,7 @@ later are in [BACKLOG.md](BACKLOG.md).
   `main` as it is, so a push reaches users before the marketplace verifies it, and
   moves `main` off the SHA in review. 039's update request
   ([issue 14152](https://github.com/omacom/omarchy-plugin-marketplace/issues/14152))
-  asks for the commit tagged `v0.3.4`, `53b607dd7ab1d760da375f0c17d1a17ebf8a062a`,
+  asks for the commit tagged `v0.3.5`, `d3d10c02e1712ad98006f56092637700e79ff1aa`,
   which the issue names in full. Commits wait
   on `main` here until it is verified.
 - **Fixtures are fictional.** No real paths, hostnames or personal config in the

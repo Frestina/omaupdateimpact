@@ -77,6 +77,9 @@ and get the marketplace to verify it.
   behind 044: the maintainer's fourth finding came on 0.3.4 itself, so the request
   can't be verified until 044's release answers it.
 
+- 044 bounded `NAMES_REMOVAL`, and 0.3.5 is the release and the SHA in review;
+  14152 answers the finding there. The boxes below name 0.3.5.
+
 ## Not in this ticket
 
 - Any change to the command or the plugin. Something found here goes to the
@@ -84,17 +87,17 @@ and get the marketplace to verify it.
 
 ## Done when
 
-- [x] `--version` and `manifest.json` say 0.3.4, and the changelog dates 0.3.0
-      through 0.3.4.
+- [x] `--version` and `manifest.json` say 0.3.5, and the changelog dates 0.3.0
+      through 0.3.5.
 - [x] `preview.png` shows the new panel buttons, its first finding open and the
       rest closed, and no real data.
 - [x] The scan of the committed tree has no `FINDING`-level result, and no
       `remote-git-execution-unpinned`, which 0.2.0's tree did produce.
-- [x] The README's clone names `v0.3.4`.
-- [x] `v0.3.0` to `v0.3.4` and their GitHub releases exist, `v0.3.4` on the commit
+- [x] The README's clone names `v0.3.5`.
+- [x] `v0.3.0` to `v0.3.5` and their GitHub releases exist, `v0.3.5` on the commit
       pushed to `main`.
 - [x] CI passed on that push.
 - [ ] The owner confirmed the update request, and the marketplace verified the new
       SHA.
-- [ ] `omarchy plugin add` on a clean machine installs `v0.3.4`'s `main`.
+- [ ] `omarchy plugin add` on a clean machine installs `v0.3.5`'s `main`.
 - [x] `tests/run` passes.
