@@ -2914,7 +2914,7 @@ def check_members(tar, counted):
     A sparse member can state more than the stream holds, and its map can write past the
     size it states, so it counts as the larger. A hard link can be written as a copy of its
     target, so it counts as the target's size too, or the largest file's, if the target
-    isn't found. A size below zero counts as zero.
+    isn't found. A size below zero makes the archive broken.
     """
     stated, sizes, largest, records, count = 0, {}, 0, 0, 0
     while True:
@@ -2922,6 +2922,10 @@ def check_members(tar, counted):
         member = tar.next()
         if member is None:
             return
+        # A tarfile from before Python 3.11.12 reads the next header from further back, and
+        # can go round and round, so this stops before the next one is read.
+        if member.size < 0:
+            raise tarfile.ReadError("a member of the archive states a size below zero")
         count += 1
         if count > MOST_MEMBERS:
             raise TooLarge(f"its archive holds more than {MOST_MEMBERS:,} files, folders and links, so nothing was unpacked.")

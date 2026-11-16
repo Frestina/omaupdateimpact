@@ -4728,13 +4728,85 @@ class DownloadLimits(ProgramCase):
         self.limits(unpacked=4 << 20)
         self.assert_too_large(self.get(self.crafted(add)), "its files state more than 4 MiB")
 
-    def test_a_size_below_zero_takes_nothing_off(self):
+    def test_a_size_below_zero_is_a_broken_archive(self):
         def add(tar):
             info = tarfile.TarInfo("omarchy-1.2.3/less")
             info.type, info.pax_headers = tarfile.DIRTYPE, {"size": str(-(64 << 20))}
             tar.addfile(info)
-        self.limits(unpacked=4 << 20)
-        self.assert_too_large(self.get(self.crafted(add, self.sparse(8 << 20))), "its files state more than 4 MiB")
+        self.assert_below_zero(self.get(self.crafted(add)))
+
+    def assert_below_zero(self, result):
+        self.assert_download_failed(result)
+        self.assertEqual(result[2], "Couldn't download the release: a member of the archive states a size below zero\n")
+
+    def backwards(self, first=False):
+        """A release with a member x whose size, below zero, points back at an earlier header.
+
+        A tarfile from before Python 3.11.12 then reads a, b and x again, and again. With
+        first, x is the archive's first member, which tarfile.open reads, and points at itself.
+        """
+        tarred = io.BytesIO()
+        with tarfile.open(fileobj=tarred, mode="w", format=tarfile.USTAR_FORMAT) as tar:
+            starts = {}
+
+            def add(name, length=0):
+                starts[name] = tar.offset
+                info = tarfile.TarInfo(f"omarchy-1.2.3/{name}")
+                info.size = length
+                tar.addfile(info, io.BytesIO(bytes(length)))
+            if first:
+                add("x")
+            tar.add(self.base / "target", arcname="omarchy-1.2.3")
+            if not first:
+                add("a")
+                add("b", 4096)
+                add("x")
+        data = bytearray(tarred.getvalue())
+        at = starts["x"]
+        back = (at if first else starts["a"]) - (at + tarfile.BLOCKSIZE)
+        data[at + 124:at + 136] = b"\xff" + (back % (1 << 88)).to_bytes(11, "big")
+        data[at + 148:at + 156] = b" " * 8
+        data[at + 148:at + 156] = b"%06o\0 " % sum(data[at:at + tarfile.BLOCKSIZE])
+        # An older tarfile reads x, and would go on round. This stops at x.
+        with self.older_block(), tarfile.open(fileobj=io.BytesIO(bytes(data))) as tar:
+            x = next(member for member in tar if member.name == "omarchy-1.2.3/x")
+            self.assertEqual(x.size, back)
+        return gzip.compress(bytes(data))
+
+    def older_block(self):
+        """tarfile's _block from before gh-130577, which took a size below zero."""
+
+        def block(info, count):
+            blocks, remainder = divmod(count, tarfile.BLOCKSIZE)
+            return (blocks + bool(remainder)) * tarfile.BLOCKSIZE
+        return mock.patch.object(impact.tarfile.TarInfo, "_block", block)
+
+    def deadline(self, seconds):
+        """Fails the test, instead of hanging it, if the run never ends."""
+
+        def stop(*_):
+            raise Deadline("the run went round and round")
+        previous = signal.signal(signal.SIGALRM, stop)
+        self.addCleanup(signal.signal, signal.SIGALRM, previous)
+        signal.alarm(seconds)
+        self.addCleanup(signal.alarm, 0)
+
+    def test_a_size_back_to_an_earlier_header_stops_at_once(self):
+        self.deadline(30)
+        self.limits(headers=256 << 10)
+        data = self.backwards()
+        with self.older_block():
+            self.assert_below_zero(self.get(data))
+            code, out, _ = self.get(data, "--json")
+        self.assertEqual(code, 2)
+        self.assertFalse(json.loads(out)["unreachable"])
+
+    def test_a_first_member_below_zero_stops_too(self):
+        # tarfile.open reads the first member, before check_members.
+        self.deadline(30)
+        self.limits(headers=256 << 10)
+        with self.older_block():
+            self.assert_below_zero(self.get(self.backwards(first=True)))
 
     def test_members_at_the_limit_are_read(self):
         data = self.archive()

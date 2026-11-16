@@ -54,6 +54,15 @@ depend on finding each path.
   keeps come to at most 100,000 in all, counted after each member is read.
   Measure what v4.5.0's and v4.5.0-rc3's come to. The spec also says the header
   limit ends a plain archive near 32,000 members, before the member limit.
+- Review follow-ups, third round: a size below zero counted as zero, and reading
+  went on. On a `tarfile` from before CPython's negative-offset fix (3.11.12,
+  3.12.10, 3.13.3), the next header is then read from further back, and a size
+  that points at an earlier header loops. Each jump past gzip's buffer rewinds
+  the stream, before the 2-minute budget starts. With the old check simulated on
+  3.14, a 2.3 MB archive took 30 s of CPU for 82 KB of the header limit, about
+  100 minutes in all. The owner chose to refuse it here: a member whose size is
+  below zero makes the archive broken, a failed download with exit 2, before the
+  next header is read.
 - Real releases sit far under these. v4.5.0's archive is 172 MiB, its tar stream
   201 MiB, and it has 5,680 entries. v4.5.0-rc3's are about the same. Measure
   them again on a fresh download, and correct the spec's numbers if they differ.
@@ -120,6 +129,9 @@ depend on finding each path.
       the full-disk ones, hold what already worked.
 - [x] Real runs on v4.5.0 and v4.5.0-rc3, downloaded fresh, give the same
       results as before, and the spec's sizes match what was measured.
+- [x] A member whose size is below zero stops the run as a failed download,
+      before the next header is read, tested with the old `tarfile` check
+      simulated, and the test fails without the fix.
 - [ ] `v0.3.7` and its GitHub release exist on the commit at the top of `main`
       on GitHub, and CI passed on it.
 - [ ] The owner confirmed the edit and the reply, 14152 targets 0.3.7's SHA, and

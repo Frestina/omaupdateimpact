@@ -169,7 +169,10 @@ The stream is read whole first, which also checks gzip's checksum. Then every
 header is read, before anything is unpacked. A sparse member counts as its stated
 size or as far as its map writes, whichever is larger. A hard link counts as its
 target's size too, as tarfile writes a copy when it can't link, and as the largest
-file's if its target isn't found. A size below zero counts as zero.
+file's if its target isn't found. A member whose size is below zero makes the
+archive broken, a failed download, before the next header is read: a `tarfile`
+from before Python 3.11.12 would go back to an earlier header and read the
+archive again from the start, over and over.
 
 v4.5.0's archive is 172 MiB, its tar stream 201 MiB, and it has 5,680 members,
 whose headers come to 2.8 MiB, at most 1.5 KiB for one member, and hold 5,681 PAX
