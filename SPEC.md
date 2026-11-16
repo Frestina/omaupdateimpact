@@ -147,7 +147,7 @@ doesn't send the archive's size, so the count is all there is to show. Off a
 terminal the download is silent.
 
 A release could be crafted to fill the disk or the memory, and the plugin downloads
-it on its own. So a download has four limits, each checked while the archive is
+it on its own. So a download has five limits, each checked while the archive is
 read:
 
 - at most 1 GiB of archive
@@ -158,7 +158,12 @@ read:
 - at most 16 MiB of headers in all, as `tarfile` reads them before anything is
   unpacked: the plain headers, and the names, links, PAX records and sparse maps
   too long for one. `tarfile` reads each of those whole into memory, so a header
-  longer than what is left of the 16 MiB is never read
+  longer than what is left of the 16 MiB is never read. One member's headers may
+  take at most 1 MiB of it.
+- at most 100,000 PAX records and sparse map entries in all, counted as `tarfile`
+  keeps them. It keeps each as a Python object far larger than its text, and
+  copies a global PAX header into every member after it, so 16 MiB of headers
+  could still take gigabytes
 
 The stream is read whole first, which also checks gzip's checksum. Then every
 header is read, before anything is unpacked. A sparse member counts as its stated
@@ -167,7 +172,10 @@ target's size too, as tarfile writes a copy when it can't link, and as the large
 file's if its target isn't found. A size below zero counts as zero.
 
 v4.5.0's archive is 172 MiB, its tar stream 201 MiB, and it has 5,680 members,
-whose headers come to 2.8 MiB.
+whose headers come to 2.8 MiB, at most 1.5 KiB for one member, and hold 5,681 PAX
+records and no sparse entries: git's global comment, copied into every member. The header limit ends a plain archive near 32,000
+members, before the member limit. The member limit stays, so the count is bounded
+whatever the header limit becomes.
 Past a limit nothing is unpacked into the cache and no folder for the tag is left.
 The run stops with exit 2 and says the release is too large to read, and which
 limit it passed, as in "The release is too large to read: its archive passed 1 GiB,

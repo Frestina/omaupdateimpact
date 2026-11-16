@@ -189,9 +189,9 @@ those need a tag.
 
 The release and its notes are downloaded to `~/.cache/omaupdateimpact`. Two releases
 stay there and older ones are removed. A download is at most 1 GiB, and unpacks to
-at most 2 GiB and 100,000 files, folders and links, with at most 16 MiB of tar
-headers. Past that nothing is kept, and the run stops with exit 2 and says which
-limit the release passed. Without the
+at most 2 GiB and 100,000 files, folders and links. Its tar headers take at most
+16 MiB, 1 MiB for one file, and hold at most 100,000 records. Past that nothing is
+kept, and the run stops with exit 2 and says which limit the release passed. Without the
 notes, as when you are offline with a release already there, findings just don't
 say why. If GitHub's rate limit gets in the way, set `GITHUB_TOKEN`.
 Colour shows on a terminal only, and `NO_COLOR` turns it off.

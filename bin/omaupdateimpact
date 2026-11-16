@@ -141,8 +141,14 @@ LARGEST_ARCHIVE = 1 << 30
 LARGEST_UNPACKED = 2 << 30
 MOST_MEMBERS = 100_000
 # tarfile reads a long name, link, PAX record or sparse map whole into memory, so the
-# headers are counted as they are read, and one past what is left is never read.
+# headers are counted as they are read, and one past what is left is never read. One
+# member's headers, with the global ones read along with it, may take LARGEST_MEMBER_HEADERS.
 LARGEST_HEADERS = 16 << 20
+LARGEST_MEMBER_HEADERS = 1 << 20
+# tarfile keeps each PAX record and sparse entry as Python objects far larger than their
+# text, and copies a global PAX header into every member after it. v4.5.0 has 5,681,
+# git's global comment copied into each member, and at most 1.5 KiB of headers for one.
+MOST_RECORDS = 100_000
 # How long a run waits for another to finish with the cache, and how often it looks, in seconds.
 CACHE_WAIT = 15 * 60
 CACHE_POLL = 0.2
@@ -2898,16 +2904,25 @@ def check_stream(archive):
                 raise TooLarge(f"its archive unpacks to more than {size(LARGEST_UNPACKED)}, so nothing was unpacked.")
 
 
-def check_members(tar):
+def check_members(tar, counted):
     """Read every member's header, up to MOST_MEMBERS and the sizes they state up to LARGEST_UNPACKED.
+
+    counted is the stream tarfile reads, whose window opens again for each member. The PAX
+    records and sparse entries tarfile keeps count up to MOST_RECORDS: each member's, which
+    hold any global header's too, and the global ones once more.
 
     A sparse member can state more than the stream holds, and its map can write past the
     size it states, so it counts as the larger. A hard link can be written as a copy of its
     target, so it counts as the target's size too, or the largest file's, if the target
     isn't found. A size below zero counts as zero.
     """
-    stated, sizes, largest = 0, {}, 0
-    for count, member in enumerate(tar, 1):
+    stated, sizes, largest, records, count = 0, {}, 0, 0, 0
+    while True:
+        counted.window = LARGEST_MEMBER_HEADERS
+        member = tar.next()
+        if member is None:
+            return
+        count += 1
         if count > MOST_MEMBERS:
             raise TooLarge(f"its archive holds more than {MOST_MEMBERS:,} files, folders and links, so nothing was unpacked.")
         extent = max(0, member.size, *(offset + length for offset, length in member.sparse or ()))
@@ -2920,27 +2935,38 @@ def check_members(tar):
             largest = max(largest, extent)
         if stated > LARGEST_UNPACKED:
             raise TooLarge(f"its files state more than {size(LARGEST_UNPACKED)}, so nothing was unpacked.")
+        records += len(member.pax_headers) + len(member.sparse or ())
+        if records + len(tar.pax_headers) > MOST_RECORDS:
+            raise TooLarge(f"its archive's headers hold more than {MOST_RECORDS:,} records, so nothing was unpacked.")
 
 
 def link_key(name):
-    return os.path.normpath(name.lstrip("/"))
+    """A name as tarfile finds a link's target by it. The name itself when that is the same, so no copy is kept."""
+    normal = os.path.normpath(name.lstrip("/"))
+    return name if normal == name else normal
 
 
 class Counted:
-    """The tar stream as tarfile reads it, refusing a read past what is left of LARGEST_HEADERS.
+    """The tar stream as tarfile reads it, refusing a read past what is left of LARGEST_HEADERS,
+    or of the window of LARGEST_MEMBER_HEADERS that check_members opens for each member.
 
     The read is refused before it is made, so a header too long is never in memory. Skipping
     a member's data is a seek, which doesn't count. Once left is None, nothing is counted.
+    tarfile.open reads the first member, so the window is open from the start.
     """
 
     def __init__(self, stream):
-        self.stream, self.left = stream, LARGEST_HEADERS
+        self.stream, self.left, self.window = stream, LARGEST_HEADERS, LARGEST_MEMBER_HEADERS
 
     def read(self, count=-1):
         if self.left is not None:
             if count is None or count < 0 or count > self.left:
                 raise TooLarge(f"its archive's headers passed {size(LARGEST_HEADERS)}, so nothing was unpacked.")
+            if count > self.window:
+                one = size(LARGEST_MEMBER_HEADERS)
+                raise TooLarge(f"one of its archive's headers passed {one}, so nothing was unpacked.")
             self.left -= count
+            self.window -= count
         return self.stream.read(count)
 
     def seek(self, *args):
@@ -3031,7 +3057,7 @@ def download(tag, cache, root):
             counted = Counted(stream)
             with tarfile.open(fileobj=counted, mode="r:") as tar:
                 # Every header is read before anything is unpacked. Then the members' data is, which isn't counted.
-                check_members(tar)
+                check_members(tar, counted)
                 counted.left = None
                 tar.extractall(scratch, filter="data")
         unpacked = next((p for p in Path(scratch).iterdir() if p.is_dir()), None)

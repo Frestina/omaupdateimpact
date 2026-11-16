@@ -45,6 +45,15 @@ depend on finding each path.
   read before anything is unpacked, and a header longer than what is left is
   never read. Measure what v4.5.0's and v4.5.0-rc3's headers come to, and put
   v4.5.0's in the spec with its other sizes.
+- Review follow-ups, second round: 16 MiB of headers that fit still expand in
+  `tarfile`, as each PAX record and sparse entry is a Python object, and a
+  global PAX header is copied into every member after it. A 93 KB archive with
+  a global header of 20,000 empty keys and 6,000 folders used 3.3 MiB of
+  headers and peaked at 2.4 GiB, growing with the members. So one member's
+  headers take at most 1 MiB, and the PAX records and sparse entries tarfile
+  keeps come to at most 100,000 in all, counted after each member is read.
+  Measure what v4.5.0's and v4.5.0-rc3's come to. The spec also says the header
+  limit ends a plain archive near 32,000 members, before the member limit.
 - Real releases sit far under these. v4.5.0's archive is 172 MiB, its tar stream
   201 MiB, and it has 5,680 entries. v4.5.0-rc3's are about the same. Measure
   them again on a fresh download, and correct the spec's numbers if they differ.
@@ -96,10 +105,14 @@ depend on finding each path.
       is gone.
 - [x] A file system that fills up mid-unpack gives exit 2 and leaves no half
       release.
-- [ ] An archive whose headers pass 16 MiB in all is not unpacked, and gives
-      the same, and the run's memory stays near 16 MiB above what it uses
-      without them: tested with one long PAX record, one long GNU name, and many
-      headers that each fit.
+- [x] An archive whose headers pass 16 MiB in all, or 1 MiB for one member,
+      or whose PAX records and sparse entries pass 100,000, is not unpacked,
+      and gives the same.
+- [x] The run's memory stays within 64 MiB of what it uses without them, tested
+      with one long PAX record, one long GNU name, one PAX header of many keys,
+      a global PAX header of many keys over many members, and a sparse map of
+      many entries, in both ways tarfile reads.
+- [x] The spec gives what v4.5.0's PAX records and sparse entries come to.
 - [x] The spec gives v4.5.0's header total with its other sizes.
 - [x] `--ack` and `--unack` past a limit write nothing.
 - [x] The plugin shows such a document as "couldn't check" with the reason.

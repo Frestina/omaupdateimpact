@@ -4557,6 +4557,28 @@ class Endless(io.RawIOBase):
         return count
 
 
+def pax_record(key, value):
+    """One PAX record, whose length counts its own digits."""
+    body = f" {key}={value}\n"
+    length = len(body) + 1
+    while len(str(length)) + len(body) != length:
+        length += 1
+    return f"{length}{body}".encode()
+
+
+def extended(kind, records, name="././@PaxHeader"):
+    """An extended header block of this kind, holding records."""
+    info = tarfile.TarInfo(name)
+    info.type, info.size = kind, len(records)
+    return info.tobuf(tarfile.USTAR_FORMAT) + records + bytes(-len(records) % tarfile.BLOCKSIZE)
+
+
+def empty_folder(name):
+    info = tarfile.TarInfo(name)
+    info.type = tarfile.DIRTYPE
+    return info.tobuf(tarfile.USTAR_FORMAT)
+
+
 class DownloadLimits(ProgramCase):
     """A release's download and unpacking are bounded, each limit checked as the archive is read. See 046."""
 
@@ -4565,11 +4587,11 @@ class DownloadLimits(ProgramCase):
         self.real = impact.LARGEST_ARCHIVE, impact.LARGEST_UNPACKED, impact.MOST_MEMBERS
         (self.base / "target/migrations/1.sh").write_text("omarchy-pkg-drop a\n")
 
-    def limits(self, archive=None, unpacked=None, members=None, headers=None):
-        """Lower the limits for the rest of the test."""
+    def limits(self, archive=None, unpacked=None, members=None, headers=None, member_headers=None, records=None):
+        """Change the limits for the rest of the test."""
         lowered = (
             ("LARGEST_ARCHIVE", archive), ("LARGEST_UNPACKED", unpacked), ("MOST_MEMBERS", members),
-            ("LARGEST_HEADERS", headers),
+            ("LARGEST_HEADERS", headers), ("LARGEST_MEMBER_HEADERS", member_headers), ("MOST_RECORDS", records),
         )
         for name, value in lowered:
             if value is not None:
@@ -4759,7 +4781,7 @@ class DownloadLimits(ProgramCase):
         with mock.patch.object(impact, "LARGEST_HEADERS", 1 << 30), gzip.open(io.BytesIO(data)) as stream:
             counted = impact.Counted(stream)
             with tarfile.open(fileobj=counted, mode="r:") as tar:
-                impact.check_members(tar)
+                impact.check_members(tar, counted)
             return impact.LARGEST_HEADERS - counted.left
 
     def long_pax(self, length):
@@ -4777,12 +4799,12 @@ class DownloadLimits(ProgramCase):
             tar.addfile(tarfile.TarInfo("omarchy-1.2.3/" + "x" * length), io.BytesIO())
         return gzip.compress(tarred.getvalue())
 
-    def assert_bounded(self, data):
-        """A header past the limit is never read: memory stays far under its length.
+    def assert_bounded(self, data, passed="its archive's headers passed 256 KiB", **limits):
+        """Past a limit, memory stays far under what the headers would take.
 
         A newer tarfile reads a long header in chunks, and an older one, from 3.11.4, in one read.
         """
-        self.limits(headers=256 << 10)
+        self.limits(**(limits or {"headers": 256 << 10}))
         whole = mock.patch.object(impact.tarfile, "_safe_read", lambda stream, count: stream.read(count), create=True)
         for older in (False, True):
             with self.subTest(older=older), whole if older else contextlib.nullcontext():
@@ -4793,7 +4815,7 @@ class DownloadLimits(ProgramCase):
                     peak = tracemalloc.get_traced_memory()[1]
                 finally:
                     tracemalloc.stop()
-                self.assert_too_large(result, "its archive's headers passed 256 KiB")
+                self.assert_too_large(result, passed)
                 self.assertLess(peak, 8 << 20)
 
     def test_the_header_limit(self):
@@ -4825,6 +4847,122 @@ class DownloadLimits(ProgramCase):
         limit = self.headers(data) - 1
         self.limits(headers=limit)
         self.assert_too_large(self.get(data), f"its archive's headers passed {limit:,} bytes")
+
+    def raw(self, data):
+        """Blocks written into the tar as they are. tarfile writes many PAX records slowly."""
+
+        def add(tar):
+            tar.fileobj.write(data)
+            tar.offset += len(data)
+        return add
+
+    def keys(self, count, prefix="k"):
+        """count PAX records of distinct keys."""
+        return b"".join(pax_record(f"{prefix}{number}", "") for number in range(count))
+
+    def window(self, data):
+        """The most one member's headers take in data, as the run counts them."""
+        with mock.patch.object(impact, "LARGEST_MEMBER_HEADERS", 1 << 30), gzip.open(io.BytesIO(data)) as stream:
+            counted = impact.Counted(stream)
+            with tarfile.open(fileobj=counted, mode="r:") as tar:
+                most = impact.LARGEST_MEMBER_HEADERS - counted.window
+                while True:
+                    counted.window = impact.LARGEST_MEMBER_HEADERS
+                    member = tar.next()
+                    most = max(most, impact.LARGEST_MEMBER_HEADERS - counted.window)
+                    if member is None:
+                        return most
+
+    def records(self, data):
+        """The PAX records and sparse entries tarfile keeps for data."""
+        with tarfile.open(fileobj=io.BytesIO(data)) as tar:
+            return sum(len(member.pax_headers) + len(member.sparse or ()) for member in tar) + len(tar.pax_headers)
+
+    def global_keys(self, keys, folders):
+        """A global PAX header of keys distinct keys, then folders folders."""
+        def add(tar):
+            for number in range(folders):
+                folder = tarfile.TarInfo(f"omarchy-1.2.3/folder{number}")
+                folder.type = tarfile.DIRTYPE
+                tar.addfile(folder)
+        return [self.raw(extended(tarfile.XGLTYPE, self.keys(keys), "pax_global_header")), add]
+
+    def sparse_map(self, pairs):
+        def add(tar):
+            info = tarfile.TarInfo("omarchy-1.2.3/sparse")
+            info.size = 4
+            info.pax_headers = {"GNU.sparse.map": ",".join(["0,0"] * pairs) + ",0,4", "GNU.sparse.size": "4"}
+            tar.addfile(info, io.BytesIO(b"data"))
+        return add
+
+    def test_the_limits_on_what_headers_hold(self):
+        self.assertEqual((impact.LARGEST_MEMBER_HEADERS, impact.MOST_RECORDS), (1 << 20, 100_000))
+        self.assertEqual(impact.size(impact.LARGEST_MEMBER_HEADERS), "1 MiB")
+
+    def test_one_members_headers_past_the_window_arent_read(self):
+        data = self.crafted(self.long_pax(128 << 10))
+        self.limits(member_headers=64 << 10)
+        self.assert_too_large(self.get(data), "one of its archive's headers passed 64 KiB")
+
+    def test_one_members_headers_at_the_window_are_read(self):
+        data = self.crafted(self.long_pax(128 << 10))
+        self.assertGreater(self.window(data), 128 << 10)
+        self.limits(member_headers=self.window(data))
+        self.assert_fine(self.get(data))
+
+    def test_one_byte_past_the_window_isnt(self):
+        data = self.crafted(self.long_pax(128 << 10))
+        limit = self.window(data) - 1
+        self.limits(member_headers=limit)
+        self.assert_too_large(self.get(data), f"one of its archive's headers passed {limit:,} bytes")
+
+    def test_the_window_opens_again_for_each_member(self):
+        # Ten members of 40 KiB each, under a window of 64 KiB.
+        data = self.crafted(*(self.long_pax(40 << 10) for _ in range(10)))
+        self.limits(member_headers=64 << 10)
+        self.assert_fine(self.get(data))
+
+    def test_a_global_header_counts_in_every_member_after_it(self):
+        data = self.crafted(*self.global_keys(50, 30))
+        self.assertLess(self.window(data), 64 << 10)
+        self.limits(records=1000)
+        self.assert_too_large(self.get(data), "its archive's headers hold more than 1,000 records")
+
+    def test_records_in_one_header_count(self):
+        data = self.crafted(self.raw(extended(tarfile.XHDTYPE, self.keys(1001)) + empty_folder("omarchy-1.2.3/keyed")))
+        self.limits(records=1000)
+        self.assert_too_large(self.get(data), "its archive's headers hold more than 1,000 records")
+
+    def test_entries_in_a_sparse_map_count(self):
+        data = self.crafted(self.sparse_map(1000))
+        self.limits(records=1000)
+        self.assert_too_large(self.get(data), "its archive's headers hold more than 1,000 records")
+
+    def test_records_at_the_limit_are_read(self):
+        data = self.crafted(*self.global_keys(20, 10), self.sparse_map(100))
+        self.limits(records=self.records(data))
+        self.assert_fine(self.get(data))
+
+    def test_one_record_past_the_limit_isnt(self):
+        data = self.crafted(*self.global_keys(20, 10), self.sparse_map(100))
+        limit = self.records(data) - 1
+        self.limits(records=limit)
+        self.assert_too_large(self.get(data), f"its archive's headers hold more than {limit:,} records")
+
+    def test_a_global_header_over_many_members_stays_small(self):
+        # Unbounded, 1,000 keys copied into 1,000 members take tens of MiB.
+        data = self.crafted(*self.global_keys(1000, 1000))
+        self.assert_bounded(data, "its archive's headers hold more than 2,000 records", records=2000)
+
+    def test_one_header_of_many_keys_stays_small(self):
+        data = self.crafted(self.raw(extended(tarfile.XHDTYPE, self.keys(150_000)) + empty_folder("omarchy-1.2.3/keyed")))
+        self.assertGreater(self.window(data), 1 << 20)
+        self.assert_bounded(data, "one of its archive's headers passed 64 KiB", member_headers=64 << 10)
+
+    def test_a_sparse_map_of_many_entries_stays_small(self):
+        data = self.crafted(self.sparse_map(300_000))
+        self.assertGreater(self.window(data), 1 << 20)
+        self.assert_bounded(data, "one of its archive's headers passed 64 KiB", member_headers=64 << 10)
 
     def test_member_data_doesnt_count_as_headers(self):
         def add(tar):
