@@ -4565,9 +4565,13 @@ class DownloadLimits(ProgramCase):
         self.real = impact.LARGEST_ARCHIVE, impact.LARGEST_UNPACKED, impact.MOST_MEMBERS
         (self.base / "target/migrations/1.sh").write_text("omarchy-pkg-drop a\n")
 
-    def limits(self, archive=None, unpacked=None, members=None):
+    def limits(self, archive=None, unpacked=None, members=None, headers=None):
         """Lower the limits for the rest of the test."""
-        for name, value in (("LARGEST_ARCHIVE", archive), ("LARGEST_UNPACKED", unpacked), ("MOST_MEMBERS", members)):
+        lowered = (
+            ("LARGEST_ARCHIVE", archive), ("LARGEST_UNPACKED", unpacked), ("MOST_MEMBERS", members),
+            ("LARGEST_HEADERS", headers),
+        )
+        for name, value in lowered:
             if value is not None:
                 self.enterContext(mock.patch.object(impact, name, value))
 
@@ -4749,6 +4753,89 @@ class DownloadLimits(ProgramCase):
         self.limits(members=1)
         self.assertEqual(self.get(self.archive())[0], 2)
         self.assertEqual(sorted(path.name for path in (self.cache / "omaupdateimpact").iterdir()), ["v1.0.0", "v1.1.0"])
+
+    def headers(self, data):
+        """How many bytes of headers tarfile reads in data, as the run counts them."""
+        with mock.patch.object(impact, "LARGEST_HEADERS", 1 << 30), gzip.open(io.BytesIO(data)) as stream:
+            counted = impact.Counted(stream)
+            with tarfile.open(fileobj=counted, mode="r:") as tar:
+                impact.check_members(tar)
+            return impact.LARGEST_HEADERS - counted.left
+
+    def long_pax(self, length):
+        def add(tar):
+            info = tarfile.TarInfo("omarchy-1.2.3/commented")
+            info.pax_headers = {"comment": "x" * length}
+            tar.addfile(info, io.BytesIO())
+        return add
+
+    def long_gnu_name(self, length):
+        """A GNU tar of the release, and a member whose name is length long."""
+        tarred = io.BytesIO()
+        with tarfile.open(fileobj=tarred, mode="w", format=tarfile.GNU_FORMAT) as tar:
+            tar.add(self.base / "target", arcname="omarchy-1.2.3")
+            tar.addfile(tarfile.TarInfo("omarchy-1.2.3/" + "x" * length), io.BytesIO())
+        return gzip.compress(tarred.getvalue())
+
+    def assert_bounded(self, data):
+        """A header past the limit is never read: memory stays far under its length.
+
+        A newer tarfile reads a long header in chunks, and an older one, from 3.11.4, in one read.
+        """
+        self.limits(headers=256 << 10)
+        whole = mock.patch.object(impact.tarfile, "_safe_read", lambda stream, count: stream.read(count), create=True)
+        for older in (False, True):
+            with self.subTest(older=older), whole if older else contextlib.nullcontext():
+                shutil.rmtree(self.cache, ignore_errors=True)
+                tracemalloc.start()
+                try:
+                    result = self.get(data)
+                    peak = tracemalloc.get_traced_memory()[1]
+                finally:
+                    tracemalloc.stop()
+                self.assert_too_large(result, "its archive's headers passed 256 KiB")
+                self.assertLess(peak, 8 << 20)
+
+    def test_the_header_limit(self):
+        self.assertEqual(impact.LARGEST_HEADERS, 16 << 20)
+        self.assertEqual(impact.size(impact.LARGEST_HEADERS), "16 MiB")
+
+    def test_one_long_pax_record_is_never_read(self):
+        data = self.crafted(self.long_pax(32 << 20))
+        self.assertLess(len(data), 1 << 20)
+        self.assert_bounded(data)
+
+    def test_one_long_gnu_name_is_never_read(self):
+        data = self.long_gnu_name(32 << 20)
+        self.assertLess(len(data), 1 << 20)
+        self.assert_bounded(data)
+
+    def test_many_headers_that_each_fit_add_up(self):
+        data = self.crafted(*(self.long_pax(16 << 10) for _ in range(40)))
+        self.limits(headers=256 << 10)
+        self.assert_too_large(self.get(data), "its archive's headers passed 256 KiB")
+
+    def test_headers_at_the_limit_are_read(self):
+        data = self.crafted(self.long_pax(64 << 10))
+        self.limits(headers=self.headers(data))
+        self.assert_fine(self.get(data))
+
+    def test_headers_one_byte_past_the_limit_arent(self):
+        data = self.crafted(self.long_pax(64 << 10))
+        limit = self.headers(data) - 1
+        self.limits(headers=limit)
+        self.assert_too_large(self.get(data), f"its archive's headers passed {limit:,} bytes")
+
+    def test_member_data_doesnt_count_as_headers(self):
+        def add(tar):
+            info = tarfile.TarInfo("omarchy-1.2.3/large")
+            info.size = 4 << 20
+            tar.addfile(info, io.BytesIO(bytes(info.size)))
+        data = self.crafted(add)
+        self.assertLess(self.headers(data), 64 << 10)
+        self.limits(headers=64 << 10)
+        self.assert_fine(self.get(data))
+        self.assertEqual((self.cache / "omaupdateimpact/v1.2.3/large").stat().st_size, 4 << 20)
 
     def reviews(self):
         path = self.home / ".config/omaupdateimpact/reviewed"

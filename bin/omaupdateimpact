@@ -135,10 +135,14 @@ TOKEN = re.compile(r"[\x21-\x7e]+")
 KEPT_RELEASES = 2
 # What a download may take, each counted while the archive is read. A crafted release
 # could otherwise fill the disk, and the plugin downloads on its own. v4.5.0's archive
-# is 172 MiB, its tar stream 201 MiB, and it has 5,680 members. See Downloads in SPEC.md.
+# is 172 MiB, its tar stream 201 MiB, and it has 5,680 members, whose headers come to
+# 2.8 MiB. See Downloads in SPEC.md.
 LARGEST_ARCHIVE = 1 << 30
 LARGEST_UNPACKED = 2 << 30
 MOST_MEMBERS = 100_000
+# tarfile reads a long name, link, PAX record or sparse map whole into memory, so the
+# headers are counted as they are read, and one past what is left is never read.
+LARGEST_HEADERS = 16 << 20
 # How long a run waits for another to finish with the cache, and how often it looks, in seconds.
 CACHE_WAIT = 15 * 60
 CACHE_POLL = 0.2
@@ -2922,6 +2926,30 @@ def link_key(name):
     return os.path.normpath(name.lstrip("/"))
 
 
+class Counted:
+    """The tar stream as tarfile reads it, refusing a read past what is left of LARGEST_HEADERS.
+
+    The read is refused before it is made, so a header too long is never in memory. Skipping
+    a member's data is a seek, which doesn't count. Once left is None, nothing is counted.
+    """
+
+    def __init__(self, stream):
+        self.stream, self.left = stream, LARGEST_HEADERS
+
+    def read(self, count=-1):
+        if self.left is not None:
+            if count is None or count < 0 or count > self.left:
+                raise TooLarge(f"its archive's headers passed {size(LARGEST_HEADERS)}, so nothing was unpacked.")
+            self.left -= count
+        return self.stream.read(count)
+
+    def seek(self, *args):
+        return self.stream.seek(*args)
+
+    def tell(self):
+        return self.stream.tell()
+
+
 @contextlib.contextmanager
 def locked(path, how):
     """Hold a lock on a folder in the cache. The kernel lets go of it when the run ends, however it ends."""
@@ -2999,10 +3027,13 @@ def download(tag, cache, root):
         with heard_from_github(), github(url, 120) as response, archive.open("wb") as out:
             save(response, out, tag)
         check_stream(archive)
-        with tarfile.open(archive) as tar:
-            # Every header is read before anything is unpacked.
-            check_members(tar)
-            tar.extractall(scratch, filter="data")
+        with gzip.open(archive) as stream:
+            counted = Counted(stream)
+            with tarfile.open(fileobj=counted, mode="r:") as tar:
+                # Every header is read before anything is unpacked. Then the members' data is, which isn't counted.
+                check_members(tar)
+                counted.left = None
+                tar.extractall(scratch, filter="data")
         unpacked = next((p for p in Path(scratch).iterdir() if p.is_dir()), None)
         if unpacked is None:
             raise tarfile.ReadError("the archive holds no release")

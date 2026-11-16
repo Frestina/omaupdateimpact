@@ -37,8 +37,16 @@ depend on finding each path.
     a sparse member can state more than the stream holds.
   - **The members:** at most 100,000 entries of any kind: files, folders and
     links.
+- Review follow-ups, from the 2026-11-16 handoff: `tarfile` reads each PAX
+  record, GNU long name or link, and sparse map whole into memory, and none of
+  the three limits stops that below 2 GiB. A 1.8 MB archive with one 400 MiB PAX
+  header passed them all at 2 GiB of RAM, and a GNU long name at 2.8 GiB. The
+  owner chose a fourth limit in this ticket: at most 16 MiB of headers in all,
+  read before anything is unpacked, and a header longer than what is left is
+  never read. Measure what v4.5.0's and v4.5.0-rc3's headers come to, and put
+  v4.5.0's in the spec with its other sizes.
 - Real releases sit far under these. v4.5.0's archive is 172 MiB, its tar stream
-  201 MiB, and it has 5,681 entries. v4.5.0-rc3's are about the same. Measure
+  201 MiB, and it has 5,680 entries. v4.5.0-rc3's are about the same. Measure
   them again on a fresh download, and correct the spec's numbers if they differ.
 - Past any limit, nothing is unpacked into the cache. The scratch folder goes
   away as it already does, and no folder for the tag is left, so nothing passes
@@ -88,9 +96,15 @@ depend on finding each path.
       is gone.
 - [x] A file system that fills up mid-unpack gives exit 2 and leaves no half
       release.
+- [ ] An archive whose headers pass 16 MiB in all is not unpacked, and gives
+      the same, and the run's memory stays near 16 MiB above what it uses
+      without them: tested with one long PAX record, one long GNU name, and many
+      headers that each fit.
+- [x] The spec gives v4.5.0's header total with its other sizes.
 - [x] `--ack` and `--unack` past a limit write nothing.
 - [x] The plugin shows such a document as "couldn't check" with the reason.
-- [x] Each new test fails without the fix.
+- [x] Each test past a limit fails without the fix. The ones at a limit, and
+      the full-disk ones, hold what already worked.
 - [x] Real runs on v4.5.0 and v4.5.0-rc3, downloaded fresh, give the same
       results as before, and the spec's sizes match what was measured.
 - [ ] `v0.3.7` and its GitHub release exist on the commit at the top of `main`

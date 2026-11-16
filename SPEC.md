@@ -146,14 +146,19 @@ On a terminal, stderr says what is downloading and counts the megabytes. GitHub
 doesn't send the archive's size, so the count is all there is to show. Off a
 terminal the download is silent.
 
-A release could be crafted to fill the disk, and the plugin downloads it on its
-own. So a download has three limits, each checked while the archive is read:
+A release could be crafted to fill the disk or the memory, and the plugin downloads
+it on its own. So a download has four limits, each checked while the archive is
+read:
 
 - at most 1 GiB of archive
 - at most 2 GiB unpacked, counted both as the decompressed tar stream and as the
   sizes the members' headers state, as a sparse member can state more than the
   stream holds
 - at most 100,000 members of any kind
+- at most 16 MiB of headers in all, as `tarfile` reads them before anything is
+  unpacked: the plain headers, and the names, links, PAX records and sparse maps
+  too long for one. `tarfile` reads each of those whole into memory, so a header
+  longer than what is left of the 16 MiB is never read
 
 The stream is read whole first, which also checks gzip's checksum. Then every
 header is read, before anything is unpacked. A sparse member counts as its stated
@@ -161,7 +166,8 @@ size or as far as its map writes, whichever is larger. A hard link counts as its
 target's size too, as tarfile writes a copy when it can't link, and as the largest
 file's if its target isn't found. A size below zero counts as zero.
 
-v4.5.0's archive is 172 MiB, its tar stream 201 MiB, and it has 5,680 members.
+v4.5.0's archive is 172 MiB, its tar stream 201 MiB, and it has 5,680 members,
+whose headers come to 2.8 MiB.
 Past a limit nothing is unpacked into the cache and no folder for the tag is left.
 The run stops with exit 2 and says the release is too large to read, and which
 limit it passed, as in "The release is too large to read: its archive passed 1 GiB,
