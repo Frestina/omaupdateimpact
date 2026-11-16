@@ -80,21 +80,21 @@ depend on finding each path.
 
 ## Done when
 
-- [ ] A download past 1 GiB stops while it is read, with exit 2 and a `failed`
+- [x] A download past 1 GiB stops while it is read, with exit 2 and a `failed`
       document that names the limit.
-- [ ] An archive whose stream or whose members' stated sizes pass 2 GiB, or
+- [x] An archive whose stream or whose members' stated sizes pass 2 GiB, or
       that holds more than 100,000 members, is not unpacked, and gives the same.
-- [ ] No folder for the tag is left after any of these, and the scratch folder
+- [x] No folder for the tag is left after any of these, and the scratch folder
       is gone.
-- [ ] A file system that fills up mid-unpack gives exit 2 and leaves no half
+- [x] A file system that fills up mid-unpack gives exit 2 and leaves no half
       release.
-- [ ] `--ack` and `--unack` past a limit write nothing.
-- [ ] The plugin shows such a document as "couldn't check" with the reason.
-- [ ] Each new test fails without the fix.
-- [ ] Real runs on v4.5.0 and v4.5.0-rc3, downloaded fresh, give the same
+- [x] `--ack` and `--unack` past a limit write nothing.
+- [x] The plugin shows such a document as "couldn't check" with the reason.
+- [x] Each new test fails without the fix.
+- [x] Real runs on v4.5.0 and v4.5.0-rc3, downloaded fresh, give the same
       results as before, and the spec's sizes match what was measured.
 - [ ] `v0.3.7` and its GitHub release exist on the commit at the top of `main`
       on GitHub, and CI passed on it.
 - [ ] The owner confirmed the edit and the reply, 14152 targets 0.3.7's SHA, and
       the marketplace's checks ran on it.
-- [ ] `tests/run` passes.
+- [x] `tests/run` passes.

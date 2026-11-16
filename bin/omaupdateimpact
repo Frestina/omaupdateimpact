@@ -133,6 +133,12 @@ VERSION = re.compile(r"(?:\d+:)?v?(\d+)\.(\d+)\.(\d+)(?:-?rc(\d+))?(?:-\d+)?")
 TAG = re.compile(r"v\d+\.\d+\.\d+(?:-rc\d+)?", re.ASCII)
 TOKEN = re.compile(r"[\x21-\x7e]+")
 KEPT_RELEASES = 2
+# What a download may take, each counted while the archive is read. A crafted release
+# could otherwise fill the disk, and the plugin downloads on its own. v4.5.0's archive
+# is 172 MiB, its tar stream 201 MiB, and it has 5,680 members. See Downloads in SPEC.md.
+LARGEST_ARCHIVE = 1 << 30
+LARGEST_UNPACKED = 2 << 30
+MOST_MEMBERS = 100_000
 # How long a run waits for another to finish with the cache, and how often it looks, in seconds.
 CACHE_WAIT = 15 * 60
 CACHE_POLL = 0.2
@@ -347,6 +353,13 @@ class TooSlow(BaseException):
     """Reading the release passed READ_BUDGET.
 
     A BaseException, so that no reader's except, which looks for its own errors, can keep it.
+    """
+
+
+class TooLarge(Exception):
+    """A download passed one of its limits, so nothing of it was unpacked into the cache.
+
+    Not a download error, so it isn't reported as a download that failed.
     """
 
 
@@ -2842,19 +2855,71 @@ def newer_releases(version):
 
 
 def save(response, out, tag):
-    """Write a download to out. On a terminal, count it: GitHub doesn't say the size up front."""
-    if not sys.stderr.isatty():
-        shutil.copyfileobj(response, out)
-        return
+    """Write a download to out, up to LARGEST_ARCHIVE. On a terminal, count it: GitHub doesn't say the size up front."""
+    shown = sys.stderr.isatty()
     done = 0
     try:
-        print(f"Downloading {tag}...", end="", file=sys.stderr, flush=True)
+        if shown:
+            print(f"Downloading {tag}...", end="", file=sys.stderr, flush=True)
         for chunk in iter(lambda: response.read(1 << 20), b""):
-            out.write(chunk)
             done += len(chunk)
-            print(f"\rDownloading {tag}: {done / (1 << 20):.0f} MB", end="", file=sys.stderr, flush=True)
+            if done > LARGEST_ARCHIVE:
+                raise TooLarge(f"its archive passed {size(LARGEST_ARCHIVE)}, so nothing was unpacked.")
+            out.write(chunk)
+            if shown:
+                print(f"\rDownloading {tag}: {done / (1 << 20):.0f} MB", end="", file=sys.stderr, flush=True)
     finally:
-        print(file=sys.stderr)
+        if shown:
+            print(file=sys.stderr)
+
+
+def size(number):
+    """A number of bytes to say, such as "2 GiB"."""
+    for unit, name in ((1 << 30, "GiB"), (1 << 20, "MiB"), (1 << 10, "KiB")):
+        if number >= unit and number % unit == 0:
+            return f"{number // unit:,} {name}"
+    return f"{number:,} byte{'' if number == 1 else 's'}"
+
+
+def check_stream(archive):
+    """Read the archive's tar stream whole, up to LARGEST_UNPACKED.
+
+    This also checks gzip's checksum: tarfile stops at the end-of-archive marker and never reaches it.
+    """
+    unpacked = 0
+    with gzip.open(archive) as stream:
+        for chunk in iter(lambda: stream.read(1 << 20), b""):
+            unpacked += len(chunk)
+            if unpacked > LARGEST_UNPACKED:
+                raise TooLarge(f"its archive unpacks to more than {size(LARGEST_UNPACKED)}, so nothing was unpacked.")
+
+
+def check_members(tar):
+    """Read every member's header, up to MOST_MEMBERS and the sizes they state up to LARGEST_UNPACKED.
+
+    A sparse member can state more than the stream holds, and its map can write past the
+    size it states, so it counts as the larger. A hard link can be written as a copy of its
+    target, so it counts as the target's size too, or the largest file's, if the target
+    isn't found. A size below zero counts as zero.
+    """
+    stated, sizes, largest = 0, {}, 0
+    for count, member in enumerate(tar, 1):
+        if count > MOST_MEMBERS:
+            raise TooLarge(f"its archive holds more than {MOST_MEMBERS:,} files, folders and links, so nothing was unpacked.")
+        extent = max(0, member.size, *(offset + length for offset, length in member.sparse or ()))
+        stated += extent
+        if member.islnk():
+            # tarfile looks for the target by its normalized name, among the members before it.
+            stated += sizes.get(link_key(member.linkname), largest)
+        else:
+            sizes[link_key(member.name)] = extent
+            largest = max(largest, extent)
+        if stated > LARGEST_UNPACKED:
+            raise TooLarge(f"its files state more than {size(LARGEST_UNPACKED)}, so nothing was unpacked.")
+
+
+def link_key(name):
+    return os.path.normpath(name.lstrip("/"))
 
 
 @contextlib.contextmanager
@@ -2933,11 +2998,10 @@ def download(tag, cache, root):
         archive = Path(scratch) / "release.tar.gz"
         with heard_from_github(), github(url, 120) as response, archive.open("wb") as out:
             save(response, out, tag)
-        # tarfile stops at the end-of-archive marker and never reaches gzip's checksum.
-        with gzip.open(archive) as stream:
-            while stream.read(1 << 20):
-                pass
+        check_stream(archive)
         with tarfile.open(archive) as tar:
+            # Every header is read before anything is unpacked.
+            check_members(tar)
             tar.extractall(scratch, filter="data")
         unpacked = next((p for p in Path(scratch).iterdir() if p.is_dir()), None)
         if unpacked is None:
@@ -3376,6 +3440,8 @@ def main():
         document = fail("Can't take the review back", error, options.debug)
     except TooSlow as error:
         document = fail("Reading the release took too long", error, options.debug)
+    except TooLarge as error:
+        document = fail("The release is too large to read", error, options.debug)
     except Exception as error:  # noqa: BLE001
         document = fail(f"Unexpected {type(error).__name__}", error, options.debug)
     print_document(document, options)

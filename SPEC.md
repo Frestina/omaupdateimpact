@@ -155,11 +155,19 @@ own. So a download has three limits, each checked while the archive is read:
   stream holds
 - at most 100,000 members of any kind
 
-v4.5.0's archive is 172 MiB, its tar stream 201 MiB, and it has 5,681 members.
+The stream is read whole first, which also checks gzip's checksum. Then every
+header is read, before anything is unpacked. A sparse member counts as its stated
+size or as far as its map writes, whichever is larger. A hard link counts as its
+target's size too, as tarfile writes a copy when it can't link, and as the largest
+file's if its target isn't found. A size below zero counts as zero.
+
+v4.5.0's archive is 172 MiB, its tar stream 201 MiB, and it has 5,680 members.
 Past a limit nothing is unpacked into the cache and no folder for the tag is left.
 The run stops with exit 2 and says the release is too large to read, and which
-limit it passed. A file system that fills up anyway is a failed download, and
-leaves no half release either.
+limit it passed, as in "The release is too large to read: its archive passed 1 GiB,
+so nothing was unpacked." `--json` gives a `failed` document with that reason and
+`unreachable: false`. `--ack` and `--unack` write nothing. A file system that fills
+up anyway is a failed download, and leaves no half release either.
 
 After the archive, the release's notes come from `releases/tags/<tag>`, and are kept
 in its folder as `.omaupdateimpact-notes.md`, as GitHub sent them. They are written

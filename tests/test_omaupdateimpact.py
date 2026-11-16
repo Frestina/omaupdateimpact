@@ -4541,6 +4541,303 @@ def too_slow_run():
         case.doCleanups()
 
 
+class Endless(io.RawIOBase):
+    """A download that goes on, up to a cap so a test without the limit still ends. It counts what is read."""
+
+    def __init__(self, cap):
+        self.cap, self.given = cap, 0
+
+    def readable(self):
+        return True
+
+    def readinto(self, buffer):
+        count = min(len(buffer), self.cap - self.given)
+        buffer[:count] = bytes(count)
+        self.given += count
+        return count
+
+
+class DownloadLimits(ProgramCase):
+    """A release's download and unpacking are bounded, each limit checked as the archive is read. See 046."""
+
+    def setUp(self):
+        super().setUp()
+        self.real = impact.LARGEST_ARCHIVE, impact.LARGEST_UNPACKED, impact.MOST_MEMBERS
+        (self.base / "target/migrations/1.sh").write_text("omarchy-pkg-drop a\n")
+
+    def limits(self, archive=None, unpacked=None, members=None):
+        """Lower the limits for the rest of the test."""
+        for name, value in (("LARGEST_ARCHIVE", archive), ("LARGEST_UNPACKED", unpacked), ("MOST_MEMBERS", members)):
+            if value is not None:
+                self.enterContext(mock.patch.object(impact, name, value))
+
+    def crafted(self, *extra, trailing=b""):
+        """The release, with more members added by extra(tar), and trailing bytes after the tar's end."""
+        tarred = io.BytesIO()
+        with tarfile.open(fileobj=tarred, mode="w", format=tarfile.PAX_FORMAT) as tar:
+            tar.add(self.base / "target", arcname="omarchy-1.2.3")
+            for add in extra:
+                add(tar)
+        return gzip.compress(tarred.getvalue() + trailing)
+
+    def stream(self, data):
+        return len(gzip.decompress(data))
+
+    def count(self, data):
+        with tarfile.open(fileobj=io.BytesIO(data)) as tar:
+            return len(tar.getmembers())
+
+    def get(self, data, *args):
+        return self.download(io.BytesIO(data), args=("v1.2.3", *args), packages={"a"})
+
+    def assert_too_large(self, result, passed):
+        code, out, err = result
+        self.assertEqual((code, out), (2, ""))
+        self.assertEqual(err, f"The release is too large to read: {passed}, so nothing was unpacked.\n")
+        # No folder for the tag, and no scratch.
+        self.assertEqual(list(self.cache.glob("*/*")), [])
+
+    def assert_fine(self, result):
+        self.assertEqual(result[0], 1, result[2])
+        self.assertIn("Needs attention", result[1])
+        self.assertTrue((self.cache / "omaupdateimpact/v1.2.3/bin").is_dir())
+
+    def test_the_limits(self):
+        self.assertEqual(self.real, (1 << 30, 2 << 30, 100_000))
+        self.assertEqual([impact.size(limit) for limit in self.real[:2]], ["1 GiB", "2 GiB"])
+        self.assertEqual([impact.size(n) for n in (1, 1536, 3 << 20, 4 << 30)], ["1 byte", "1,536 bytes", "3 MiB", "4 GiB"])
+
+    def test_an_archive_at_the_limit_is_read(self):
+        data = self.archive()
+        self.limits(archive=len(data))
+        self.assert_fine(self.get(data))
+
+    def test_an_archive_past_the_limit_isnt(self):
+        data = self.archive()
+        self.limits(archive=len(data) - 1)
+        self.assert_too_large(self.get(data), f"its archive passed {len(data) - 1:,} bytes")
+
+    def test_a_download_stops_once_it_passes_the_limit(self):
+        for terminal in (False, True):
+            with self.subTest(terminal=terminal):
+                self.terminal = terminal
+                self.limits(archive=1 << 20)
+                response = Endless(64 << 20)
+                code, out, err = self.download(io.BufferedReader(response, 1 << 16))
+                self.assertEqual((code, out), (2, ""))
+                self.assertTrue(err.endswith("The release is too large to read: its archive passed 1 MiB, so nothing was unpacked.\n"))
+                # It stops within one read of the limit.
+                self.assertLessEqual(response.given, (2 << 20) + (1 << 16))
+                self.assertEqual(list(self.cache.glob("*/*")), [])
+
+    def test_a_stream_at_the_limit_is_read(self):
+        data = self.crafted(trailing=bytes(1 << 20))
+        self.limits(unpacked=self.stream(data))
+        self.assert_fine(self.get(data))
+
+    def test_a_gzip_bomb_isnt(self):
+        # A small archive whose stream passes the limit, after the tar's own end, so no header states it.
+        data = self.crafted(trailing=bytes(8 << 20))
+        self.assertLess(len(data), 64 << 10)
+        self.limits(unpacked=4 << 20)
+        self.assert_too_large(self.get(data), "its archive unpacks to more than 4 MiB")
+
+    def sparse(self, stated):
+        """A sparse member that holds 4 bytes and states more."""
+
+        def add(tar):
+            info = tarfile.TarInfo("omarchy-1.2.3/sparse")
+            info.size = 4
+            info.pax_headers = {"GNU.sparse.map": "0,4", "GNU.sparse.size": str(stated)}
+            tar.addfile(info, io.BytesIO(b"data"))
+        return add
+
+    def test_a_sparse_member_that_states_more_than_the_limit_isnt_read(self):
+        data = self.crafted(self.sparse(64 << 20))
+        self.assertLess(self.stream(data), 1 << 20)
+        self.limits(unpacked=4 << 20)
+        self.assert_too_large(self.get(data), "its files state more than 4 MiB")
+
+    def test_the_stated_sizes_at_the_limit_are_read(self):
+        data = self.crafted(self.sparse(4 << 20))
+        with tarfile.open(fileobj=io.BytesIO(data)) as tar:
+            stated = sum(member.size for member in tar)
+        self.limits(unpacked=stated)
+        self.assert_fine(self.get(data))
+        self.assertEqual((self.cache / "omaupdateimpact/v1.2.3/sparse").stat().st_size, 4 << 20)
+
+    def test_a_sparse_map_past_its_stated_size_counts_too(self):
+        def add(tar):
+            info = tarfile.TarInfo("omarchy-1.2.3/sparse")
+            info.size = 4
+            info.pax_headers = {"GNU.sparse.map": f"{64 << 20},4", "GNU.sparse.size": "8"}
+            tar.addfile(info, io.BytesIO(b"data"))
+        self.limits(unpacked=4 << 20)
+        self.assert_too_large(self.get(self.crafted(add)), "its files state more than 4 MiB")
+
+    def test_a_hard_link_counts_as_its_target(self):
+        # A link can be written as a copy, as when the file system has no more links to give.
+        def add(tar):
+            info = tarfile.TarInfo("omarchy-1.2.3/file")
+            info.size = 1 << 20
+            tar.addfile(info, io.BytesIO(bytes(info.size)))
+            for number in range(8):
+                link = tarfile.TarInfo(f"omarchy-1.2.3/link{number}")
+                link.type, link.linkname = tarfile.LNKTYPE, "omarchy-1.2.3/file"
+                tar.addfile(link)
+        data = self.crafted(add)
+        self.assertLess(self.stream(data), 2 << 20)
+        self.limits(unpacked=4 << 20)
+        self.assert_too_large(self.get(data), "its files state more than 4 MiB")
+
+    def test_a_hard_link_to_no_member_counts_as_the_largest_file(self):
+        def add(tar):
+            info = tarfile.TarInfo("omarchy-1.2.3/file")
+            info.size = 1 << 20
+            tar.addfile(info, io.BytesIO(bytes(info.size)))
+            for number in range(8):
+                link = tarfile.TarInfo(f"omarchy-1.2.3/link{number}")
+                link.type, link.linkname = tarfile.LNKTYPE, "omarchy-1.2.3/elsewhere"
+                tar.addfile(link)
+        self.limits(unpacked=4 << 20)
+        self.assert_too_large(self.get(self.crafted(add)), "its files state more than 4 MiB")
+
+    def test_a_size_below_zero_takes_nothing_off(self):
+        def add(tar):
+            info = tarfile.TarInfo("omarchy-1.2.3/less")
+            info.type, info.pax_headers = tarfile.DIRTYPE, {"size": str(-(64 << 20))}
+            tar.addfile(info)
+        self.limits(unpacked=4 << 20)
+        self.assert_too_large(self.get(self.crafted(add, self.sparse(8 << 20))), "its files state more than 4 MiB")
+
+    def test_members_at_the_limit_are_read(self):
+        data = self.archive()
+        self.limits(members=self.count(data))
+        self.assert_fine(self.get(data))
+
+    def test_one_member_past_the_limit_isnt(self):
+        data = self.archive()
+        self.limits(members=self.count(data) - 1)
+        many = f"{self.count(data) - 1:,} files, folders and links"
+        self.assert_too_large(self.get(data), f"its archive holds more than {many}")
+
+    def test_links_and_folders_count_as_members(self):
+        def add(tar):
+            for number in range(20):
+                folder = tarfile.TarInfo(f"omarchy-1.2.3/folder{number}")
+                folder.type = tarfile.DIRTYPE
+                tar.addfile(folder)
+                link = tarfile.TarInfo(f"omarchy-1.2.3/link{number}")
+                link.type, link.linkname = tarfile.SYMTYPE, "bin"
+                tar.addfile(link)
+        self.limits(members=self.count(self.archive()) + 39)
+        self.assert_too_large(self.get(self.crafted(add)), f"its archive holds more than {impact.MOST_MEMBERS:,} files, folders and links")
+
+    def test_its_document_is_failed_with_the_reason_and_not_unreachable(self):
+        data = self.archive()
+        self.limits(members=1)
+        code, out, err = self.get(data, "--json")
+        self.assertEqual(code, 2)
+        reason = "The release is too large to read: its archive holds more than 1 files, folders and links, so nothing was unpacked."
+        self.assertEqual(json.loads(out), impact.failure(reason))
+        self.assertFalse(json.loads(out)["unreachable"])
+        self.assertEqual(err, reason + "\n")
+
+    def test_a_release_too_large_prunes_nothing(self):
+        for tag in ("v1.0.0", "v1.1.0"):
+            self.assertEqual(self.download(io.BytesIO(self.archive()), args=(tag,))[0], 0)
+        self.limits(members=1)
+        self.assertEqual(self.get(self.archive())[0], 2)
+        self.assertEqual(sorted(path.name for path in (self.cache / "omaupdateimpact").iterdir()), ["v1.0.0", "v1.1.0"])
+
+    def reviews(self):
+        path = self.home / ".config/omaupdateimpact/reviewed"
+        return path.read_bytes() if path.exists() else None
+
+    def finding(self):
+        """The id of the release's finding. The release is then taken out of the cache, so the next run downloads it."""
+        code, out, _ = self.get(self.archive(), "--json")
+        self.assertEqual(code, 1)
+        shutil.rmtree(self.cache / "omaupdateimpact/v1.2.3")
+        return json.loads(out)["findings"][0]["id"]
+
+    def test_ack_past_a_limit_writes_nothing(self):
+        found = self.finding()
+        self.limits(members=1)
+        self.assertEqual(self.get(self.archive(), "--ack", found)[0], 2)
+        self.assertIsNone(self.reviews())
+        self.assertFalse((self.home / ".config/omaupdateimpact").exists())
+
+    def test_unack_past_a_limit_writes_nothing(self):
+        found = self.finding()
+        self.assertEqual(self.get(self.archive(), "--ack", found)[0], 0)
+        shutil.rmtree(self.cache / "omaupdateimpact/v1.2.3")
+        before = self.reviews()
+        self.assertIn(found.encode(), before)
+        self.limits(members=1)
+        self.assertEqual(self.get(self.archive(), "--unack", found)[0], 2)
+        self.assertEqual(self.reviews(), before)
+
+
+def too_large_run():
+    """The --json document and exit code of a run past a download limit, for the plugin's tests."""
+    case = DownloadLimits()
+    case.setUp()
+    try:
+        case.limits(members=1)
+        code, out, _ = case.get(case.archive(), "--json")
+        return out, code
+    finally:
+        case.doCleanups()
+
+
+class FullDisk(ProgramCase):
+    """A file system that fills up mid-download is a failed download, and leaves no half release."""
+
+    def full(self, *_):
+        raise OSError(errno.ENOSPC, os.strerror(errno.ENOSPC))
+
+    def assert_full(self, result):
+        self.assert_download_failed(result)
+        self.assertEqual(result[2], f"Couldn't download the release: [Errno {errno.ENOSPC}] {os.strerror(errno.ENOSPC)}\n")
+
+    def test_while_the_archive_is_written(self):
+        written = []
+
+        class Filling(io.BufferedWriter):
+            def write(this, chunk):
+                written.append(len(chunk))
+                if len(written) > 1:
+                    self.full()
+                return super().write(chunk)
+
+        opened = Path.open
+
+        def opening(path, mode="r", *args, **kwargs):
+            handle = opened(path, mode, *args, **kwargs)
+            return Filling(handle.detach()) if mode == "wb" else handle
+
+        data = self.archive() + bytes(3 << 20)
+        with mock.patch.object(impact.Path, "open", opening):
+            self.assert_full(self.download(io.BytesIO(data)))
+        self.assertEqual(len(written), 2)
+
+    def test_while_the_release_is_unpacked(self):
+        files = []
+        make = impact.tarfile.TarFile.makefile
+
+        def filling(tar, member, path):
+            files.append(path)
+            if len(files) > 2:
+                Path(path).write_bytes(b"half")
+                self.full()
+            return make(tar, member, path)
+
+        with mock.patch.object(impact.tarfile.TarFile, "makefile", filling):
+            self.assert_full(self.download(io.BytesIO(self.archive())))
+        self.assertEqual(len(files), 3)
+
+
 class RateLimits(ProgramCase):
     def api_failure(self, error):
         return self.download(error, args=("--channel", "stable"))

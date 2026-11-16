@@ -188,8 +188,11 @@ channel, and exits 0. The `edge` and `dev` channels have no tagged releases, so
 those need a tag.
 
 The release and its notes are downloaded to `~/.cache/omaupdateimpact`. Two releases
-stay there and older ones are removed. Without the notes, as when you are offline
-with a release already there, findings just don't say why. If GitHub's rate limit gets in the way, set `GITHUB_TOKEN`.
+stay there and older ones are removed. A download is at most 1 GiB, and unpacks to
+at most 2 GiB and 100,000 files, folders and links. Past that nothing is kept, and
+the run stops with exit 2 and says which limit the release passed. Without the
+notes, as when you are offline with a release already there, findings just don't
+say why. If GitHub's rate limit gets in the way, set `GITHUB_TOKEN`.
 Colour shows on a terminal only, and `NO_COLOR` turns it off.
 
 Each finding that needs attention ends with an id in brackets. If you've seen one
@@ -236,7 +239,7 @@ none.
 | --- | --- |
 | 0 | Every check ran and nothing needs attention, or there is no update |
 | 1 | Something needs attention, that you haven't reviewed |
-| 2 | No verdict: bad usage, a failed download, an unusable tree, a release too slow to read, or a crash |
+| 2 | No verdict: bad usage, a failed download, an unusable tree, a release too large or too slow to read, or a crash |
 | 3 | Nothing needs attention, but at least one check couldn't run |
 
 Exit 3 names the checks that didn't run, and those that ran in part. A failure

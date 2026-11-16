@@ -101,4 +101,4 @@ when.
 | 043 | [A long command costs no more than its length](043-long-commands.md) | 042 | done |
 | 044 | [NAMES_REMOVAL costs no more than the words it reads](044-named-removal-bounded.md) | 042, 043 | done |
 | 045 | [Reading a release has one budget](045-reading-budget.md) | 044 | done |
-| 046 | [A release's download and unpacking are bounded](046-bounded-download.md) | 045 | todo |
+| 046 | [A release's download and unpacking are bounded](046-bounded-download.md) | 045 | in progress |
