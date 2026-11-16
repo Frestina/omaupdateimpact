@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.3.7 (2026-11-16)
+
+- A release's download and unpacking are now bounded. A crafted release could
+  otherwise fill the disk or the memory, and the plugin downloads on its own. A
+  download is at most 1 GiB of archive. It unpacks to at most 2 GiB, counted both
+  as the tar stream and as the sizes its headers state, and to at most 100,000
+  files, folders and links. Its tar headers take at most 16 MiB in all and 1 MiB
+  for one file, and hold at most 100,000 PAX records and sparse entries. Each
+  limit is checked while the archive is read, before anything is unpacked. Past
+  one, nothing is kept in the cache, and the run stops with exit 2 and says the
+  release is too large to read, and which limit it passed. `--json` gives a
+  `failed` document with that reason, and the plugin shows it as "Couldn't
+  check". `--ack` and `--unack` write nothing. v4.5.0 is 172 MiB of archive,
+  201 MiB unpacked, 5,680 members and 2.8 MiB of headers.
+- A member whose size is below zero now makes the archive broken, a failed
+  download. A `tarfile` from before Python 3.11.12 could otherwise read the same
+  headers over and over.
+
 ## 0.3.6 (2026-11-09)
 
 - Reading a release now has one budget: 2 minutes of the command's own CPU time,
