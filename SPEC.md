@@ -146,6 +146,21 @@ On a terminal, stderr says what is downloading and counts the megabytes. GitHub
 doesn't send the archive's size, so the count is all there is to show. Off a
 terminal the download is silent.
 
+A release could be crafted to fill the disk, and the plugin downloads it on its
+own. So a download has three limits, each checked while the archive is read:
+
+- at most 1 GiB of archive
+- at most 2 GiB unpacked, counted both as the decompressed tar stream and as the
+  sizes the members' headers state, as a sparse member can state more than the
+  stream holds
+- at most 100,000 members of any kind
+
+v4.5.0's archive is 172 MiB, its tar stream 201 MiB, and it has 5,681 members.
+Past a limit nothing is unpacked into the cache and no folder for the tag is left.
+The run stops with exit 2 and says the release is too large to read, and which
+limit it passed. A file system that fills up anyway is a failed download, and
+leaves no half release either.
+
 After the archive, the release's notes come from `releases/tags/<tag>`, and are kept
 in its folder as `.omaupdateimpact-notes.md`, as GitHub sent them. They are written
 whole and then moved into place, so notes cut short never pass for the notes. A
@@ -582,7 +597,7 @@ Its evidence is the line in the notes.
 | --- | --- |
 | 0 | Every check ran and nothing needs attention, or there is no update |
 | 1 | Something needs attention, that you haven't reviewed |
-| 2 | No verdict: bad usage, a failed download, an unusable tree, a release too slow to read, or a crash |
+| 2 | No verdict: bad usage, a failed download, an unusable tree, a release too large or too slow to read, or a crash |
 | 3 | Nothing needs attention, but at least one check couldn't run in full |
 
 An unexpected exception is exit 2 with one line of explanation. It never falls
@@ -712,7 +727,8 @@ shows three of them.
   newest other one by version stay, and the rest go. So an older release someone
   asks for is not removed before it's read. Nor is one that another run is
   reading: the next download removes it. See [Downloads](#downloads). Nothing else
-  in the cache is touched.
+  in the cache is touched. With the download limits, each release in it takes at
+  most 2 GiB, and a download at most 3 GiB more while it unpacks.
 - `~/.config/omaupdateimpact/reviewed`: [reviewed findings](#reviewed-findings),
   written only by `--ack` and `--unack`. `XDG_CONFIG_HOME` replaces `~/.config`
   unless it's empty, and `--home` moves `~/.config` with it, as it does `~/.cache`.

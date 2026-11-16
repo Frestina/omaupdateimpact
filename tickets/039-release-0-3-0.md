@@ -2,7 +2,7 @@
 id: "039"
 title: Release 0.3.0 and update the listing
 milestone: M4 Plugin
-depends_on: ["023", "038", "040", "041", "042", "043", "044", "045"]
+depends_on: ["023", "038", "040", "041", "042", "043", "044", "045", "046"]
 ---
 
 # 039 Release 0.3.0 and update the listing
@@ -85,6 +85,12 @@ and get the marketplace to verify it.
   Each finding was one more slow reader, so the owner chose to cap them all: 045
   gives reading one budget, and 0.3.6 is the release 14152 targets. The boxes
   below then name 0.3.6.
+
+- The maintainer's review of 0.3.6, on 2026-11-15, accepted the four earlier
+  fixes and the budget, and found a fifth: the download and unpacking had no
+  limit on the total, before the budget starts. The owner chose to bound them in
+  046 and release 0.3.7, which 14152 then targets. The boxes below then name
+  0.3.7.
 
 ## Not in this ticket
 

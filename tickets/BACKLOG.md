@@ -144,6 +144,10 @@ Paths already ruled out are not here; they are under
 - **A plugin's own `.qmllint.ini`.** `qmllint` runs in the plugin's folder and reads
   it, so a plugin can turn warnings off. That's the same in both runs, so it only
   hides warnings. `--ignore-settings` would stop it. Waits for a real report.
+- **A release too large is downloaded again.** Past a download limit (046) nothing
+  is kept, so the plugin's next check downloads up to 1 GiB again, every 6 hours by
+  default. Only a crafted Omarchy release gets there. Remembering the failure in
+  the cache would stop it. Waits for a real report.
 - **Scratch left by a killed run.** A run killed mid-download leaves its `tmp*`
   folder in the cache. Pruning skips those, since one may belong to a live run.
   Waits for a real report.
